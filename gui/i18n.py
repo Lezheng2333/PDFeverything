@@ -66,6 +66,8 @@ T = {
     "reader_next":            {"zh": "下一页",                                       "en": "Next"},
     "reader_fit_width":       {"zh": "适应宽度",                                      "en": "Fit Width"},
     "reader_fit_height":      {"zh": "适应高度",                                      "en": "Fit Height"},
+    "reader_zoom_out":        {"zh": "缩小 1%",                                      "en": "Zoom out 1%"},
+    "reader_zoom_in":         {"zh": "放大 1%",                                      "en": "Zoom in 1%"},
     "reader_fit_width_tip":   {"zh": "将页面宽度缩放至窗口宽度",                         "en": "Fit page width to viewport"},
     "reader_fit_height_tip":  {"zh": "将页面高度缩放至窗口高度",                         "en": "Fit page height to viewport"},
     "reader_zoom_tip":        {"zh": "缩放级别",                                      "en": "Zoom level"},
