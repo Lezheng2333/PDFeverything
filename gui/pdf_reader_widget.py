@@ -25,7 +25,7 @@ class ViewMode(Enum):
     GRID = "grid"         # 2×3 thumbnail grid, scrollable
 
 
-BASE_DPI = 72
+RENDER_SCALE = 2  # always render at 2x for retina-sharp display
 
 
 class PdfReaderWidget(QWidget):
@@ -42,7 +42,6 @@ class PdfReaderWidget(QWidget):
         self._view_mode = ViewMode.SCROLL  # default: continuous scroll
         self._zoom_mode = "fit_width"
         self._custom_zoom = 1.0
-        self._fit_dpi = BASE_DPI
         self._init_ui()
 
     # ═══════════════════════════════════════════════════
@@ -396,8 +395,9 @@ class PdfReaderWidget(QWidget):
                 row_layout.addStretch()
 
     def _render_pixmap(self, page_idx: int, max_w: int, max_h: int = 9999, force_fit: bool = False) -> QPixmap:
-        """Render a single page to QPixmap, scaled to fit max_w × max_h."""
+        """Render a single page to QPixmap at retina quality, scaled to fit max_w × max_h."""
         import fitz
+        from PyQt6.QtCore import Qt as QtCore
         page = self.doc[page_idx]
         pw, ph = page.rect.width, page.rect.height
 
@@ -410,12 +410,23 @@ class PdfReaderWidget(QWidget):
         else:
             zoom = self._zoom_mode  # float
 
-        mat = fitz.Matrix(zoom, zoom)
-        pix = page.get_pixmap(matrix=mat, dpi=BASE_DPI)
+        # Render at 2x resolution for retina displays
+        zoom_2x = zoom * RENDER_SCALE
+        mat = fitz.Matrix(zoom_2x, zoom_2x)
+        pix = page.get_pixmap(matrix=mat)
+
+        # PyMuPDF produces RGB byte order.
         qimg = QImage(pix.samples, pix.width, pix.height,
                       pix.stride, QImage.Format.Format_RGB888)
-        qimg = qimg.rgbSwapped()  # BGR→RGB for QImage
-        return QPixmap.fromImage(qimg)
+
+        target_w = int(pix.width / RENDER_SCALE)
+        target_h = int(pix.height / RENDER_SCALE)
+        pixmap = QPixmap.fromImage(qimg).scaled(
+            target_w, target_h,
+            QtCore.AspectRatioMode.IgnoreAspectRatio,
+            QtCore.TransformationMode.SmoothTransformation,
+        )
+        return pixmap
 
     def _clear_container(self):
         """Remove all child widgets from the container's persistent layout."""
