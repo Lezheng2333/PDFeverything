@@ -77,11 +77,15 @@ class PdfReaderWidget(QWidget):
             QTimer.singleShot(100, self._try_show_welcome)
 
     def _try_show_welcome(self):
-        """Safely show welcome only when widget is sized and visible."""
-        if self.doc or self._welcome:
-            return
-        if self.isVisible() and self.width() > 200 and self.height() > 100:
-            self._show_welcome()
+        """Safely show welcome. Retries if viewport not yet sized."""
+        try:
+            if self.doc or self._welcome: return
+            vp = self.scroll_area.viewport()
+            if vp and vp.width() > 100 and vp.height() > 50:
+                self._show_welcome()
+            else:
+                QTimer.singleShot(200, self._try_show_welcome)  # retry
+        except Exception: pass
 
     # ═══════════ UI ═══════════
 
@@ -160,7 +164,7 @@ class PdfReaderWidget(QWidget):
         self.zoom_edit.setFixedWidth(55)
         self.zoom_edit.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.zoom_edit.setMaxLength(3)
-        self.zoom_edit.setValidator(QIntValidator(25, 500, self))
+        self.zoom_edit.setValidator(QIntValidator(25, 300, self))
         self.zoom_edit.returnPressed.connect(self._on_zoom_edit)
         self.zoom_edit.editingFinished.connect(self._on_zoom_edit)
 
@@ -234,6 +238,7 @@ class PdfReaderWidget(QWidget):
 
     def open_pdf(self, path: Path) -> None:
         import fitz
+        self._cancel_deferred_renders()
         PdfReaderWidget._cache.clear(); self._destroy_labels(); self._destroy_welcome()
         try: self.doc = fitz.open(path)
         except Exception: self._show_welcome(); return
@@ -262,6 +267,7 @@ class PdfReaderWidget(QWidget):
         self.setFocus()
 
     def close_document(self):
+        self._cancel_deferred_renders()
         if self.doc: self.doc.close(); self.doc = None
         self._path = None; self._total_pages = 0; self._current_page = 0
         PdfReaderWidget._cache.clear()
@@ -272,7 +278,13 @@ class PdfReaderWidget(QWidget):
         self.scroll_area.verticalScrollBar().blockSignals(False)
         self._show_welcome()
 
-    # ═══════════ Zoom — direct render (PyMuPDF C-level, no O(n) scaling) ═══════════
+    def _cancel_deferred_renders(self):
+        """Cancel any pending QTimer.singleShot callbacks that would crash."""
+        self._pending_zoom_pct = None
+        self._resize_timer.stop()
+        self._scroll_timer.stop()
+
+    # ═══════════ Zoom — two-pass: instant scale → sharp render ═══════════
 
     def _current_zoom_pct(self) -> int:
         if self._zoom_mode == "fit_width":
@@ -282,19 +294,62 @@ class PdfReaderWidget(QWidget):
         return max(50, min(300, int(self._zoom_mode * 100)))
 
     def _set_zoom_pct(self, pct: int):
-        """Apply zoom: re-render labels at new zoom using multi-res cache (no clear)."""
+        """Two-pass zoom:
+        Pass 1 (instant): QPixmap.scaled() on existing images — <1ms visual feedback.
+        Pass 2 (deferred): 250ms debounce → PyMuPDF real render for sharp quality.
+          Skip pass 2 for zoom levels already cached."""
         pct = max(50, min(300, pct))
-        old_zoom_mode = self._zoom_mode
         self._zoom_mode = pct / 100.0
         self.btn_fit_width.setChecked(False); self.btn_fit_height.setChecked(False)
         self.zoom_edit.setText(str(pct))
-        if self.doc and self._zoom_mode != old_zoom_mode:
-            vw, vh = self._viewport_size()
-            for pi, label in enumerate(self._labels):
-                pix = self._get_or_render(pi, vw, vh)
-                if pix: label.setPixmap(pix); label.setFixedSize(pix.size())
-            self._layout_labels()
+        if not self.doc:
+            return
+        # Pass 1: instant smooth pixel scaling
+        self._smooth_scale_all(pct / 100.0)
+        self._layout_labels()
         self._show_zoom_popup(pct)
+        # Pass 2: deferred sharp re-render
+        self._pending_zoom_pct = pct
+        QTimer.singleShot(180, self._sharp_render)
+
+    def _smooth_scale_all(self, factor: float):
+        """Scale all existing pixmaps by factor relative to fit_width base."""
+        if not self._labels: return
+        base = self._fw_ratio
+        scale = factor / base if base > 0 else factor
+        from PyQt6.QtCore import Qt as QtCore
+        for label in self._labels:
+            try:
+                pix = label.pixmap()
+                if pix is None or pix.isNull(): continue
+                pw, ph = pix.size().width(), pix.size().height()
+                tw, th = max(1,int(pw*scale)), max(1,int(ph*scale))
+                label.setPixmap(pix.scaled(tw,th,
+                    QtCore.AspectRatioMode.IgnoreAspectRatio,
+                    QtCore.TransformationMode.SmoothTransformation))
+                label.setFixedSize(tw,th)
+            except Exception: pass
+
+    def _sharp_render(self):
+        """Deferred real rendering: only re-render cache-missed pages at current zoom."""
+        if not self.doc or not self._labels or not hasattr(self,'_pending_zoom_pct'):
+            return
+        try:
+            pct = self._pending_zoom_pct; self._zoom_mode = pct / 100.0
+            vw, vh = self._viewport_size()
+            zk = self._zoom_key(vw, vh); any_miss = False
+            for pi, label in enumerate(self._labels):
+                try:
+                    key = (pi, zk)
+                    if key in PdfReaderWidget._cache:
+                        pix = PdfReaderWidget._cache[key]
+                    else:
+                        pix = self._get_or_render(pi, vw, vh)
+                        any_miss = True
+                    if pix: label.setPixmap(pix); label.setFixedSize(pix.size())
+                except Exception: pass
+            if any_miss: self._layout_labels()
+        except Exception: pass
 
     def _adjust_zoom(self, delta: int):
         if not self.doc: return
@@ -324,29 +379,24 @@ class PdfReaderWidget(QWidget):
     def _on_fit_width(self):
         if not self.doc: return
         if self._zoom_mode == "fit_width": return
-        self._zoom_mode = "fit_width"
-        self.btn_fit_width.setChecked(True); self.btn_fit_height.setChecked(False)
-        pct = max(50, min(300, int(self._fw_ratio * 100)))
-        self.zoom_edit.setText(str(pct))
-        if self.doc:
-            vw, vh = self._viewport_size()
-            for pi, label in enumerate(self._labels):
-                pix = self._get_or_render(pi, vw, vh)
-                if pix: label.setPixmap(pix); label.setFixedSize(pix.size())
-            self._layout_labels()
+        self._apply_fit_mode("fit_width", max(50, min(300, int(self._fw_ratio * 100))))
 
     def _on_fit_height(self):
         if not self.doc: return
         if self._zoom_mode == "fit_height": return
-        self._zoom_mode = "fit_height"
-        self.btn_fit_width.setChecked(False); self.btn_fit_height.setChecked(True)
-        self.zoom_edit.setText(str(self._default_zoom_pct))
-        if self.doc:
-            vw, vh = self._viewport_size()
-            for pi, label in enumerate(self._labels):
-                pix = self._get_or_render(pi, vw, vh)
-                if pix: label.setPixmap(pix); label.setFixedSize(pix.size())
-            self._layout_labels()
+        self._apply_fit_mode("fit_height", self._default_zoom_pct)
+
+    def _apply_fit_mode(self, mode: str, pct: int):
+        """Fit W/H: instant scale + deferred sharp render, same two-pass as zoom."""
+        self._zoom_mode = mode
+        self.btn_fit_width.setChecked(mode == "fit_width")
+        self.btn_fit_height.setChecked(mode == "fit_height")
+        self.zoom_edit.setText(str(pct))
+        self._smooth_scale_all(pct / 100.0)
+        self._layout_labels()
+        self._show_zoom_popup(pct)
+        self._pending_zoom_pct = pct
+        QTimer.singleShot(180, self._sharp_render)
 
     # ═══════════ Labels ═══════════
 
@@ -406,14 +456,8 @@ class PdfReaderWidget(QWidget):
         self._current_page = page_idx
         self._view_mode = ViewMode.SCROLL
         self.btn_scroll.setChecked(True); self.btn_grid.setChecked(False)
-        self._zoom_mode = "fit_height"
-        self.btn_fit_width.setChecked(False); self.btn_fit_height.setChecked(True)
-        self.zoom_edit.setText(str(self._default_zoom_pct))
-        vw, vh = self._viewport_size()
-        for pi, label in enumerate(self._labels):
-            pix = self._get_or_render(pi, vw, vh)
-            if pix: label.setPixmap(pix); label.setFixedSize(pix.size())
-        self._layout_labels(); self._scroll_to_page_top(); self._update_nav_ui()
+        self._apply_fit_mode("fit_height", self._default_zoom_pct)
+        self._scroll_to_page_top(); self._update_nav_ui()
 
     # ═══════════ Pre-render ═══════════
 
@@ -528,11 +572,13 @@ class PdfReaderWidget(QWidget):
         self._fw_ratio = vw / pw if pw > 0 else 1.0
         self._fh_ratio = vh / ph if ph > 0 else 1.0
         self._default_zoom_pct = max(50, min(300, int(self._fh_ratio * 100)))
-        for pi, label in enumerate(self._labels):
-            pix = self._get_or_render(pi, vw, vh)
-            if pix: label.setPixmap(pix); label.setFixedSize(pix.size())
-        self._layout_labels()
-        self.zoom_edit.setText(str(self._current_zoom_pct()))
+        # Instant smooth scale on resize
+        cur_pct = self._current_zoom_pct()
+        self._smooth_scale_all(cur_pct / 100.0)
+        self.zoom_edit.setText(str(cur_pct))
+        # Deferred sharp render
+        self._pending_zoom_pct = cur_pct
+        QTimer.singleShot(180, self._sharp_render)
 
     def _update_nav_ui(self):
         self.page_label.setText(f"{self._current_page + 1} / {self._total_pages}")
@@ -551,9 +597,8 @@ class PdfReaderWidget(QWidget):
         self._welcome_drop = drop_text
         self._welcome_btn_text = load_btn_text
         if self.doc: return
-        if not self.isVisible(): return
         vp = self.scroll_area.viewport()
-        if vp.width() < 100 or vp.height() < 50: return
+        if not vp or vp.width() < 100 or vp.height() < 50: return
 
         self._destroy_welcome()
         # Use the scroll_area's own container: put welcome text inside page_container
@@ -575,10 +620,6 @@ class PdfReaderWidget(QWidget):
         c.adjustSize()
         c.move(max(0, (vp.width() - c.width()) // 2),
                max(0, (vp.height() - c.height()) // 2))
-        c.show(); c.raise_()
-        self._welcome = c
-        vh = max(100, self.height() - self.toolbar.height())
-        c.move(max(0, (vw - c.width()) // 2), max(0, (vh - c.height()) // 2))
         c.show(); c.raise_()
         self._welcome = c
 
