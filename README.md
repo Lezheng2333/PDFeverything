@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/Lezheng2333/PDFeverything/releases"><img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-blue?style=flat-square" /></a>
-  <a href="https://github.com/Lezheng2333/PDFeverything/releases"><img src="https://img.shields.io/github/v/release/Lezheng2333/PDFeverything?style=flat-square" /></a>
+  <a href="https://github.com/Lezheng2333/PDFeverything/releases/latest"><img src="https://img.shields.io/badge/version-v1.1.0-007aff?style=flat-square" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" /></a>
 </p>
 
@@ -163,9 +163,136 @@ pyinstaller PDFeverything.spec --noconfirm --clean
 |---|---|
 | 🖼️ GUI | **PyQt6** — native look on both macOS & Windows |
 | 🧠 PDF Engine | **PyMuPDF** + **pypdf** + **pikepdf** |
-| 📝 Office Converters | **AppleScript** (macOS, high-fidelity) / **python-docx** + **python-pptx** + **openpyxl** (fallback) |
+| 📝 Office Converters | **AppleScript** (macOS) / **COM** (Windows) / **python-docx** + **python-pptx** + **openpyxl** (fallback) |
 | 📦 Packaging | **PyInstaller** (onefile on Windows, app bundle on macOS) |
 
 ## 📄 License
 
 MIT — do whatever you want with it. [LICENSE](resources/LICENSE.txt)
+
+---
+
+<h2 align="center">🇨🇳 中文介绍</h2>
+
+<p align="center">
+  <b>🪄 PDF 万能工具箱</b><br>
+  <sub>把 PDF、Word、PPT、Excel、图片、文本文件统统丢进来 ——<br>一键合成一个整整齐齐的 PDF。就这么简单。</sub>
+</p>
+
+### 🎯 核心功能：混合文件合并
+
+```
+📄 报告.docx     (2 页)
+📊 图表.xlsx     (1 页)
+🖼️ 照片.jpg     (1 页)
+📄 附录.pdf      (5 页)
+
+         🪄  一键合并  🪄
+              ↓
+    ┌─────────────────────┐
+    │   统一输出.pdf       │
+    │   9 页，顺序不变     │
+    └─────────────────────┘
+```
+
+把不同类型的文件拖进来，每个文件经过专用转换器处理，然后按顺序合并。某个文件转换失败了也不影响其他的——最后会给你一份汇总报告。
+
+### 🔧 全部功能
+
+| 操作 | 说明 |
+|---|---|
+| 🔀 **混合合并** | PDF + Word + PPT + Excel + 图片 + 文本 → 一个 PDF |
+| 🔗 **PDF 合并** | 多个 PDF 按任意顺序合并 |
+| ✂️ **PDF 拆分** | 按页码、每 N 页或自定义范围拆分 |
+| 🖼️ **图片 → PDF** | 多张图片一键合成为 PDF |
+| 📝 **Word → PDF** | 转换 .docx / .doc 文件 |
+| 📊 **PPT / Excel → PDF** | 转换 .pptx / .xlsx 文件 |
+| 📄 **PDF → 图片** | 每页导出为 PNG |
+| 📤 **提取文字** | 提取 PDF 中所有文字 |
+| 🖼️ **提取图片** | 提取 PDF 中嵌入的图片 |
+| 🗜️ **压缩** | 缩小 PDF 文件体积 |
+| 💧 **水印** | 添加文字或 PDF 叠加水印 |
+| 🔒 **加密 / 解密** | 设置或移除 PDF 打开密码 |
+| 🔄 **旋转** | 旋转页面 90° / 180° / 270° |
+| ℹ️ **信息** | 查看页数、元数据、加密状态 |
+
+### 🆕 v1.1.0 新功能
+
+- 🌐 **英文界面** — 设置 → 语言 切换中英文
+- 🪟 **Windows Office 集成** — 调用本机 Word/PPT/Excel 高保真转换
+- 🤖 **AI 调用的命令行模式** — `PDFeverything.exe merge -i a.pdf b.pdf -o out.pdf`
+
+### 🖥️ 界面预览
+
+```
+┌──────────────────────────────────────────────┐
+│  📄 doc.pdf        [🔼] [🔽] [✖]            │
+│  📊 data.xlsx      [🔼] [🔽] [✖]            │
+│  🖼️ photo.jpg      [🔼] [🔽] [✖]            │
+│  📝 report.docx    [🔼] [🔽] [✖]            │
+│                                              │
+│  ── 拖放文件到此处 ──                        │
+│                                              │
+│  [🔀 合并为统一 PDF]   [✂️ 拆分...]          │
+│  [🗜️ 压缩...]        [💧 水印...]          │
+│  [🔒 加密...]        [🔄 旋转...]           │
+│                                              │
+│  ████████████░░░░░░  78%                     │
+│  转换中: 报告.docx (3/5)...                  │
+└──────────────────────────────────────────────┘
+```
+
+- 🖱️ 从资源管理器/Finder **拖放**文件
+- 🔄 用按钮或拖动**调整顺序**
+- ⚡ **多线程**处理 — 界面永不卡顿，实时进度条
+- 🧠 **智能按钮** — 根据文件列表内容自动变化
+
+### 🤖 命令行模式（供 AI Agent 调用）
+
+编译好的 exe/app 可以直接作为**无头命令行工具**使用 — 无需安装 Python 或任何依赖：
+
+```bash
+PDFeverything.exe merge -i a.pdf b.pdf -o merged.pdf
+PDFeverything.exe info -i document.pdf
+PDFeverything.exe compress -i big.pdf -o small.pdf
+PDFeverything.exe -h          # 查看完整帮助
+PDFeverything.exe --version   # v1.1.0
+```
+
+任何 AI Agent（Claude、ChatGPT、自动化脚本）都能直接调用 PDFeverything，无需安装任何东西。
+
+### 🚀 开发者快速开始
+
+```bash
+pip install PyQt6 PyMuPDF pypdf pikepdf pillow python-docx python-pptx openpyxl
+python main.py            # 启动 GUI
+python pdf_tool.py info -i document.pdf   # CLI 模式
+```
+
+### 📦 从源码构建
+
+**Windows**（单文件便携版）:
+```bash
+pip install pywin32   # Windows Office COM 支持
+pyinstaller build_windows.spec --noconfirm --clean
+# → dist/PDFeverything.exe
+```
+
+**macOS**（App Bundle）:
+```bash
+pyinstaller PDFeverything.spec --noconfirm --clean
+# → dist/PDFeverything.app
+```
+
+### 🧱 技术栈
+
+| 层 | 技术 |
+|---|---|
+| 🖼️ 界面 | **PyQt6** — macOS / Windows 原生体验 |
+| 🧠 PDF 引擎 | **PyMuPDF** + **pypdf** + **pikepdf** |
+| 📝 Office 转换 | **AppleScript** (macOS) / **COM** (Windows) / **python-docx** + **python-pptx** + **openpyxl** (备选) |
+| 📦 打包 | **PyInstaller** (Windows onefile / macOS app bundle) |
+
+### 📄 许可证
+
+MIT — 随便用。 [LICENSE](resources/LICENSE.txt)
