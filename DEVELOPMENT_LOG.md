@@ -180,3 +180,14 @@ Ver 1.3.0 | 2026-06-26 — PDF 阅读器
     - 预渲染改为分批异步（每批 40 页），初次加载保持 UI 响应
     - BUGFIX: Fit Width 和 Fit Page 完全相同 — 拆分为 Width/Height 两个维度
     - BUGFIX: 连续模式底栏显示翻页按钮和页码 — 改为仅 Grid 隐藏
+
+  Ver 1.3.4 | 欢迎页 + 完整 i18n + 右键"打开方式"集成
+    - 阅读器空载时显示居中欢迎页："拖入 PDF 文件以阅读" + "加载文件"按钮
+    - 支持拖拽 PDF 文件到阅读器窗口直接打开
+    - _retranslate_ui() 在 _init_ui() 末尾调用，所有按钮/文字启动即本地化
+    - 阅读器工具栏全中文化（连续/网格/适应宽度/适应高度）
+    - 所有 tooltip 中英双语
+    - macOS Info.plist 注册 .pdf 文件类型（LSHandlerRank=Alternate），
+      系统"打开方式"菜单中出现 PDFeverything，文件自动加入文件列表
+    - main.py 新增 _collect_file_args()，忽略 -psn_ 等 macOS 噪声参数
+    - 版本号升级至 1.3.0

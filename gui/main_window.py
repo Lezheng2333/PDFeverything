@@ -78,6 +78,9 @@ class MainWindow(QMainWindow):
         self._create_menu()
         self.setAcceptDrops(True)
 
+        # Apply initial language (default zh from QSettings, or user's previous choice)
+        self._retranslate_ui()
+
     def _create_menu(self):
         mb = self.menuBar()
 
@@ -95,7 +98,7 @@ class MainWindow(QMainWindow):
 
         self.menu_op = mb.addMenu(tr("menu_operations"))
         self.act_merge = self.menu_op.addAction(
-            "🔀 Merge → PDF", "Ctrl+M", self._on_merge_clicked)
+            tr("menu_merge"), "Ctrl+M", self._on_merge_clicked)
         self.act_split = self.menu_op.addAction(tr("btn_split"), self._on_split_clicked)
         self.act_compress = self.menu_op.addAction(tr("btn_compress"), self._on_compress_clicked)
         self.act_watermark = self.menu_op.addAction(tr("btn_watermark"), self._on_watermark_clicked)
@@ -175,10 +178,16 @@ class MainWindow(QMainWindow):
         self.reader.btn_prev.setToolTip(tr("reader_prev"))
         self.reader.btn_next.setToolTip(tr("reader_next"))
         self.reader.btn_fit_width.setText(tr("reader_fit_width"))
-        self.reader.btn_fit_width.setToolTip("Fit page width to viewport")
+        self.reader.btn_fit_width.setToolTip(tr("reader_fit_width_tip"))
         self.reader.btn_fit_height.setText(tr("reader_fit_height"))
-        self.reader.btn_fit_height.setToolTip("Fit page height to viewport")
+        self.reader.btn_fit_height.setToolTip(tr("reader_fit_height_tip"))
         self.reader.zoom_combo.setToolTip(tr("reader_zoom_tip"))
+        self.reader.btn_close.setToolTip(tr("reader_close"))
+        # Refresh welcome screen text if no document loaded
+        if not self.reader.has_document():
+            self.reader._show_welcome(
+                drop_text=tr("reader_drop_here"),
+                load_btn_text=tr("reader_load_file"))
         # Tool buttons
         if self._tool_buttons:
             labels = ["tool_extract_text", "tool_extract_images",
@@ -301,7 +310,16 @@ class MainWindow(QMainWindow):
         """Tab 3: PDF reader."""
         self.reader = PdfReaderWidget()
         self.reader.close_requested.connect(self._on_reader_close)
+        self.reader.open_requested.connect(self._on_reader_open_requested)
         self.tabs.addTab(self.reader, tr("tab_reader"))
+
+    def _on_reader_open_requested(self):
+        """Handle Load file button or drag-drop in reader welcome screen."""
+        drop_path = getattr(self.reader, '_path', None)
+        if drop_path and drop_path.exists():
+            self._open_pdf_in_reader(drop_path, from_file_list=False)
+        else:
+            self._open_pdf_in_reader()  # show file dialog
 
     def _open_pdf_in_reader(self, path: Path = None, from_file_list: bool = False) -> None:
         """Open a PDF in the reader tab. If path is None, show file dialog."""

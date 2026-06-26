@@ -26,6 +26,7 @@ class PdfReaderWidget(QWidget):
 
     document_changed = pyqtSignal(str)
     close_requested = pyqtSignal()  # emitted when user clicks × close button
+    open_requested = pyqtSignal()   # emitted when user clicks "Load file" / drops a file
     _cache: dict = {}               # (page, zoom_key) -> QPixmap
 
     def __init__(self, parent=None):
@@ -488,11 +489,64 @@ class PdfReaderWidget(QWidget):
         self.btn_next.setEnabled(self._current_page < self._total_pages - 1)
         self.page_input.setEnabled(self._total_pages > 0)
 
-    def _show_welcome(self, text="Open a PDF to start reading"):
+    def _show_welcome(self, drop_text="Drop PDF here to read", load_btn_text="Load file..."):
         vw, vh = self._viewport_size()
-        l = QLabel(text); l.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        l.setStyleSheet("QLabel { color: #888; font-size: 20px; background: transparent; }")
-        l.setParent(self.page_container); l.setGeometry(0, 0, vw, vh); l.show()
+        # Clear old welcome content
+        for c in self.page_container.findChildren(QWidget):
+            if c is not self.page_container and c is not self._zoom_popup and c not in self._labels:
+                c.setParent(None); c.deleteLater()
+
+        # Container
+        center = QWidget(self.page_container); self._welcome_widget = center
+        center.setStyleSheet("background: transparent;")
+        cl = QVBoxLayout(center); cl.setAlignment(Qt.AlignmentFlag.AlignCenter); cl.setSpacing(12)
+
+        self._welcome_text = QLabel(drop_text)
+        self._welcome_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._welcome_text.setStyleSheet("QLabel { color: #555; font-size: 16px; background: transparent; }")
+        cl.addWidget(self._welcome_text)
+
+        self._welcome_btn = QPushButton(load_btn_text)
+        self._welcome_btn.setFixedWidth(120)
+        self._welcome_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._welcome_btn.setStyleSheet(
+            "QPushButton { color: #666; background: #2a2a2a; border: 1px solid #444; "
+            "border-radius: 4px; padding: 5px 16px; font-size: 12px; }"
+            "QPushButton:hover { color: #999; background: #333; border-color: #555; }")
+        self._welcome_btn.clicked.connect(lambda: self.open_requested.emit())
+        cl.addWidget(self._welcome_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        center.adjustSize()
+        cx = (vw - center.width()) // 2
+        cy = (vh - center.height()) // 2
+        center.move(cx, cy)
+        center.show()
+
+        # Support drag-drop PDF onto the reader
+        self.scroll_area.setAcceptDrops(True)
+        self.scroll_area.dragEnterEvent = self._drag_enter
+        self.scroll_area.dropEvent = self._drop_event
+
+    def _drag_enter(self, e):
+        from PyQt6.QtGui import QDragEnterEvent
+        if e.mimeData().hasUrls():
+            ext = Path(e.mimeData().urls()[0].toLocalFile()).suffix.lower()
+            if ext in (".pdf",):
+                e.acceptProposedAction()
+            else:
+                e.ignore()
+        else:
+            e.ignore()
+
+    def _drop_event(self, e):
+        from PyQt6.QtGui import QDropEvent
+        paths = [Path(u.toLocalFile()) for u in e.mimeData().urls()
+                 if Path(u.toLocalFile()).exists()]
+        pdfs = [p for p in paths if p.suffix.lower() == ".pdf"]
+        if pdfs:
+            self._path = pdfs[0]  # pre-set so open_requested handler reads from here
+            self.open_requested.emit()
+        e.acceptProposedAction()
 
     # ═══════════════ Keyboard ═══════════════
 

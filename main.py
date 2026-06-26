@@ -90,7 +90,24 @@ def _app_icon_path():
     return ""
 
 
-def launch_gui():
+def _collect_file_args():
+    """Collect file paths from argv that aren't known flags or commands.
+    Filters out macOS launch-service noise like -psn_*."""
+    files = []
+    for a in sys.argv[1:]:
+        if a in ("-h", "--help", "-v", "--version", "--mcp", "--cli"):
+            continue
+        if a in CLI_COMMANDS:
+            continue
+        if a.startswith("-psn_") or a.startswith("-NS"):
+            continue  # macOS launch service noise
+        p = Path(a)
+        if p.exists() and p.is_file():
+            files.append(p)
+    return files
+
+
+def launch_gui(open_files=None):
     from PyQt6.QtWidgets import QApplication
     from PyQt6.QtGui import QIcon
     app = QApplication(sys.argv)
@@ -102,6 +119,8 @@ def launch_gui():
     app.setApplicationName("PDFeverything")
     from gui.main_window import MainWindow
     w = MainWindow()
+    if open_files:
+        w.file_list.add_files(open_files)
     w.show()
     sys.exit(app.exec())
 
@@ -111,7 +130,7 @@ def main():
         print(HELP_TEXT)
         return
     if len(sys.argv) > 1 and sys.argv[1] in ("-v", "--version"):
-        print("PDFeverything v1.2.0")
+        print("PDFeverything v1.3.0")
         return
     if len(sys.argv) > 1 and sys.argv[1] == "--mcp":
         launch_mcp()
@@ -128,6 +147,11 @@ def main():
             sys.exit(1)
         from pdf_tool import main as cli_main
         cli_main()
+        return
+
+    open_files = _collect_file_args()
+    if open_files:
+        launch_gui(open_files)
         return
     launch_gui()
 
