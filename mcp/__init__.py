@@ -1,0 +1,1 @@
+# PDFeverything MCP server package

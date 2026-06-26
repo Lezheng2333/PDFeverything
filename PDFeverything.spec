@@ -46,6 +46,7 @@ hiddenimports = [
     "openpyxl",
     "openpyxl.worksheet",
     "openpyxl.reader",
+    "mcp", "mcp.server",
     "tempfile",
     "subprocess",
     "shutil",

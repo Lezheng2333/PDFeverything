@@ -28,6 +28,7 @@ hiddenimports = [
     "pptx", "pptx.slide", "pptx.shapes",
     "openpyxl", "openpyxl.worksheet", "openpyxl.reader",
     "win32com", "win32com.client", "pythoncom",
+    "mcp", "mcp.server",
     "tempfile", "subprocess", "shutil", "uuid",
 ]
 

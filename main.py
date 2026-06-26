@@ -48,15 +48,22 @@ Commands:
 
     -h, --help                                Show this help
     --version                                 Show version
+    --mcp                                     Launch MCP server (for AI agents)
 
 Examples:
     PDFeverything.exe merge -i a.pdf b.pdf c.pdf -o merged.pdf
     PDFeverything.exe info -i document.pdf
-    PDFeverything.exe compress -i big.pdf -o small.pdf
+    PDFeverything.exe --mcp                  # start AI agent tool server
 
 Note: On first run the self-extracting executable takes a few seconds to unpack.
 Subsequent runs in the same session are instant.
 """
+
+
+def launch_mcp():
+    """Launch the MCP server for AI agent integration."""
+    from mcp.server import serve
+    serve()
 
 
 def launch_gui():
@@ -77,6 +84,9 @@ def main():
         return
     if len(sys.argv) > 1 and sys.argv[1] in ("-v", "--version"):
         print("PDFeverything v1.1.0")
+        return
+    if len(sys.argv) > 1 and sys.argv[1] == "--mcp":
+        launch_mcp()
         return
     if len(sys.argv) > 1 and sys.argv[1] in CLI_COMMANDS:
         from pdf_tool import main as cli_main
