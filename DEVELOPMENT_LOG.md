@@ -236,3 +236,19 @@ Ver 1.3.0 | 2026-06-26 — PDF 阅读器
     - **连续捏合优化**：`skip_deferred=True` 在手势期间仅做即时缩放，不触发后台渲染
     - **捏合终止检测**：`ScrollEnd (phase=3)` → 触发 `_sharp_render` 产生最终高清画面
     - BUGFIX: `_show_welcome` 重复居中代码 + `vw`/`vh` 未定义变量名
+
+  Ver 1.3.8 | LRU 缓存 + 内存水位线 + 双 timer 页码追踪 + 按需预加载
+    - 缓存替换为 collections.OrderedDict（LRU 有序淘汰）：
+      · `_cache_put`: 插入时 `move_to_end`，超 250MB 限制时 `popitem(last=False)`
+      · `_cache_get`: 命中时 `move_to_end`（最近使用标记）
+      · 驻留特权：`zk in ("fh","fw")` 永不被淘汰（fit_width/fit_height for page 0）
+      · `_cache_memory_bytes` 实时追踪，`_clear_cache()` 清零
+      · 删除旧 `MAX_CACHE=3000` 条目上限，改为内存驱动
+    - 双 timer 页码追踪：
+      · Throttle (30ms): `_do_throttle_page` — `scrollY / avgPageHeight` 粗略页码，<1μs
+      · Debounce (150ms): `_do_debounce_calibration` — `bisect_right` 精确校准
+      · 滚动停止后自动触发 `_prefetch_around(N)` 预加载 N±1 页
+    - 快速缓存探测：`_set_zoom_pct` 仅检查 page 0 是否命中，不再遍历所有页面
+    - `_sharp_render` 改用 `_cache_get`（LRU 语义），`finally` 清除 `_pending_zoom_pct`
+    - `_cancel_deferred_renders` 统一停止所有 timer
+    - BUGFIX: 滚动→闪退 — `_on_scrollbar_changed` + throttle/debounce 双重守卫

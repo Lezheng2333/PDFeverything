@@ -1,6 +1,7 @@
-"""PDF reader — Scroll+Grid, direct zoom, bisect page tracking, welcome overlay."""
+"""PDF reader — LRU cache, dual-timer pages, on-demand prefetch."""
 
 from bisect import bisect_right
+from collections import OrderedDict
 from enum import Enum
 from pathlib import Path
 from typing import Optional
@@ -19,13 +20,17 @@ class ViewMode(Enum):
 
 
 RENDER_SCALE = 2; RESIZE_DEBOUNCE = 350; BATCH = 30
+MAX_CACHE_MB = 250; CACHE_TARGET_MB = 180
+PAGE_THROTTLE_MS = 30  # rough page update
+PAGE_DEBOUNCE_MS = 150  # precise bisect calibration
 
 
 class PdfReaderWidget(QWidget):
     document_changed = pyqtSignal(str)
     close_requested = pyqtSignal()
     open_requested = pyqtSignal()
-    _cache: dict = {}
+    _cache: OrderedDict = OrderedDict()
+    _cache_memory_bytes: int = 0
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -43,9 +48,13 @@ class PdfReaderWidget(QWidget):
         self._resize_timer.setInterval(RESIZE_DEBOUNCE)
         self._resize_timer.timeout.connect(self._on_resize)
 
-        self._scroll_timer = QTimer(self); self._scroll_timer.setSingleShot(True)
-        self._scroll_timer.setInterval(100)
-        self._scroll_timer.timeout.connect(self._track_scroll_page)
+        self._scroll_throttle = QTimer(self); self._scroll_throttle.setSingleShot(True)
+        self._scroll_throttle.setInterval(PAGE_THROTTLE_MS)
+        self._scroll_throttle.timeout.connect(self._do_throttle_page)
+
+        self._scroll_debounce = QTimer(self); self._scroll_debounce.setSingleShot(True)
+        self._scroll_debounce.setInterval(PAGE_DEBOUNCE_MS)
+        self._scroll_debounce.timeout.connect(self._do_debounce_calibration)
 
         self._pre_render_timer = QTimer(self); self._pre_render_timer.setSingleShot(True)
         self._pre_render_timer.setInterval(0)
@@ -239,7 +248,7 @@ class PdfReaderWidget(QWidget):
     def open_pdf(self, path: Path) -> None:
         import fitz
         self._cancel_deferred_renders()
-        PdfReaderWidget._cache.clear(); self._destroy_labels(); self._destroy_welcome()
+        PdfReaderWidget._clear_cache(); self._destroy_labels(); self._destroy_welcome()
         try: self.doc = fitz.open(path)
         except Exception: self._show_welcome(); return
         if self.doc.is_encrypted:
@@ -270,7 +279,7 @@ class PdfReaderWidget(QWidget):
         self._cancel_deferred_renders()
         if self.doc: self.doc.close(); self.doc = None
         self._path = None; self._total_pages = 0; self._current_page = 0
-        PdfReaderWidget._cache.clear()
+        PdfReaderWidget._clear_cache()
         self.scroll_area.verticalScrollBar().blockSignals(True)
         self._destroy_labels()
         self._page_heights.clear(); self._update_nav_ui(); self.label_filename.clear()
@@ -279,10 +288,11 @@ class PdfReaderWidget(QWidget):
         self._show_welcome()
 
     def _cancel_deferred_renders(self):
-        """Cancel any pending QTimer.singleShot callbacks that would crash."""
+        """Cancel all pending timers to prevent stale callbacks."""
         self._pending_zoom_pct = None
         self._resize_timer.stop()
-        self._scroll_timer.stop()
+        self._scroll_throttle.stop()
+        self._scroll_debounce.stop()
 
     # ═══════════ Zoom — two-pass: instant scale → sharp render ═══════════
 
@@ -311,11 +321,13 @@ class PdfReaderWidget(QWidget):
         self._show_zoom_popup(pct)
         # Pass 2: deferred sharp render (skip for continuous pinch / already cached)
         if not skip_deferred:
-            # Quick cache probe: if ALL pages already cached at new zoom, skip re-render
+            # Quick probe: check first page cache hit. If hit, likely all cached
+            # (pre-render runs all pages at same zoom key). Full traversal not needed.
             vw, vh = self._viewport_size()
             zk = self._zoom_key(vw, vh)
-            all_cached = all((pi, zk) in PdfReaderWidget._cache for pi in range(self._total_pages))
-            if not all_cached:
+            probe_key = (0, zk)
+            if probe_key not in PdfReaderWidget._cache:
+                # Not yet cached — schedule sharp render
                 self._pending_zoom_pct = pct
                 QTimer.singleShot(180, self._sharp_render)
 
@@ -339,7 +351,7 @@ class PdfReaderWidget(QWidget):
 
     def _sharp_render(self):
         """Deferred real rendering: only re-render cache-missed pages at current zoom."""
-        if not self.doc or not self._labels or not hasattr(self,'_pending_zoom_pct'):
+        if not self.doc or not self._labels or not hasattr(self, '_pending_zoom_pct'):
             return
         try:
             pct = self._pending_zoom_pct; self._zoom_mode = pct / 100.0
@@ -348,15 +360,16 @@ class PdfReaderWidget(QWidget):
             for pi, label in enumerate(self._labels):
                 try:
                     key = (pi, zk)
-                    if key in PdfReaderWidget._cache:
-                        pix = PdfReaderWidget._cache[key]
-                    else:
+                    pix = PdfReaderWidget._cache_get(key)
+                    if pix is None:
                         pix = self._get_or_render(pi, vw, vh)
                         any_miss = True
                     if pix: label.setPixmap(pix); label.setFixedSize(pix.size())
                 except Exception: pass
             if any_miss: self._layout_labels()
         except Exception: pass
+        finally:
+            self._pending_zoom_pct = None
 
     def _adjust_zoom(self, delta: int):
         if not self.doc: return
@@ -490,25 +503,50 @@ class PdfReaderWidget(QWidget):
             max(0, self._page_heights[self._current_page]))
 
     def _on_scrollbar_changed(self, value):
-        """Scrollbar moved — only track pages if document is loaded."""
+        """Scrollbar moved — fire both throttle (rough) and debounce (precise)."""
         if self.doc:
-            self._scroll_timer.start()
+            self._scroll_throttle.start()
+            self._scroll_debounce.start()
 
-    def _track_scroll_page(self):
-        try:
-            if not self.doc or self._view_mode != ViewMode.SCROLL:
-                return
-            if not self._page_heights or not self._labels:
-                return
-            sb = self.scroll_area.verticalScrollBar()
-            mid = max(0, sb.value() + sb.pageStep() // 2)
-            idx = bisect_right(self._page_heights, mid) - 1
-            if idx < 0: idx = 0
-            elif idx >= len(self._page_heights): idx = len(self._page_heights) - 1
-            if 0 <= idx < len(self._labels) and idx != self._current_page:
-                self._current_page = idx; self._update_nav_ui()
-        except Exception:
-            pass  # widget destroyed mid-timer
+    def _do_throttle_page(self):
+        """Rough page estimate via division — fast, <1μs, updates UI immediately."""
+        if not self.doc or not self._page_heights or not self._total_pages:
+            return
+        sb = self.scroll_area.verticalScrollBar()
+        scroll_y = sb.value()
+        # Average page height from container
+        total_h = self.page_container.height()
+        if total_h <= 0: return
+        avg_h = total_h / self._total_pages
+        rough = max(0, min(self._total_pages - 1, int(scroll_y / avg_h)))
+        if rough != self._current_page:
+            self._current_page = rough
+            self._update_nav_ui()
+
+    def _do_debounce_calibration(self):
+        """Precise calibration via bisect on _page_heights — O(log n)."""
+        if not self.doc or not self._page_heights:
+            return
+        sb = self.scroll_area.verticalScrollBar()
+        mid = max(0, sb.value() + sb.pageStep() // 2)
+        idx = bisect_right(self._page_heights, mid) - 1
+        if idx < 0: idx = 0
+        elif idx >= len(self._page_heights): idx = len(self._page_heights) - 1
+        if idx != self._current_page:
+            self._current_page = idx
+            self._update_nav_ui()
+            # Prefetch neighbors
+            self._prefetch_around(idx)
+
+    def _prefetch_around(self, page_idx: int):
+        """Low-priority prefetch of N-1 and N+1 pages after scroll stops."""
+        if not self.doc: return
+        vw, vh = self._viewport_size()
+        for pi in (page_idx - 1, page_idx + 1):
+            if 0 <= pi < self._total_pages:
+                key = (pi, self._zoom_key(vw, vh))
+                if key not in PdfReaderWidget._cache:
+                    QTimer.singleShot(500, lambda p=pi: self._get_or_render(p, vw, vh))
 
     # ═══════════ Render ═══════════
 
@@ -542,13 +580,47 @@ class PdfReaderWidget(QWidget):
         vp = self.scroll_area.viewport()
         return (max(800, vp.width() - 4), max(600, vp.height() - 4))
 
+    @classmethod
+    def _cache_put(cls, key, pix: QPixmap):
+        """LRU insert with memory-aware eviction. Pinned keys never evicted."""
+        # Move to end (most-recently-used) if already present
+        if key in cls._cache:
+            cls._cache.move_to_end(key)
+            cls._cache[key] = pix
+            return
+        # Estimate memory: RGBA = width * height * 4 bytes
+        mem = pix.width() * pix.height() * 4
+        cls._cache_memory_bytes += mem
+        cls._cache[key] = pix
+        # Evict until under target, skipping pinned entries
+        while cls._cache_memory_bytes > MAX_CACHE_MB * 1024 * 1024 and len(cls._cache) > 1:
+            oldest_key, oldest_pix = next(iter(cls._cache.items()))
+            pi, zk = oldest_key
+            if zk in ("fh", "fw"):  # pinned: fit_height / fit_width for first page
+                break  # cannot evict, will exceed limit (acceptable edge case)
+            ow, oh = oldest_pix.width(), oldest_pix.height()
+            cls._cache_memory_bytes -= ow * oh * 4
+            cls._cache.popitem(last=False)
+
+    @classmethod
+    def _cache_get(cls, key):
+        if key in cls._cache:
+            cls._cache.move_to_end(key)
+            return cls._cache[key]
+        return None
+
+    @classmethod
+    def _clear_cache(cls):
+        cls._cache.clear()
+        cls._cache_memory_bytes = 0
+
     def _get_or_render(self, pi, vw, vh=99999, force_fit=False):
         key = (pi, self._zoom_key(vw, vh))
-        if key in PdfReaderWidget._cache:
-            return PdfReaderWidget._cache[key]
+        cached = PdfReaderWidget._cache_get(key)
+        if cached is not None:
+            return cached
         pix = PdfReaderWidget._render_page(self.doc, pi, key[1], vw, vh, force_fit)
-        if len(PdfReaderWidget._cache) < 3000:
-            PdfReaderWidget._cache[key] = pix
+        PdfReaderWidget._cache_put(key, pix)
         return pix
 
     # ═══════════ Navigation ═══════════
