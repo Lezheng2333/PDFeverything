@@ -40,9 +40,21 @@ _EXCEL_APPLESCRIPT = '''tell application "Microsoft Excel"
 end tell'''
 
 
+def _verify_pdf(path: Path) -> bool:
+    """Check that output PDF has actual content."""
+    try:
+        import fitz
+        doc = fitz.open(path)
+        has = len(doc) > 0
+        doc.close()
+        return has
+    except Exception:
+        return path.stat().st_size > 100
+
+
 def _applescript_convert(app_name: str, script: str, input_path: Path,
                          output_path: Path, timeout: int = 300) -> bool:
-    """通过 AppleScript 调用 Office 应用转换文件为 PDF。成功返回 True。"""
+    """Convert via AppleScript (macOS). Returns True on success."""
     try:
         r = subprocess.run(
             ["osascript", "-e", script.format(
@@ -51,18 +63,57 @@ def _applescript_convert(app_name: str, script: str, input_path: Path,
             )],
             capture_output=True, text=True, timeout=timeout,
         )
-        if r.returncode != 0 or not output_path.exists():
-            return False
-        # 验证输出 PDF 确实有内容（不是空文件）
-        try:
-            import fitz
-            doc = fitz.open(output_path)
-            has_pages = len(doc) > 0
-            doc.close()
-            return has_pages
-        except Exception:
-            return output_path.stat().st_size > 100  # 至少不是完全的空文件
+        return r.returncode == 0 and output_path.exists() and _verify_pdf(output_path)
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return False
+
+
+def _windows_com_convert(app_name: str, file_format: int,
+                         input_path: Path, output_path: Path,
+                         prog_id: str, timeout: int = 300) -> bool:
+    """Convert via Windows COM (win32com). Returns True on success."""
+    try:
+        import pythoncom
+        import win32com.client
+
+        pythoncom.CoInitialize()
+        try:
+            app = win32com.client.Dispatch(prog_id)
+            app.Visible = False
+            app.DisplayAlerts = 0
+
+            if app_name == "word":
+                doc = app.Documents.Open(str(input_path.resolve()), ReadOnly=True)
+                doc.SaveAs(str(output_path.resolve()), FileFormat=file_format)  # 17 = PDF
+                doc.Close()
+            elif app_name == "powerpoint":
+                pres = app.Presentations.Open(str(input_path.resolve()),
+                                              WithWindow=False)
+                pres.SaveAs(str(output_path.resolve()), FileFormat=file_format)  # 32 = PDF
+                pres.Close()
+            elif app_name == "excel":
+                wb = app.Workbooks.Open(str(input_path.resolve()), ReadOnly=True)
+                wb.ExportAsFixedFormat(
+                    Type=0,  # xlTypePDF
+                    Filename=str(output_path.resolve()),
+                    Quality=0,  # standard
+                )
+                wb.Close()
+
+            app.Quit()
+        finally:
+            pythoncom.CoUninitialize()
+
+        return output_path.exists() and _verify_pdf(output_path)
+    except ImportError:
+        return False
+    except Exception:
+        # Windows COM can fail for many reasons — fall through to fallback
+        try:
+            import pythoncom
+            pythoncom.CoUninitialize()
+        except Exception:
+            pass
         return False
 
 
@@ -210,18 +261,25 @@ class WordConverter(BaseConverter):
         out = output_dir / f"{input_path.stem}.pdf"
 
         if progress_callback:
-            progress_callback(f"转换 Word: {input_path.name}", 30)
+            progress_callback(f"Converting Word: {input_path.name}", 30)
 
-        # 方案 A: AppleScript 调用 Word
-        if _applescript_convert("Microsoft Word", _WORD_APPLESCRIPT, input_path, out, timeout=300):
-            if progress_callback:
-                progress_callback(f"Word 转换完成: {input_path.name}", 100)
-            return out
+        # Platform-specific Office automation
+        if sys.platform == "win32":
+            if _windows_com_convert("word", 17, input_path, out,
+                                    "Word.Application", timeout=300):
+                if progress_callback:
+                    progress_callback(f"Word done (COM): {input_path.name}", 100)
+                return out
+        else:
+            if _applescript_convert("Microsoft Word", _WORD_APPLESCRIPT,
+                                    input_path, out, timeout=300):
+                if progress_callback:
+                    progress_callback(f"Word done (AppleScript): {input_path.name}", 100)
+                return out
 
         if progress_callback:
-            progress_callback(f"Word 未可用，使用纯 Python 渲染: {input_path.name}", 30)
+            progress_callback(f"Office unavailable, fallback render: {input_path.name}", 30)
 
-        # 方案 B: 纯 Python (python-docx + PyMuPDF)
         return self._fallback_convert(input_path, out, progress_callback)
 
     def _fallback_convert(self, input_path: Path, out: Path,
@@ -373,24 +431,28 @@ class PowerPointConverter(BaseConverter):
 
     def convert(self, input_path: Path, output_dir: Path,
                 progress_callback: Optional[Callable[[str, int], None]] = None) -> Path:
-        import fitz
-
         check_input(input_path)
         out = output_dir / f"{input_path.stem}.pdf"
 
         if progress_callback:
-            progress_callback(f"转换 PPT: {input_path.name}", 30)
+            progress_callback(f"Converting PPT: {input_path.name}", 30)
 
-        # 方案 A: AppleScript
-        if _applescript_convert("Microsoft PowerPoint", _PPT_APPLESCRIPT, input_path, out, timeout=300):
-            if progress_callback:
-                progress_callback(f"PPT 转换完成: {input_path.name}", 100)
-            return out
+        if sys.platform == "win32":
+            if _windows_com_convert("powerpoint", 32, input_path, out,
+                                    "PowerPoint.Application", timeout=300):
+                if progress_callback:
+                    progress_callback(f"PPT done (COM): {input_path.name}", 100)
+                return out
+        else:
+            if _applescript_convert("Microsoft PowerPoint", _PPT_APPLESCRIPT,
+                                    input_path, out, timeout=300):
+                if progress_callback:
+                    progress_callback(f"PPT done (AppleScript): {input_path.name}", 100)
+                return out
 
         if progress_callback:
-            progress_callback(f"PPT 未可用，使用纯 Python 渲染: {input_path.name}", 30)
+            progress_callback(f"Office unavailable, fallback: {input_path.name}", 30)
 
-        # 方案 B: python-pptx + PyMuPDF
         return self._fallback_convert(input_path, out, progress_callback)
 
     def _fallback_convert(self, input_path: Path, out: Path,
@@ -468,18 +530,24 @@ class ExcelConverter(BaseConverter):
         out = output_dir / f"{input_path.stem}.pdf"
 
         if progress_callback:
-            progress_callback(f"转换 Excel: {input_path.name}", 30)
+            progress_callback(f"Converting Excel: {input_path.name}", 30)
 
-        # 方案 A: AppleScript
-        if _applescript_convert("Microsoft Excel", _EXCEL_APPLESCRIPT, input_path, out, timeout=300):
-            if progress_callback:
-                progress_callback(f"Excel 转换完成: {input_path.name}", 100)
-            return out
+        if sys.platform == "win32":
+            if _windows_com_convert("excel", 0, input_path, out,
+                                    "Excel.Application", timeout=300):
+                if progress_callback:
+                    progress_callback(f"Excel done (COM): {input_path.name}", 100)
+                return out
+        else:
+            if _applescript_convert("Microsoft Excel", _EXCEL_APPLESCRIPT,
+                                    input_path, out, timeout=300):
+                if progress_callback:
+                    progress_callback(f"Excel done (AppleScript): {input_path.name}", 100)
+                return out
 
         if progress_callback:
-            progress_callback(f"Excel 未可用，使用纯 Python 渲染: {input_path.name}", 30)
+            progress_callback(f"Office unavailable, fallback: {input_path.name}", 30)
 
-        # 方案 B: openpyxl + PyMuPDF
         return self._fallback_convert(input_path, out, progress_callback)
 
     def _fallback_convert(self, input_path: Path, out: Path,

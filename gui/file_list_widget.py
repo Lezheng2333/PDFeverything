@@ -1,4 +1,4 @@
-"""文件列表组件 — 支持拖拽添加、内部排序、右键菜单。"""
+"""Draggable file list widget with toolbar and context menu."""
 
 from pathlib import Path
 from typing import List
@@ -19,19 +19,14 @@ from PyQt6.QtWidgets import (
 )
 
 from core.utils import format_bytes, get_file_category
+from .i18n import tr
 
-# 文件类型 → emoji 图标映射
 FILE_ICONS = {
-    "pdf": "📄",
-    "image": "🖼️",
-    "word": "📝",
-    "powerpoint": "📊",
-    "excel": "📈",
-    "text": "📃",
-    "unknown": "📎",
+    "pdf": "\U0001f4c4", "image": "\U0001f5bc", "word": "\U0001f4dd",
+    "powerpoint": "\U0001f4ca", "excel": "\U0001f4c8", "text": "\U0001f4c3",
+    "unknown": "\U0001f4ce",
 }
 
-# 支持的文件扩展名
 SUPPORTED_EXTS = {
     ".pdf", ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff", ".tif", ".webp",
     ".docx", ".doc", ".rtf",
@@ -43,9 +38,9 @@ SUPPORTED_EXTS = {
 
 
 class FileListWidget(QWidget):
-    """拖拽式文件列表，内嵌工具栏。"""
+    """Drag-and-drop file list with inline toolbar."""
 
-    files_changed = pyqtSignal()  # 文件列表变动时发射
+    files_changed = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -55,30 +50,30 @@ class FileListWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        # ── 工具栏 ──
+        # Toolbar
         toolbar = QHBoxLayout()
         btn_style = "QPushButton { padding: 4px 10px; }"
 
-        self.btn_add = QPushButton("📂 添加文件")
+        self.btn_add = QPushButton(tr("fl_btn_add"))
         self.btn_add.setStyleSheet(btn_style)
         self.btn_add.clicked.connect(self._on_add_files)
 
-        self.btn_remove = QPushButton("🗑️ 移除")
+        self.btn_remove = QPushButton(tr("fl_btn_remove"))
         self.btn_remove.setStyleSheet(btn_style)
         self.btn_remove.clicked.connect(self._on_remove)
 
-        self.btn_clear = QPushButton("✖️ 清空")
+        self.btn_clear = QPushButton(tr("fl_btn_clear"))
         self.btn_clear.setStyleSheet(btn_style)
         self.btn_clear.clicked.connect(self._on_clear)
 
         self.btn_up = QPushButton("⬆")
         self.btn_up.setFixedWidth(36)
-        self.btn_up.setToolTip("上移")
+        self.btn_up.setToolTip(tr("fl_btn_up_tip"))
         self.btn_up.clicked.connect(self._on_move_up)
 
         self.btn_down = QPushButton("⬇")
         self.btn_down.setFixedWidth(36)
-        self.btn_down.setToolTip("下移")
+        self.btn_down.setToolTip(tr("fl_btn_down_tip"))
         self.btn_down.clicked.connect(self._on_move_down)
 
         toolbar.addWidget(self.btn_add)
@@ -89,7 +84,7 @@ class FileListWidget(QWidget):
         toolbar.addWidget(self.btn_down)
         layout.addLayout(toolbar)
 
-        # ── 列表 ──
+        # List
         self.list_widget = QListWidget()
         self.list_widget.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
         self.list_widget.setDefaultDropAction(Qt.DropAction.MoveAction)
@@ -98,33 +93,36 @@ class FileListWidget(QWidget):
         self.list_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.list_widget.customContextMenuRequested.connect(self._on_context_menu)
         self.list_widget.model().rowsMoved.connect(lambda *a: self.files_changed.emit())
-
-        # 启用外部拖入
         self.list_widget.setAcceptDrops(True)
         self.list_widget.dragEnterEvent = self._drag_enter
         self.list_widget.dropEvent = self._drop_event
 
         layout.addWidget(self.list_widget)
 
-    # ── 公共接口 ─────────────────────────────────────
+    def retranslate_ui(self):
+        """Refresh all UI strings after language change."""
+        self.btn_add.setText(tr("fl_btn_add"))
+        self.btn_remove.setText(tr("fl_btn_remove"))
+        self.btn_clear.setText(tr("fl_btn_clear"))
+        self.btn_up.setToolTip(tr("fl_btn_up_tip"))
+        self.btn_down.setToolTip(tr("fl_btn_down_tip"))
+
+    # ── Public API ────────────────────────────────────
 
     def add_files(self, paths: List[Path]) -> None:
-        """向列表添加文件（去重，仅支持的类型）。"""
         existing = set(self.get_file_paths())
         added = 0
         skipped_unsupported = 0
         for p in paths:
-            # 跳过文件夹
             if p.is_dir():
                 continue
-            # 检查扩展名
             if p.suffix.lower() not in SUPPORTED_EXTS:
                 skipped_unsupported += 1
                 continue
             if p not in existing:
                 existing.add(p)
                 cat = get_file_category(p)
-                icon = FILE_ICONS.get(cat, "📎")
+                icon = FILE_ICONS.get(cat, "\U0001f4ce")
                 size = format_bytes(p.stat().st_size)
                 item = QListWidgetItem(f"{icon}  {p.name}  ({size})")
                 item.setData(Qt.ItemDataRole.UserRole, p)
@@ -137,13 +135,11 @@ class FileListWidget(QWidget):
 
         if skipped_unsupported > 0:
             QMessageBox.information(
-                self, "提示",
-                f"已跳过 {skipped_unsupported} 个不支持的文件格式。\n"
-                f"支持格式: PDF, 图片, Word, PPT, Excel, 文本文件",
+                self, tr("fl_msg_skip_title"),
+                tr("fl_msg_skip_body", count=skipped_unsupported),
             )
 
     def get_file_paths(self) -> List[Path]:
-        """返回当前列表中的所有文件路径（按列表顺序）。"""
         paths = []
         for i in range(self.list_widget.count()):
             item = self.list_widget.item(i)
@@ -159,15 +155,12 @@ class FileListWidget(QWidget):
         self.list_widget.clear()
         self.files_changed.emit()
 
-    # ── 槽 ───────────────────────────────────────────
+    # ── Slots ─────────────────────────────────────────
 
     def _on_add_files(self):
         files, _ = QFileDialog.getOpenFileNames(
-            self, "选择文件", "",
-            "所有支持的文件 (*.pdf *.png *.jpg *.jpeg *.gif *.bmp *.tiff *.webp "
-            "*.docx *.doc *.rtf *.pptx *.ppt *.xlsx *.xls *.csv "
-            "*.txt *.md *.log *.py *.json *.xml *.html *.yaml *.ini *.sh);;"
-            "所有文件 (*)",
+            self, tr("fl_dialog_title"), "",
+            tr("fl_dialog_filter"),
         )
         if files:
             self.add_files([Path(f) for f in files])
@@ -198,18 +191,9 @@ class FileListWidget(QWidget):
 
     def _on_context_menu(self, pos):
         menu = QMenu(self)
-        remove_action = QAction("🗑️ 移除", self)
-        remove_action.triggered.connect(self._on_remove)
-        menu.addAction(remove_action)
-
-        top_action = QAction("⬆ 移到最前", self)
-        top_action.triggered.connect(self._move_to_top)
-        menu.addAction(top_action)
-
-        bottom_action = QAction("⬇ 移到最后", self)
-        bottom_action.triggered.connect(self._move_to_bottom)
-        menu.addAction(bottom_action)
-
+        menu.addAction(tr("fl_menu_remove"), self._on_remove)
+        menu.addAction(tr("fl_menu_top"), self._move_to_top)
+        menu.addAction(tr("fl_menu_bottom"), self._move_to_bottom)
         menu.exec(self.list_widget.mapToGlobal(pos))
 
     def _move_to_top(self):
@@ -228,8 +212,6 @@ class FileListWidget(QWidget):
             self.list_widget.insertItem(count - 1, item)
             self.list_widget.setCurrentRow(count - 1)
             self.files_changed.emit()
-
-    # ── 外部拖入 ─────────────────────────────────────
 
     def _drag_enter(self, event: QDragEnterEvent):
         if event.mimeData().hasUrls():

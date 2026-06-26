@@ -120,24 +120,16 @@ def read_text_file(path: Path) -> str:
         return f.read()
 
 
-# ── Office 可用性检测 ─────────────────────────────────────
+# ── Office 可用性检测（跨平台） ────────────────────────────
 
 _office_cache: Optional[dict] = None
 
 
-def check_office_availability() -> dict:
-    """检测 macOS 上 Microsoft Office 应用的可用性。结果缓存。"""
-    global _office_cache
-    if _office_cache is not None:
-        return _office_cache
-
+def _check_office_macos() -> dict:
+    """Detect Office on macOS via AppleScript."""
     import subprocess
-
-    apps = {
-        "word": "Microsoft Word",
-        "powerpoint": "Microsoft PowerPoint",
-        "excel": "Microsoft Excel",
-    }
+    apps = {"word": "Microsoft Word", "powerpoint": "Microsoft PowerPoint",
+            "excel": "Microsoft Excel"}
     result = {}
     for key, name in apps.items():
         try:
@@ -148,6 +140,38 @@ def check_office_availability() -> dict:
             result[key] = r.returncode == 0
         except Exception:
             result[key] = False
-
-    _office_cache = result
     return result
+
+
+def _check_office_windows() -> dict:
+    """Detect Office on Windows via COM."""
+    result = {"word": False, "powerpoint": False, "excel": False}
+    try:
+        import win32com.client
+        for prog_id, key in [("Word.Application", "word"),
+                              ("PowerPoint.Application", "powerpoint"),
+                              ("Excel.Application", "excel")]:
+            try:
+                app = win32com.client.Dispatch(prog_id)
+                ver = app.Version  # noqa: F841 — probe that it works
+                app.Quit()
+                result[key] = True
+            except Exception:
+                result[key] = False
+    except ImportError:
+        pass  # pywin32 not installed
+    return result
+
+
+def check_office_availability() -> dict:
+    """Cross-platform Office detection. Returns {word, powerpoint, excel: bool}."""
+    global _office_cache
+    if _office_cache is not None:
+        return _office_cache
+
+    import sys
+    if sys.platform == "win32":
+        _office_cache = _check_office_windows()
+    else:
+        _office_cache = _check_office_macos()
+    return _office_cache
