@@ -72,11 +72,16 @@ class PdfReaderWidget(QWidget):
 
     def showEvent(self, e):
         super().showEvent(e)
-        # Only show welcome if widget has been properly sized (height > 50).
-        # During tab-switch layout transitions, height may be 0, causing
-        # welcome placement to crash. We defer to resizeEvent or next showEvent.
-        if not self.doc and not self._welcome and self.height() > 50:
-            QTimer.singleShot(50, self._show_welcome)
+        if not self.doc and not self._welcome:
+            # Defer to ensure layout is complete
+            QTimer.singleShot(100, self._try_show_welcome)
+
+    def _try_show_welcome(self):
+        """Safely show welcome only when widget is sized and visible."""
+        if self.doc or self._welcome:
+            return
+        if self.isVisible() and self.width() > 200 and self.height() > 100:
+            self._show_welcome()
 
     # ═══════════ UI ═══════════
 
@@ -96,7 +101,7 @@ class PdfReaderWidget(QWidget):
             "QScrollBar::handle:horizontal{background:#555;border-radius:4px;min-width:30px}"
             "QScrollBar::add-line:horizontal,QScrollBar::sub-line:horizontal{width:0}")
         self.scroll_area.verticalScrollBar().valueChanged.connect(
-            lambda: self._scroll_timer.start())
+            self._on_scrollbar_changed)
         self.scroll_area.setAcceptDrops(True)
 
         self.page_container = QWidget()
@@ -292,9 +297,11 @@ class PdfReaderWidget(QWidget):
         self._show_zoom_popup(pct)
 
     def _adjust_zoom(self, delta: int):
+        if not self.doc: return
         self._set_zoom_pct(self._current_zoom_pct() + delta)
 
     def _on_zoom_edit(self):
+        if not self.doc: return
         txt = self.zoom_edit.text().strip()
         if not txt:
             self.zoom_edit.setText(str(self._current_zoom_pct()))
@@ -315,6 +322,7 @@ class PdfReaderWidget(QWidget):
     def _hide_zoom_popup(self): self._zoom_popup.hide()
 
     def _on_fit_width(self):
+        if not self.doc: return
         if self._zoom_mode == "fit_width": return
         self._zoom_mode = "fit_width"
         self.btn_fit_width.setChecked(True); self.btn_fit_height.setChecked(False)
@@ -328,6 +336,7 @@ class PdfReaderWidget(QWidget):
             self._layout_labels()
 
     def _on_fit_height(self):
+        if not self.doc: return
         if self._zoom_mode == "fit_height": return
         self._zoom_mode = "fit_height"
         self.btn_fit_width.setChecked(False); self.btn_fit_height.setChecked(True)
@@ -429,16 +438,26 @@ class PdfReaderWidget(QWidget):
         self.scroll_area.verticalScrollBar().setValue(
             max(0, self._page_heights[self._current_page]))
 
+    def _on_scrollbar_changed(self, value):
+        """Scrollbar moved — only track pages if document is loaded."""
+        if self.doc:
+            self._scroll_timer.start()
+
     def _track_scroll_page(self):
-        if not self.doc or self._view_mode != ViewMode.SCROLL or not self._page_heights:
-            return
-        sb = self.scroll_area.verticalScrollBar()
-        mid = max(0, sb.value() + sb.pageStep() // 2)
-        idx = bisect_right(self._page_heights, mid) - 1
-        if idx < 0: idx = 0
-        elif idx >= len(self._page_heights): idx = len(self._page_heights) - 1
-        if idx != self._current_page:
-            self._current_page = idx; self._update_nav_ui()
+        try:
+            if not self.doc or self._view_mode != ViewMode.SCROLL:
+                return
+            if not self._page_heights or not self._labels:
+                return
+            sb = self.scroll_area.verticalScrollBar()
+            mid = max(0, sb.value() + sb.pageStep() // 2)
+            idx = bisect_right(self._page_heights, mid) - 1
+            if idx < 0: idx = 0
+            elif idx >= len(self._page_heights): idx = len(self._page_heights) - 1
+            if 0 <= idx < len(self._labels) and idx != self._current_page:
+                self._current_page = idx; self._update_nav_ui()
+        except Exception:
+            pass  # widget destroyed mid-timer
 
     # ═══════════ Render ═══════════
 
@@ -502,17 +521,18 @@ class PdfReaderWidget(QWidget):
     # ═══════════ Slots ═══════════
 
     def _on_resize(self):
-        if self.doc:
-            page = self.doc[0]; pw, ph = page.rect.width, page.rect.height
-            vw, vh = self._viewport_size()
-            self._fw_ratio = vw / pw if pw > 0 else 1.0
-            self._fh_ratio = vh / ph if ph > 0 else 1.0
-            self._default_zoom_pct = max(50, min(300, int(self._fh_ratio * 100)))
-            for pi, label in enumerate(self._labels):
-                pix = self._get_or_render(pi, vw, vh)
-                if pix: label.setPixmap(pix); label.setFixedSize(pix.size())
-            self._layout_labels()
-            self.zoom_edit.setText(str(self._current_zoom_pct()))
+        if not self.doc or not self._labels:
+            return
+        page = self.doc[0]; pw, ph = page.rect.width, page.rect.height
+        vw, vh = self._viewport_size()
+        self._fw_ratio = vw / pw if pw > 0 else 1.0
+        self._fh_ratio = vh / ph if ph > 0 else 1.0
+        self._default_zoom_pct = max(50, min(300, int(self._fh_ratio * 100)))
+        for pi, label in enumerate(self._labels):
+            pix = self._get_or_render(pi, vw, vh)
+            if pix: label.setPixmap(pix); label.setFixedSize(pix.size())
+        self._layout_labels()
+        self.zoom_edit.setText(str(self._current_zoom_pct()))
 
     def _update_nav_ui(self):
         self.page_label.setText(f"{self._current_page + 1} / {self._total_pages}")
@@ -531,9 +551,15 @@ class PdfReaderWidget(QWidget):
         self._welcome_drop = drop_text
         self._welcome_btn_text = load_btn_text
         if self.doc: return
-        if self.width() < 100 or self.height() < 50: return  # widget not laid out yet
+        if not self.isVisible(): return
+        vp = self.scroll_area.viewport()
+        if vp.width() < 100 or vp.height() < 50: return
+
         self._destroy_welcome()
-        c = QWidget(self); c.setStyleSheet("background:transparent;")
+        # Use the scroll_area's own container: put welcome text inside page_container
+        self.page_container.setFixedSize(vp.width(), vp.height())
+        c = QWidget(self.page_container)
+        c.setStyleSheet("background:transparent;")
         cl = QVBoxLayout(c); cl.setAlignment(Qt.AlignmentFlag.AlignCenter); cl.setSpacing(12)
         t = QLabel(drop_text); t.setAlignment(Qt.AlignmentFlag.AlignCenter)
         t.setStyleSheet("QLabel{color:#555;font-size:16px;background:transparent;}")
@@ -547,7 +573,10 @@ class PdfReaderWidget(QWidget):
         b.clicked.connect(lambda: self.open_requested.emit())
         cl.addWidget(b, alignment=Qt.AlignmentFlag.AlignCenter)
         c.adjustSize()
-        vw = self.width()
+        c.move(max(0, (vp.width() - c.width()) // 2),
+               max(0, (vp.height() - c.height()) // 2))
+        c.show(); c.raise_()
+        self._welcome = c
         vh = max(100, self.height() - self.toolbar.height())
         c.move(max(0, (vw - c.width()) // 2), max(0, (vh - c.height()) // 2))
         c.show(); c.raise_()
