@@ -1,71 +1,149 @@
-# PDFeverything
+<h1 align="center">
+  <img src="resources/app_icon.ico" width="64" align="center" />
+  &nbsp;PDFeverything
+</h1>
 
-**One-stop PDF processing tool with GUI** — merge, split, convert, compress, watermark, and more.
+<p align="center">
+  <b>🪄 The PDF Swiss Army Knife</b><br>
+  <sub>Throw in PDFs, Word docs, PowerPoints, Excel sheets, images, text files —<br>get one clean PDF out the other end. No fuss.</sub>
+</p>
+
+<p align="center">
+  <a href="https://github.com/Lezheng2333/PDFeverything/releases"><img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-blue?style=flat-square" /></a>
+  <a href="https://github.com/Lezheng2333/PDFeverything/releases"><img src="https://img.shields.io/github/v/release/Lezheng2333/PDFeverything?style=flat-square" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" /></a>
+</p>
+
+---
+
+## ✨ Why PDFeverything?
+
+You've been there: a Word report here, a PDF scan there, some photos of the whiteboard, an Excel chart… and now someone wants "*one combined PDF please, by 5pm*". 😤
+
+**PDFeverything is built for exactly this moment.**
+
+Drag everything in — any combination of PDFs, Word documents, PowerPoint decks, Excel spreadsheets, PNGs, JPEGs, text files — and it merges them into **one unified PDF**, in the order you decide, with progress you can watch.
 
 | Platform | Download |
 |---|---|
-| 🍎 macOS | `PDFeverything.app` (Apple Silicon) |
-| 🪟 Windows | `PDFeverything.exe` (64-bit, portable) |
+| 🍎 macOS (Apple Silicon) | [`PDFeverything_macOS.zip`](https://github.com/Lezheng2333/PDFeverything/releases/latest) |
+| 🪟 Windows 10/11 (64-bit) | [`PDFeverything.exe`](https://github.com/Lezheng2333/PDFeverything/releases/latest) |
 
-## Features
+> 🔗 [**Latest Release →**](https://github.com/Lezheng2333/PDFeverything/releases/latest)
 
-- **Merge PDFs** — order files, one-click merge
-- **Split PDFs** — by page, by range, or custom
-- **Mixed files → PDF** 🎯 — select PDF + Word + images + text, merge into one unified PDF
-- **Format conversion** — Word (.docx), PowerPoint (.pptx), Excel (.xlsx), images, text → PDF
-- **Compress** — reduce PDF file size
-- **Watermark** — text or PDF overlay
-- **Encrypt / Decrypt** — password protect or remove password
-- **Rotate** — pages by 90/180/270 degrees
-- **Extract** — text or embedded images from PDF
-- **PDF → Images** — each page as PNG
-- **Images → PDF** — combine image files into one PDF
+---
 
-## Supported Input Formats
+## 🎯 The Killer Feature: Mixed-File Merge
+
+```
+📄 report.docx   (2 pages)
+📊 chart.xlsx    (1 page)
+🖼️ photo.jpg    (1 page)
+📄 appendix.pdf  (5 pages)
+
+         🪄  one click  🪄
+              ↓
+    ┌─────────────────────┐
+    │   unified.pdf       │
+    │   9 pages, in order │
+    └─────────────────────┘
+```
+
+Every file goes through its own converter (AppleScript → Office on macOS, or pure-Python fallback), then everything gets stitched together. If one file fails, the rest still go through — you get a summary of what worked and what didn't.
+
+## 🔧 Everything It Can Do
+
+| Operation | What it does |
+|---|---|
+| 🔀 **Mixed Merge** | PDF + Word + PPT + Excel + images + text → one PDF |
+| 🔗 **PDF Merge** | Combine multiple PDFs in any order |
+| ✂️ **PDF Split** | Split by page, by chunks of N pages, or by custom ranges |
+| 🖼️ **Images → PDF** | Turn a batch of images into a single PDF |
+| 📝 **Word → PDF** | Convert `.docx` / `.doc` files to PDF |
+| 📊 **PPT / Excel → PDF** | Convert `.pptx` and `.xlsx` files |
+| 📄 **PDF → Images** | Export each PDF page as a PNG |
+| 📤 **Extract Text** | Pull out all text from a PDF |
+| 🖼️ **Extract Images** | Rip embedded images from a PDF |
+| 🗜️ **Compress** | Shrink PDF file size (lossless / medium / aggressive) |
+| 💧 **Watermark** | Stamp a text or PDF overlay on every page |
+| 🔒 **Encrypt** | Set an open-password on a PDF |
+| 🔓 **Decrypt** | Remove password protection |
+| 🔄 **Rotate** | Rotate pages 90° / 180° / 270° |
+| ℹ️ **Info** | Inspect page count, metadata, encryption status |
+
+## 📥 Supported Inputs
 
 | Category | Extensions |
 |---|---|
-| PDF | `.pdf` |
-| Images | `.png` `.jpg` `.jpeg` `.gif` `.bmp` `.tiff` `.webp` |
-| Word | `.docx` `.doc` `.rtf` |
-| PowerPoint | `.pptx` `.ppt` |
-| Excel | `.xlsx` `.xls` `.csv` |
-| Text | `.txt` `.md` `.json` `.xml` `.html` `.py` ... |
+| 📄 PDF | `.pdf` |
+| 🖼️ Images | `.png` `.jpg` `.jpeg` `.gif` `.bmp` `.tiff` `.webp` |
+| 📝 Word | `.docx` `.doc` `.rtf` |
+| 📊 PowerPoint | `.pptx` `.ppt` |
+| 📈 Excel | `.xlsx` `.xls` `.csv` |
+| 📃 Text & Code | `.txt` `.md` `.json` `.xml` `.html` `.py` `.yml` … |
 
-## Download
+## 🖥️ The GUI
 
-Go to [Releases](../../releases) and download the latest version:
+```
+┌──────────────────────────────────────────────┐
+│  📄 doc.pdf        [🔼] [🔽] [✖]            │
+│  📊 data.xlsx      [🔼] [🔽] [✖]            │
+│  🖼️ photo.jpg      [🔼] [🔽] [✖]            │
+│  📝 report.docx    [🔼] [🔽] [✖]            │
+│                                              │
+│  ── drag & drop files here ──               │
+│                                              │
+│  [🔀 Merge All →]       [✂️ Split...]        │
+│  [🗜️ Compress...]       [💧 Watermark...]    │
+│  [🔒 Encrypt...]        [🔄 Rotate...]       │
+│                                              │
+│  ████████████░░░░░░  78%                     │
+│  Converting: report.docx (3/5)...            │
+└──────────────────────────────────────────────┘
+```
 
-- **macOS**: `PDFeverything_macOS.zip` → unzip → double-click `PDFeverything.app`
-- **Windows**: `PDFeverything.exe` → double-click (portable, no install needed)
+- 🖱️ **Drag & drop** files from Finder / Explorer
+- 🔄 **Reorder** with arrow buttons or by dragging inside the list
+- ⚡ **Multi-threaded** — never freezes, always shows progress
+- 🧠 **Smart buttons** — the UI adapts to what's in your file list
 
-> macOS users: first launch, right-click → Open (to bypass Gatekeeper).
-
-## Build from Source
+## 🚀 Quick Start (for Developers)
 
 ```bash
+# 1. Install dependencies
 pip install PyQt6 PyMuPDF pypdf pikepdf pillow python-docx python-pptx openpyxl
+
+# 2. Launch GUI
 python main.py
+
+# 3. Or use the CLI
+python pdf_tool.py merge -i a.pdf b.pdf -o merged.pdf
+python pdf_tool.py info -i document.pdf
 ```
 
-### Windows Build
+### Build from Source
 
+**Windows** (one-file portable exe):
 ```bash
-# onefile mode — outputs a single PDFeverything.exe
 pyinstaller build_windows.spec --noconfirm --clean
+# → dist/PDFeverything.exe
 ```
 
-### macOS Build
-
+**macOS** (app bundle):
 ```bash
-# generates PDFeverything.app bundle
 pyinstaller PDFeverything.spec --noconfirm --clean
+# → dist/PDFeverything.app
 ```
 
-## Tech Stack
+## 🧱 Tech Stack
 
-Python • PyQt6 • PyMuPDF • pypdf • pikepdf • python-docx
+| Layer | Tech |
+|---|---|
+| 🖼️ GUI | **PyQt6** — native look on both macOS & Windows |
+| 🧠 PDF Engine | **PyMuPDF** + **pypdf** + **pikepdf** |
+| 📝 Office Converters | **AppleScript** (macOS, high-fidelity) / **python-docx** + **python-pptx** + **openpyxl** (fallback) |
+| 📦 Packaging | **PyInstaller** (onefile on Windows, app bundle on macOS) |
 
-## License
+## 📄 License
 
-MIT
+MIT — do whatever you want with it. [LICENSE](resources/LICENSE.txt)
