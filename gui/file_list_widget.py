@@ -109,35 +109,62 @@ class FileListWidget(QWidget):
 
     # ── Public API ────────────────────────────────────
 
+    MAX_FILES = 200          # hard limit
+    MAX_SIZE_BYTES = 500 * 1024 * 1024  # 500MB per file
+
     def add_files(self, paths: List[Path]) -> None:
         existing = set(self.get_file_paths())
-        added = 0
-        skipped_unsupported = 0
+        added, skipped_unsupported, skipped_large, skipped_empty = 0, 0, 0, 0
+        remaining = self.MAX_FILES - self.count()
+
         for p in paths:
             if p.is_dir():
                 continue
             if p.suffix.lower() not in SUPPORTED_EXTS:
                 skipped_unsupported += 1
                 continue
-            if p not in existing:
-                existing.add(p)
-                cat = get_file_category(p)
-                icon = FILE_ICONS.get(cat, "\U0001f4ce")
-                size = format_bytes(p.stat().st_size)
-                item = QListWidgetItem(f"{icon}  {p.name}  ({size})")
-                item.setData(Qt.ItemDataRole.UserRole, p)
-                item.setToolTip(str(p))
-                self.list_widget.addItem(item)
-                added += 1
+            if p in existing:
+                continue
+            try:
+                fsize = p.stat().st_size
+            except OSError:
+                continue
+            if fsize == 0:
+                skipped_empty += 1
+                continue
+            if fsize > self.MAX_SIZE_BYTES:
+                skipped_large += 1
+                continue
+            if remaining <= 0:
+                break
+
+            existing.add(p)
+            cat = get_file_category(p)
+            icon = FILE_ICONS.get(cat, "\U0001f4ce")
+            size = format_bytes(fsize)
+            item = QListWidgetItem(f"{icon}  {p.name}  ({size})")
+            item.setData(Qt.ItemDataRole.UserRole, p)
+            item.setToolTip(str(p))
+            self.list_widget.addItem(item)
+            added += 1
+            remaining -= 1
 
         if added > 0:
             self.files_changed.emit()
 
-        if skipped_unsupported > 0:
+        msgs = []
+        if skipped_unsupported:
+            msgs.append(f"{skipped_unsupported} unsupported format(s)")
+        if skipped_large:
+            msgs.append(f"{skipped_large} file(s) >500MB")
+        if skipped_empty:
+            msgs.append(f"{skipped_empty} empty file(s)")
+        if remaining <= 0 and added > 0:
+            msgs.append(f"List full (max {self.MAX_FILES} files)")
+        if msgs:
             QMessageBox.information(
                 self, tr("fl_msg_skip_title"),
-                tr("fl_msg_skip_body", count=skipped_unsupported),
-            )
+                "Skipped: " + ", ".join(msgs))
 
     def get_file_paths(self) -> List[Path]:
         paths = []

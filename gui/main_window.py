@@ -154,8 +154,6 @@ class MainWindow(QMainWindow):
         self.btn_decrypt.setText(tr("btn_decrypt"))
         self.btn_rotate.setText(tr("btn_rotate"))
         self.btn_info.setText(tr("btn_info"))
-        self.btn_images_pdf.setText(tr("btn_images_to_pdf"))
-        self.btn_word_pdf.setText(tr("btn_word_to_pdf"))
         self.btn_browse_out.setText(tr("btn_browse"))
         self.btn_cancel.setText(tr("btn_cancel"))
         self.label_output.setText(tr("label_output"))
@@ -202,14 +200,6 @@ class MainWindow(QMainWindow):
             "QPushButton:disabled { background-color: #aaa; }")
         self.btn_merge.clicked.connect(self._on_merge_clicked)
         mg_layout.addWidget(self.btn_merge)
-
-        self.btn_images_pdf = QPushButton(tr("btn_images_to_pdf"))
-        self.btn_images_pdf.clicked.connect(self._on_images_to_pdf)
-        mg_layout.addWidget(self.btn_images_pdf)
-
-        self.btn_word_pdf = QPushButton(tr("btn_word_to_pdf"))
-        self.btn_word_pdf.clicked.connect(self._on_word_to_pdf)
-        mg_layout.addWidget(self.btn_word_pdf)
 
         right_layout.addWidget(self.merge_group)
 
@@ -351,32 +341,21 @@ class MainWindow(QMainWindow):
         paths = self.file_list.get_file_paths()
         has_files = len(paths) > 0
         self.btn_merge.setEnabled(has_files)
+        # Show a hint about what's in the list, but always keep one button
         if has_files:
             cats = set(get_file_category(p) for p in paths)
-            if cats == {"pdf"}:
-                self.btn_merge.setText(tr("merge_pdf_files"))
+            if len(cats) > 1:
+                self.btn_merge.setText(f"🔀 {tr('merge_mixed_files')} ({len(paths)} files)")
+            elif cats == {"pdf"}:
+                self.btn_merge.setText(f"🔀 {tr('merge_pdf_files')} ({len(paths)} PDFs)")
             elif cats == {"image"}:
-                self.btn_merge.setText(tr("merge_image_files"))
+                self.btn_merge.setText(f"🔀 {tr('merge_image_files')} ({len(paths)} images)")
             elif cats == {"word"}:
-                self.btn_merge.setText(tr("merge_word_files"))
-            elif len(cats) > 1:
-                self.btn_merge.setText(tr("merge_mixed_files"))
+                self.btn_merge.setText(f"🔀 {tr('merge_word_files')} ({len(paths)} docs)")
             else:
-                self.btn_merge.setText(tr("merge_as_pdf"))
+                self.btn_merge.setText(f"🔀 {tr('merge_as_pdf')} ({len(paths)} files)")
         else:
             self.btn_merge.setText(tr("btn_merge_unified"))
-
-        images = filter_by_category(paths, "image")
-        self.btn_images_pdf.setEnabled(len(images) > 0)
-        if len(images) > 0:
-            self.btn_images_pdf.setText(
-                f"\U0001f5bc  ({len(images)}) → PDF")
-
-        words = filter_by_category(paths, "word")
-        self.btn_word_pdf.setEnabled(len(words) > 0)
-        if len(words) > 0:
-            self.btn_word_pdf.setText(
-                f"\U0001f4dd  ({len(words)}) → PDF")
 
     # ── Output path ──────────────────────────────────
 
@@ -415,7 +394,7 @@ class MainWindow(QMainWindow):
         self.progress_bar.setVisible(busy)
         self.btn_cancel.setVisible(busy)
         self.file_list.setEnabled(not busy)
-        for w in [self.btn_merge, self.btn_images_pdf, self.btn_word_pdf,
+        for w in [self.btn_merge,
                   self.btn_split, self.btn_compress, self.btn_watermark,
                   self.btn_encrypt, self.btn_decrypt, self.btn_rotate, self.btn_info]:
             w.setEnabled(not busy)
@@ -431,7 +410,13 @@ class MainWindow(QMainWindow):
         self.status_label.setText(tr("status_done"))
         self.progress_bar.setValue(100)
         if isinstance(result, dict):
-            if "failed" in result and result["failed"]:
+            if "results" in result:
+                info_text = f"Batch: {result['converted']} files\nOutput: {result['output']}\n"
+                for r in result["results"]:
+                    fname = Path(r).name if isinstance(r, str) else r
+                    info_text += f"  • {fname}\n"
+                QMessageBox.information(self, tr("status_done"), info_text)
+            elif "failed" in result and result["failed"]:
                 failed_list = "\n".join(
                     f"• {f['path']}: {f['reason']}" for f in result["failed"])
                 QMessageBox.warning(
@@ -491,6 +476,66 @@ class MainWindow(QMainWindow):
         else:
             self._run_worker(merge_mixed_files, paths, out)
 
+    def _run_batch(self, files, suffix, op_func, *extra_args, ext=".pdf"):
+        """Batch helper: process multiple files with same op to an output dir.
+        Asks for confirmation if >20 files, and caps at 200."""
+        MAX_BATCH = 200
+        CONFIRM_THRESHOLD = 20
+
+        if len(files) > MAX_BATCH:
+            reply = QMessageBox.question(
+                self, "Batch limit",
+                f"You selected {len(files)} files. Maximum batch size is {MAX_BATCH}.\n"
+                f"Only the first {MAX_BATCH} will be processed. Continue?",
+                QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel)
+            if reply != QMessageBox.StandardButton.Ok:
+                return
+            files = files[:MAX_BATCH]
+        elif len(files) > 1:
+            if len(files) > CONFIRM_THRESHOLD:
+                reply = QMessageBox.question(
+                    self, "Large batch",
+                    f"You are about to process {len(files)} files. This may take a while.\nContinue?",
+                    QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel)
+                if reply != QMessageBox.StandardButton.Ok:
+                    return
+
+        out_dir = self._get_batch_output_dir()
+        if not out_dir:
+            return
+
+        def batch_fn(progress_callback=None):
+            results = []
+            for i, fp in enumerate(files):
+                out = self._get_batch_output_path(fp, suffix, out_dir, ext)
+                if progress_callback:
+                    progress_callback(f"{suffix} ({i+1}/{len(files)}): {fp.name}",
+                                      int((i + 1) / len(files) * 100))
+                op_func(fp, out, *extra_args)
+                results.append(str(out))
+            return {"converted": len(results), "total_files": len(files),
+                    "failed": [], "output": str(out_dir), "results": results}
+
+        self._run_worker(batch_fn)
+
+    def _run_batch_with_dialog(self, files, suffix, dlg_cls, op_no_extra, *extra_args):
+        """Like _run_batch, but opens a dialog first for shared params."""
+        dlg = dlg_cls(self)
+        if not dlg.exec():
+            return
+        extra = list(extra_args)
+        if hasattr(dlg, 'get_password'):
+            extra.append(dlg.get_password())
+        if hasattr(dlg, 'get_angle'):
+            extra.extend([dlg.get_angle(), dlg.get_pages()])
+        if len(files) == 1:
+            out = self._get_output_path(f"{files[0].stem}_{suffix}.pdf")
+            if not out:
+                return
+            self._run_worker(op_no_extra, files[0], out, *extra)
+        else:
+            self._run_batch(files, suffix, op_no_extra, *extra)
+
     def _on_split_clicked(self):
         ip = self._pick_input_file()
         if not ip:
@@ -517,69 +562,90 @@ class MainWindow(QMainWindow):
             self._run_worker(PdfOperator.split, ip, out_dir, dlg.get_ranges())
 
     def _on_compress_clicked(self):
-        ip = self._pick_input_file()
-        if not ip:
+        files = self._pick_input_files()
+        if not files:
             return
         dlg = CompressDialog(self)
         if not dlg.exec():
             return
-        out = self._get_output_path(f"{ip.stem}_compressed.pdf")
-        if not out:
-            return
-        self._run_worker(PdfOperator.compress, ip, out)
+        if len(files) == 1:
+            out = self._get_output_path(f"{files[0].stem}_compressed.pdf")
+            if not out:
+                return
+            self._run_worker(PdfOperator.compress, files[0], out)
+        else:
+            self._run_batch(files, "compressed", PdfOperator.compress)
 
     def _on_watermark_clicked(self):
-        ip = self._pick_input_file()
-        if not ip:
+        files = self._pick_input_files()
+        if not files:
             return
         dlg = WatermarkDialog(self)
         if not dlg.exec():
             return
-        out = self._get_output_path(f"{ip.stem}_watermarked.pdf")
-        if not out:
-            return
         r = dlg.get_result()
         if r["type"] == "text":
-            self._run_worker(PdfOperator.text_watermark, ip, out,
-                             r["text"], r["font_size"], r["opacity"], r["rotation"])
+            wm_fn = PdfOperator.text_watermark
+            wm_args = [r["text"], r["font_size"], r["opacity"], r["rotation"]]
         else:
-            self._run_worker(PdfOperator.watermark, ip, r["watermark_path"], out)
+            wm_fn = PdfOperator.watermark
+            wm_args = [r["watermark_path"]]
+
+        if len(files) == 1:
+            out = self._get_output_path(f"{files[0].stem}_watermarked.pdf")
+            if not out:
+                return
+            self._run_worker(wm_fn, files[0], out, *wm_args)
+        else:
+            self._run_batch(files, "watermarked", wm_fn, *wm_args)
 
     def _on_encrypt_clicked(self):
-        ip = self._pick_input_file()
-        if not ip:
+        files = self._pick_input_files()
+        if not files:
             return
         dlg = EncryptDialog(self)
         if not dlg.exec():
             return
-        out = self._get_output_path(f"{ip.stem}_encrypted.pdf")
-        if not out:
-            return
-        self._run_worker(PdfOperator.encrypt, ip, out, dlg.get_password())
+        pw = dlg.get_password()
+        if len(files) == 1:
+            out = self._get_output_path(f"{files[0].stem}_encrypted.pdf")
+            if not out:
+                return
+            self._run_worker(PdfOperator.encrypt, files[0], out, pw)
+        else:
+            self._run_batch(files, "encrypted", PdfOperator.encrypt, pw)
 
     def _on_decrypt_clicked(self):
-        ip = self._pick_input_file()
-        if not ip:
+        files = self._pick_input_files()
+        if not files:
             return
         dlg = DecryptDialog(self)
         if not dlg.exec():
             return
-        out = self._get_output_path(f"{ip.stem}_decrypted.pdf")
-        if not out:
-            return
-        self._run_worker(PdfOperator.decrypt, ip, out, dlg.get_password())
+        pw = dlg.get_password()
+        if len(files) == 1:
+            out = self._get_output_path(f"{files[0].stem}_decrypted.pdf")
+            if not out:
+                return
+            self._run_worker(PdfOperator.decrypt, files[0], out, pw)
+        else:
+            self._run_batch(files, "decrypted", PdfOperator.decrypt, pw)
 
     def _on_rotate_clicked(self):
-        ip = self._pick_input_file()
-        if not ip:
+        files = self._pick_input_files()
+        if not files:
             return
         dlg = RotateDialog(self)
         if not dlg.exec():
             return
-        out = self._get_output_path(f"{ip.stem}_rotated.pdf")
-        if not out:
-            return
-        self._run_worker(PdfOperator.rotate, ip, out, dlg.get_angle(), dlg.get_pages())
+        angle, pages = dlg.get_angle(), dlg.get_pages()
+        if len(files) == 1:
+            out = self._get_output_path(f"{files[0].stem}_rotated.pdf")
+            if not out:
+                return
+            self._run_worker(PdfOperator.rotate, files[0], out, angle, pages)
+        else:
+            self._run_batch(files, "rotated", PdfOperator.rotate, angle, pages)
 
     def _on_info_clicked(self):
         ip = self._pick_input_file()
@@ -588,35 +654,48 @@ class MainWindow(QMainWindow):
         InfoDialog(PdfOperator.get_info(ip), self).exec()
 
     def _on_extract_text(self):
-        ip = self._pick_input_file()
-        if not ip:
+        files = self._pick_input_files()
+        if not files:
             return
-        out, _ = QFileDialog.getSaveFileName(
-            self, tr("dlg_save_text"), f"{ip.stem}.txt", tr("file_filter_text"))
-        if not out:
-            return
-        self._run_worker(PdfOperator.extract_text, ip, Path(out))
+        if len(files) == 1:
+            out, _ = QFileDialog.getSaveFileName(
+                self, tr("dlg_save_text"), f"{files[0].stem}.txt", tr("file_filter_text"))
+            if not out:
+                return
+            self._run_worker(PdfOperator.extract_text, files[0], Path(out))
+        else:
+            out_dir = self._get_batch_output_dir()
+            if not out_dir:
+                return
+            self._run_batch(files, "text", PdfOperator.extract_text, ext=".txt")
 
     def _on_extract_images(self):
-        ip = self._pick_input_file()
-        if not ip:
+        files = self._pick_input_files()
+        if not files:
             return
-        out_dir = QFileDialog.getExistingDirectory(
-            self, tr("dlg_select_output_dir"))
-        if not out_dir:
-            return
-        self._run_worker(PdfOperator.extract_images, ip, Path(out_dir))
+        if len(files) == 1:
+            out_dir = QFileDialog.getExistingDirectory(self, tr("dlg_select_output_dir"))
+            if not out_dir:
+                return
+            self._run_worker(PdfOperator.extract_images, files[0], Path(out_dir))
+        else:
+            out_dir = self._get_batch_output_dir()
+            if not out_dir:
+                return
+            self._run_batch(files, "images", PdfOperator.extract_images)
 
     def _on_pdf_to_images(self):
-        ip = self._pick_input_file()
-        if not ip:
-            return
-        out_dir = QFileDialog.getExistingDirectory(
-            self, tr("dlg_select_output_dir"))
-        if not out_dir:
+        files = self._pick_input_files()
+        if not files:
             return
         dpi = int(self._settings.value("dpi", 200))
-        self._run_worker(PdfOperator.to_images, ip, Path(out_dir), dpi)
+        if len(files) == 1:
+            out_dir = QFileDialog.getExistingDirectory(self, tr("dlg_select_output_dir"))
+            if not out_dir:
+                return
+            self._run_worker(PdfOperator.to_images, files[0], Path(out_dir), dpi)
+        else:
+            self._run_batch(files, "pages", PdfOperator.to_images, dpi)
 
     def _on_single_images_to_pdf(self):
         files, _ = QFileDialog.getOpenFileNames(
@@ -628,25 +707,36 @@ class MainWindow(QMainWindow):
             return
         self._run_worker(PdfOperator.from_images, [Path(f) for f in files], out)
 
-    def _on_images_to_pdf(self):
-        images = filter_by_category(self.file_list.get_file_paths(), "image")
-        if not images:
-            QMessageBox.warning(self, tr("msg_op_failed"), tr("msg_no_images"))
-            return
-        out = self._get_output_path(tr("default_images"))
-        if not out:
-            return
-        self._run_worker(PdfOperator.from_images, images, out)
+    def _pick_input_files(self) -> List[Path]:
+        """Get PDFs to process: from file list if available, else from dialog.
+        If user selected specific rows in the list, use only those.
+        Returns empty list if user cancelled."""
+        paths = self.file_list.get_file_paths()
+        pdfs = filter_by_category(paths, "pdf")
+        if pdfs:
+            return pdfs
+        # Fallback: multi-select file dialog
+        files, _ = QFileDialog.getOpenFileNames(
+            self, tr("dlg_select_pdf"), "", tr("file_filter_pdf"))
+        return [Path(f) for f in files] if files else []
 
-    def _on_word_to_pdf(self):
-        words = filter_by_category(self.file_list.get_file_paths(), "word")
-        if not words:
-            QMessageBox.warning(self, tr("msg_op_failed"), tr("msg_no_word"))
-            return
-        out = self._get_output_path(tr("default_word_merged"))
-        if not out:
-            return
-        self._run_worker(merge_mixed_files, words, out)
+    def _pick_input_file(self) -> Optional[Path]:
+        """Select a single PDF (prefer from list, else dialog)."""
+        files = self._pick_input_files()
+        return files[0] if files else None
+
+    def _get_batch_output_dir(self) -> Optional[Path]:
+        """Ask user to pick a directory for batch output."""
+        d = Path(self._settings.value(
+            "output_dir", str(Path.home() / "Desktop")))
+        path = QFileDialog.getExistingDirectory(
+            self, tr("dlg_select_output_dir"), str(d))
+        return Path(path) if path else None
+
+    def _get_batch_output_path(self, input_path: Path, suffix: str, out_dir: Path,
+                                ext: str = ".pdf") -> Path:
+        """Generate output path for a single file in a batch."""
+        return out_dir / f"{input_path.stem}_{suffix}{ext}"
 
     def _on_add_files_dialog(self):
         self.file_list._on_add_files()
@@ -661,38 +751,47 @@ class MainWindow(QMainWindow):
             self.output_path_edit.setText(path)
 
     def _on_to_word(self):
-        ip = self._pick_input_file()
-        if not ip:
+        files = self._pick_input_files()
+        if not files:
             return
-        out, _ = QFileDialog.getSaveFileName(
-            self, tr("dlg_save_text"), f"{ip.stem}.docx",
-            "Word (*.docx);;All files (*)")
-        if not out:
-            return
-        self._run_worker(PdfOperator.to_word, ip, Path(out))
+        if len(files) == 1:
+            out, _ = QFileDialog.getSaveFileName(
+                self, tr("dlg_save_text"), f"{files[0].stem}.docx",
+                "Word (*.docx);;All files (*)")
+            if not out:
+                return
+            self._run_worker(PdfOperator.to_word, files[0], Path(out))
+        else:
+            self._run_batch(files, "word", PdfOperator.to_word, ext=".docx")
 
     def _on_to_ppt(self):
-        ip = self._pick_input_file()
-        if not ip:
-            return
-        out, _ = QFileDialog.getSaveFileName(
-            self, tr("dlg_save_text"), f"{ip.stem}.pptx",
-            "PowerPoint (*.pptx);;All files (*)")
-        if not out:
+        files = self._pick_input_files()
+        if not files:
             return
         dpi = int(self._settings.value("dpi", 200))
-        self._run_worker(PdfOperator.to_ppt, ip, Path(out), dpi)
+        if len(files) == 1:
+            out, _ = QFileDialog.getSaveFileName(
+                self, tr("dlg_save_text"), f"{files[0].stem}.pptx",
+                "PowerPoint (*.pptx);;All files (*)")
+            if not out:
+                return
+            self._run_worker(PdfOperator.to_ppt, files[0], Path(out), dpi)
+        else:
+            self._run_batch(files, "ppt", PdfOperator.to_ppt, dpi, ext=".pptx")
 
     def _on_to_excel(self):
-        ip = self._pick_input_file()
-        if not ip:
+        files = self._pick_input_files()
+        if not files:
             return
-        out, _ = QFileDialog.getSaveFileName(
-            self, tr("dlg_save_text"), f"{ip.stem}.xlsx",
-            "Excel (*.xlsx);;All files (*)")
-        if not out:
-            return
-        self._run_worker(PdfOperator.to_excel, ip, Path(out))
+        if len(files) == 1:
+            out, _ = QFileDialog.getSaveFileName(
+                self, tr("dlg_save_text"), f"{files[0].stem}.xlsx",
+                "Excel (*.xlsx);;All files (*)")
+            if not out:
+                return
+            self._run_worker(PdfOperator.to_excel, files[0], Path(out))
+        else:
+            self._run_batch(files, "excel", PdfOperator.to_excel, ext=".xlsx")
 
     def _on_about(self):
         QMessageBox.about(self, tr("about_title"), tr("about_text"))
