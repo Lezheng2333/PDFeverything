@@ -433,3 +433,205 @@ class PdfOperator:
 
         doc.save(output_path, incremental=False)
         doc.close()
+
+    # ── 14. PDF → Word ───────────────────────────────
+
+    @staticmethod
+    def to_word(
+        input_path: Path,
+        output_path: Path,
+        progress_callback: Optional[Callable[[str, int], None]] = None,
+    ) -> int:
+        """Convert PDF to Word (.docx). Preserves text structure and tables.
+        Returns number of pages processed."""
+        import fitz
+        from docx import Document
+        from docx.shared import Pt, Inches
+
+        check_input(input_path)
+        doc_in = fitz.open(input_path)
+        doc_out = Document()
+        total = len(doc_in)
+
+        for pi in range(total):
+            page = doc_in[pi]
+            if progress_callback:
+                progress_callback(f"PDF→Word ({pi+1}/{total})", int((pi+1)/total*100))
+
+            # Heading = page label
+            doc_out.add_heading(f"Page {pi + 1}", level=1)
+
+            # Extract text blocks with positions → sort top-to-bottom
+            blocks = page.get_text("blocks")
+            blocks.sort(key=lambda b: (b[1], b[0]))  # sort by Y then X
+
+            for block in blocks:
+                x0, y0, x1, y1, text, block_type, block_no = block
+                text = text.strip()
+                if not text:
+                    continue
+
+                # Heuristic: larger font blocks are headings
+                if block_type == 0:  # text block
+                    # Check font size from first span
+                    spans = page.get_text("dict", clip=(x0, y0, x1, y1))
+                    font_size = 11
+                    for span_block in spans.get("blocks", []):
+                        for line in span_block.get("lines", []):
+                            for span in line.get("spans", []):
+                                font_size = span.get("size", 11)
+                                break
+                    if font_size >= 16:
+                        doc_out.add_heading(text, level=2)
+                    else:
+                        doc_out.add_paragraph(text)
+                elif block_type == 1:  # image block
+                    # Extract and embed the image
+                    try:
+                        pix = page.get_pixmap(clip=(x0, y0, x1, y1), dpi=150)
+                        import tempfile
+                        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                            pix.save(tmp.name)
+                            doc_out.add_picture(tmp.name, width=Inches(5))
+                            import os
+                            os.unlink(tmp.name)
+                    except Exception:
+                        pass
+
+            # Extract tables from page
+            try:
+                tables = page.find_tables()
+                if tables and len(tables.tables) > 0:
+                    for tab in tables.tables:
+                        header = tab.header
+                        data = header.explicit_outer + tab.extract()
+                        if not data:
+                            continue
+                        ncols = len(data[0]) if data else 1
+                        table = doc_out.add_table(rows=len(data), cols=ncols)
+                        table.style = "Table Grid"
+                        for ri, row_data in enumerate(data):
+                            for ci, cell_val in enumerate(row_data):
+                                if ci < ncols and cell_val is not None:
+                                    table.cell(ri, ci).text = str(cell_val)
+            except Exception:
+                pass  # table extraction is best-effort
+
+        doc_out.save(str(output_path))
+        doc_in.close()
+        return total
+
+    # ── 15. PDF → PPT ────────────────────────────────
+
+    @staticmethod
+    def to_ppt(
+        input_path: Path,
+        output_path: Path,
+        dpi: int = 200,
+        progress_callback: Optional[Callable[[str, int], None]] = None,
+    ) -> int:
+        """Convert PDF to PowerPoint (.pptx). Each PDF page becomes one slide
+        with the page rendered as a full-slide image."""
+        import fitz
+        from pptx import Presentation
+        from pptx.util import Inches as PptInches
+
+        check_input(input_path)
+        doc = fitz.open(input_path)
+        prs = Presentation()
+        prs.slide_width = PptInches(13.333)   # widescreen
+        prs.slide_height = PptInches(7.5)
+        total = len(doc)
+
+        for pi in range(total):
+            page = doc[pi]
+            if progress_callback:
+                progress_callback(f"PDF→PPT ({pi+1}/{total})", int((pi+1)/total*100))
+
+            # Render page to image
+            pix = page.get_pixmap(dpi=dpi)
+
+            # Save to temp file
+            import tempfile
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                pix.save(tmp.name)
+
+            # Create slide with full-slide image
+            slide_layout = prs.slide_layouts[6]  # blank layout
+            slide = prs.slides.add_slide(slide_layout)
+            slide.shapes.add_picture(
+                tmp.name,
+                PptInches(0), PptInches(0),
+                width=prs.slide_width, height=prs.slide_height,
+            )
+
+            import os
+            os.unlink(tmp.name)
+
+        prs.save(str(output_path))
+        doc.close()
+        return total
+
+    # ── 16. PDF → Excel ──────────────────────────────
+
+    @staticmethod
+    def to_excel(
+        input_path: Path,
+        output_path: Path,
+        progress_callback: Optional[Callable[[str, int], None]] = None,
+    ) -> int:
+        """Convert PDF tables to Excel (.xlsx). Each table found in the PDF
+        becomes a separate worksheet. Falls back to writing extracted text
+        if no tables are detected."""
+        import fitz
+        from openpyxl import Workbook
+
+        check_input(input_path)
+        doc = fitz.open(input_path)
+        wb = Workbook()
+        # Remove default sheet
+        wb.remove(wb.active)
+        total = len(doc)
+        sheet_count = 0
+
+        for pi in range(total):
+            page = doc[pi]
+            if progress_callback:
+                progress_callback(f"PDF→Excel ({pi+1}/{total})", int((pi+1)/total*100))
+
+            # Try table extraction
+            try:
+                tables = page.find_tables()
+                if tables and len(tables.tables) > 0:
+                    for ti, tab in enumerate(tables.tables):
+                        data = tab.header.explicit_outer + tab.extract()
+                        if not data:
+                            continue
+                        sheet_count += 1
+                        safe_title = f"Page{pi+1}_Tbl{ti+1}"[:31]
+                        ws = wb.create_sheet(title=safe_title)
+                        for ri, row_data in enumerate(data, start=1):
+                            for ci, cell_val in enumerate(row_data, start=1):
+                                if cell_val is not None:
+                                    ws.cell(row=ri, column=ci, value=str(cell_val))
+            except Exception:
+                pass
+
+            # Fallback: extract text if no tables found on this page
+            text = page.get_text().strip()
+            if text and (not tables or len(tables.tables) == 0):
+                sheet_count += 1
+                safe_title = f"Page{pi+1}_Text"[:31]
+                ws = wb.create_sheet(title=safe_title)
+                ws.cell(row=1, column=1, value=f"Page {pi+1} — extracted text")
+                for li, line in enumerate(text.split("\n"), start=2):
+                    ws.cell(row=li, column=1, value=line)
+
+        # If nothing at all was written
+        if sheet_count == 0:
+            ws = wb.create_sheet(title="Empty")
+            ws.cell(row=1, column=1, value="No tables or text found in the PDF.")
+
+        wb.save(str(output_path))
+        doc.close()
+        return sheet_count

@@ -22,6 +22,7 @@ CLI_COMMANDS = {
     "merge", "split", "extract-text", "extract-images",
     "to-images", "from-images", "compress", "watermark",
     "encrypt", "decrypt", "rotate", "info",
+    "to-word", "to-ppt", "to-excel",
 }
 
 HELP_TEXT = """PDFeverything — One-stop PDF processing tool
@@ -45,6 +46,9 @@ Commands:
     decrypt     -i <pdf>       -o <pdf> --password <pw>   Remove password
     rotate      -i <pdf>       -o <pdf> --angle <90|180|270>  Rotate pages
     info        -i <pdf>                      Show PDF metadata
+    to-word     -i <pdf>       -o <docx>       Convert PDF to Word
+    to-ppt      -i <pdf>       -o <pptx> [--dpi 200]  PDF to PowerPoint
+    to-excel    -i <pdf>       -o <xlsx>       Extract PDF tables to Excel
 
     -h, --help                                Show this help
     --version                                 Show version
@@ -53,6 +57,8 @@ Commands:
 Examples:
     PDFeverything.exe merge -i a.pdf b.pdf c.pdf -o merged.pdf
     PDFeverything.exe info -i document.pdf
+    PDFeverything.exe to-word -i report.pdf -o report.docx
+    PDFeverything.exe to-excel -i tables.pdf -o data.xlsx
     PDFeverything.exe --mcp                  # start AI agent tool server
 
 Note: On first run the self-extracting executable takes a few seconds to unpack.

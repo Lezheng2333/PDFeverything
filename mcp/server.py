@@ -312,6 +312,65 @@ TOOLS = [
             "required": ["input_files", "output"]
         }
     },
+    {
+        "name": "pdf_to_word",
+        "description": "Convert a PDF file to Microsoft Word (.docx) format. Preserves text structure, headings, and tables from the PDF.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "input": {
+                    "type": "string",
+                    "description": "Absolute path to the input PDF file"
+                },
+                "output": {
+                    "type": "string",
+                    "description": "Absolute path for the output .docx file"
+                }
+            },
+            "required": ["input", "output"]
+        }
+    },
+    {
+        "name": "pdf_to_ppt",
+        "description": "Convert a PDF file to Microsoft PowerPoint (.pptx) format. Each PDF page becomes one slide with the page rendered as a full-slide image.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "input": {
+                    "type": "string",
+                    "description": "Absolute path to the input PDF file"
+                },
+                "output": {
+                    "type": "string",
+                    "description": "Absolute path for the output .pptx file"
+                },
+                "dpi": {
+                    "type": "integer",
+                    "description": "Image resolution in DPI for rendering pages (default: 200)",
+                    "default": 200
+                }
+            },
+            "required": ["input", "output"]
+        }
+    },
+    {
+        "name": "pdf_to_excel",
+        "description": "Extract tables from a PDF into Microsoft Excel (.xlsx) format. Each table found becomes a separate worksheet. Falls back to extracted text if no tables are detected.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "input": {
+                    "type": "string",
+                    "description": "Absolute path to the input PDF file"
+                },
+                "output": {
+                    "type": "string",
+                    "description": "Absolute path for the output .xlsx file"
+                }
+            },
+            "required": ["input", "output"]
+        }
+    },
 ]
 
 
@@ -431,6 +490,31 @@ def _run_tool(name: str, args: dict) -> str:
                 "output": args["output"]
             })
 
+
+        elif name == "pdf_to_word":
+            pages = PdfOperator.to_word(Path(args["input"]), Path(args["output"]))
+            return json.dumps({
+                "success": True,
+                "pages": pages,
+                "output": args["output"]
+            })
+
+        elif name == "pdf_to_ppt":
+            dpi = args.get("dpi", 200)
+            pages = PdfOperator.to_ppt(Path(args["input"]), Path(args["output"]), dpi=dpi)
+            return json.dumps({
+                "success": True,
+                "pages": pages,
+                "output": args["output"]
+            })
+
+        elif name == "pdf_to_excel":
+            sheets = PdfOperator.to_excel(Path(args["input"]), Path(args["output"]))
+            return json.dumps({
+                "success": True,
+                "sheets": sheets,
+                "output": args["output"]
+            })
         elif name == "pdf_mixed_merge":
             paths = [Path(p) for p in args["input_files"]]
             result = merge_mixed_files(paths, Path(args["output"]))

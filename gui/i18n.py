@@ -52,6 +52,9 @@ T = {
     "tool_extract_images":    {"zh": "🖼️ PDF 提取图片",                             "en": "🖼️ Extract Images from PDF"},
     "tool_pdf_to_images":     {"zh": "🖼️ PDF → 图片",                               "en": "🖼️ PDF → Images"},
     "tool_images_to_pdf":     {"zh": "📄 图片 → PDF",                               "en": "📄 Images → PDF"},
+    "tool_to_word":           {"zh": "📝 PDF → Word",                               "en": "📝 PDF → Word"},
+    "tool_to_ppt":            {"zh": "📊 PDF → PowerPoint",                         "en": "📊 PDF → PowerPoint"},
+    "tool_to_excel":          {"zh": "📈 PDF → Excel",                              "en": "📈 PDF → Excel"},
 
     # ── Status bar ──
     "status_ready":           {"zh": "就绪",                                        "en": "Ready"},

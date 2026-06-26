@@ -165,7 +165,8 @@ class MainWindow(QMainWindow):
         # Tool buttons
         if self._tool_buttons:
             labels = ["tool_extract_text", "tool_extract_images",
-                      "tool_pdf_to_images", "tool_images_to_pdf"]
+                      "tool_pdf_to_images", "tool_images_to_pdf",
+                      "tool_to_word", "tool_to_ppt", "tool_to_excel"]
             for btn, key in zip(self._tool_buttons, labels):
                 btn.setText(tr(key))
         # Status
@@ -266,6 +267,9 @@ class MainWindow(QMainWindow):
             ("tool_extract_images", self._on_extract_images),
             ("tool_pdf_to_images", self._on_pdf_to_images),
             ("tool_images_to_pdf", self._on_single_images_to_pdf),
+            ("tool_to_word", self._on_to_word),
+            ("tool_to_ppt", self._on_to_ppt),
+            ("tool_to_excel", self._on_to_excel),
         ]
         self._tool_buttons = []
         for key, slot in tool_keys:
@@ -655,6 +659,40 @@ class MainWindow(QMainWindow):
             self, tr("dlg_save_pdf"), current, tr("file_filter_pdf"))
         if path:
             self.output_path_edit.setText(path)
+
+    def _on_to_word(self):
+        ip = self._pick_input_file()
+        if not ip:
+            return
+        out, _ = QFileDialog.getSaveFileName(
+            self, tr("dlg_save_text"), f"{ip.stem}.docx",
+            "Word (*.docx);;All files (*)")
+        if not out:
+            return
+        self._run_worker(PdfOperator.to_word, ip, Path(out))
+
+    def _on_to_ppt(self):
+        ip = self._pick_input_file()
+        if not ip:
+            return
+        out, _ = QFileDialog.getSaveFileName(
+            self, tr("dlg_save_text"), f"{ip.stem}.pptx",
+            "PowerPoint (*.pptx);;All files (*)")
+        if not out:
+            return
+        dpi = int(self._settings.value("dpi", 200))
+        self._run_worker(PdfOperator.to_ppt, ip, Path(out), dpi)
+
+    def _on_to_excel(self):
+        ip = self._pick_input_file()
+        if not ip:
+            return
+        out, _ = QFileDialog.getSaveFileName(
+            self, tr("dlg_save_text"), f"{ip.stem}.xlsx",
+            "Excel (*.xlsx);;All files (*)")
+        if not out:
+            return
+        self._run_worker(PdfOperator.to_excel, ip, Path(out))
 
     def _on_about(self):
         QMessageBox.about(self, tr("about_title"), tr("about_text"))

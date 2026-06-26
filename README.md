@@ -67,6 +67,9 @@ Every file goes through its own converter (AppleScript → Office on macOS, or p
 | 🖼️ **Images → PDF** | Turn a batch of images into a single PDF |
 | 📝 **Word → PDF** | Convert `.docx` / `.doc` files to PDF |
 | 📊 **PPT / Excel → PDF** | Convert `.pptx` and `.xlsx` files |
+| 📝 **PDF → Word** | Convert PDF to editable `.docx` |
+| 📊 **PDF → PowerPoint** | Convert PDF pages to `.pptx` slides |
+| 📈 **PDF → Excel** | Extract PDF tables to `.xlsx` |
 | 📄 **PDF → Images** | Export each PDF page as a PNG |
 | 📤 **Extract Text** | Pull out all text from a PDF |
 | 🖼️ **Extract Images** | Rip embedded images from a PDF |
@@ -116,7 +119,7 @@ Every file goes through its own converter (AppleScript → Office on macOS, or p
 
 ## 🤖 AI Agent Integration (MCP Server)
 
-PDFeverything comes with a built-in **Model Context Protocol (MCP)** server. Any AI agent (Claude Desktop, Claude Code, Cursor, etc.) can discover all 13 PDF tools and call them directly — **no Python, no install, just the app file**.
+PDFeverything comes with a built-in **Model Context Protocol (MCP)** server. Any AI agent (Claude Desktop, Claude Code, Cursor, etc.) can discover all 16 PDF tools and call them directly — **no Python, no install, just the app file**.
 
 ### How it works
 
@@ -171,7 +174,7 @@ Add to `.claude/settings.json` in your project:
 }
 ```
 
-### What the AI sees (13 tools)
+### What the AI sees (16 tools)
 
 Once connected, the agent automatically discovers these tools — no manual instruction needed:
 
@@ -184,6 +187,9 @@ Once connected, the agent automatically discovers these tools — no manual inst
 | `pdf_extract_images` | Extract embedded images |
 | `pdf_to_images` | Convert PDF pages to PNG |
 | `images_to_pdf` | Images → single PDF |
+| `pdf_to_word` | Convert PDF to Word (.docx) |
+| `pdf_to_ppt` | Convert PDF to PowerPoint (.pptx) |
+| `pdf_to_excel` | Extract PDF tables to Excel (.xlsx) |
 | `pdf_compress` | Reduce PDF file size |
 | `pdf_watermark` | Add text watermark |
 | `pdf_encrypt` | Set open password |
@@ -290,6 +296,9 @@ MIT — do whatever you want with it. [LICENSE](resources/LICENSE.txt)
 | 🖼️ **图片 → PDF** | 多张图片一键合成为 PDF |
 | 📝 **Word → PDF** | 转换 .docx / .doc 文件 |
 | 📊 **PPT / Excel → PDF** | 转换 .pptx / .xlsx 文件 |
+| 📝 **PDF → Word** | 将 PDF 转换为可编辑的 .docx |
+| 📊 **PDF → PowerPoint** | PDF 每页转为 .pptx 幻灯片 |
+| 📈 **PDF → Excel** | 提取 PDF 表格为 .xlsx |
 | 📄 **PDF → 图片** | 每页导出为 PNG |
 | 📤 **提取文字** | 提取 PDF 中所有文字 |
 | 🖼️ **提取图片** | 提取 PDF 中嵌入的图片 |
@@ -332,7 +341,7 @@ MIT — do whatever you want with it. [LICENSE](resources/LICENSE.txt)
 
 ### 🤖 AI Agent 集成（MCP 服务器）
 
-PDFeverything 内置了 **Model Context Protocol (MCP)** 服务器。任何 AI Agent（Claude Desktop、Claude Code、Cursor 等）都能自动发现全部 13 个 PDF 工具并直接调用——**无需安装 Python、无需额外依赖，只要有这个 app 文件就行**。
+PDFeverything 内置了 **Model Context Protocol (MCP)** 服务器。任何 AI Agent（Claude Desktop、Claude Code、Cursor 等）都能自动发现全部 16 个 PDF 工具并直接调用——**无需安装 Python、无需额外依赖，只要有这个 app 文件就行**。
 
 #### 同一个文件，三种模式
 
@@ -385,7 +394,7 @@ PDFeverything 内置了 **Model Context Protocol (MCP)** 服务器。任何 AI A
 }
 ```
 
-#### AI 能看到的 13 个工具
+#### AI 能看到的 16 个工具
 
 连接后 Agent 会自动发现这些工具——无需手动教它：
 
@@ -398,6 +407,9 @@ PDFeverything 内置了 **Model Context Protocol (MCP)** 服务器。任何 AI A
 | `pdf_extract_images` | 提取嵌入的图片 |
 | `pdf_to_images` | PDF 每页 → PNG |
 | `images_to_pdf` | 多张图片 → 一个 PDF |
+| `pdf_to_word` | PDF 转 Word (.docx) |
+| `pdf_to_ppt` | PDF 转 PowerPoint (.pptx) |
+| `pdf_to_excel` | 提取 PDF 表格为 Excel (.xlsx) |
 | `pdf_compress` | 压缩 PDF 体积 |
 | `pdf_watermark` | 添加文字水印 |
 | `pdf_encrypt` | 设置打开密码 |
@@ -453,7 +465,7 @@ pyinstaller PDFeverything.spec --noconfirm --clean
 | 🖼️ 界面 | **PyQt6** — macOS / Windows 原生体验 |
 | 🧠 PDF 引擎 | **PyMuPDF** + **pypdf** + **pikepdf** |
 | 📝 Office 转换 | **AppleScript** (macOS) / **COM** (Windows) / **python-docx** + **python-pptx** + **openpyxl** (备选) |
-| 🔌 AI 集成 | **MCP (Model Context Protocol)** — 13 个工具自动发现 |
+| 🔌 AI 集成 | **MCP (Model Context Protocol)** — 16 个工具自动发现 |
 | 📦 打包 | **PyInstaller** (Windows onefile / macOS app bundle) |
 
 ### 📄 许可证

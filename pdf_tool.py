@@ -2,20 +2,16 @@
 """
 PDFeverything — CLI 版本
 ========================
-功能：合并、拆分、提取文本/图片、转换格式、压缩、加水印/加密等。
+功能：合并、拆分、提取、格式互转、压缩、加水印/加密等。
 
 用法示例：
     python pdf_tool.py merge -i a.pdf b.pdf -o merged.pdf
     python pdf_tool.py split -i input.pdf -o out_dir/
     python pdf_tool.py extract-text -i input.pdf -o output.txt
-    python pdf_tool.py extract-images -i input.pdf -o images/
-    python pdf_tool.py to-images -i input.pdf -o images/ --dpi 200
     python pdf_tool.py compress -i input.pdf -o compressed.pdf
-    python pdf_tool.py watermark -i input.pdf -w watermark.pdf -o watermarked.pdf
-    python pdf_tool.py encrypt -i input.pdf -o encrypted.pdf --password secret
-    python pdf_tool.py decrypt -i input.pdf -o decrypted.pdf --password secret
-    python pdf_tool.py info -i input.pdf
-    python pdf_tool.py rotate -i input.pdf -o rotated.pdf --angle 90
+    python pdf_tool.py to-word -i input.pdf -o output.docx
+    python pdf_tool.py to-ppt -i input.pdf -o output.pptx
+    python pdf_tool.py to-excel -i input.pdf -o output.xlsx
 
 核心逻辑由 core.pdf_ops.PdfOperator 提供，CLI 和 GUI 共享同一实现。
 """
@@ -107,6 +103,22 @@ def main():
     p_rot.add_argument("--pages", type=int, nargs="*",
                        help="目标页码（默认全部）")
 
+    # --- to-word ---
+    p_tw = sub.add_parser("to-word", help="PDF 转 Word")
+    p_tw.add_argument("-i", "--input", required=True, help="输入 PDF 文件")
+    p_tw.add_argument("-o", "--output", required=True, help="输出 .docx 文件")
+
+    # --- to-ppt ---
+    p_tp = sub.add_parser("to-ppt", help="PDF 转 PowerPoint")
+    p_tp.add_argument("-i", "--input", required=True, help="输入 PDF 文件")
+    p_tp.add_argument("-o", "--output", required=True, help="输出 .pptx 文件")
+    p_tp.add_argument("--dpi", type=int, default=200, help="图片分辨率 (默认 200)")
+
+    # --- to-excel ---
+    p_te = sub.add_parser("to-excel", help="PDF 转 Excel（提取表格）")
+    p_te.add_argument("-i", "--input", required=True, help="输入 PDF 文件")
+    p_te.add_argument("-o", "--output", required=True, help="输出 .xlsx 文件")
+
     args = parser.parse_args()
 
     if not args.command:
@@ -174,6 +186,18 @@ def main():
             PdfOperator.rotate(Path(args.input), Path(args.output),
                                args.angle, args.pages)
             print(f"✅ 已旋转 → {args.output}")
+
+        elif args.command == "to-word":
+            pages = PdfOperator.to_word(Path(args.input), Path(args.output))
+            print(f"✅ 已转换 {pages} 页 → {args.output}")
+
+        elif args.command == "to-ppt":
+            pages = PdfOperator.to_ppt(Path(args.input), Path(args.output), dpi=args.dpi)
+            print(f"✅ 已转换 {pages} 页 → {args.output}")
+
+        elif args.command == "to-excel":
+            sheets = PdfOperator.to_excel(Path(args.input), Path(args.output))
+            print(f"✅ 已提取 {sheets} 个工作表 → {args.output}")
 
     except Exception as e:
         sys.exit(f"❌ 错误: {e}")
