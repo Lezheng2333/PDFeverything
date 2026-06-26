@@ -114,20 +114,100 @@ Every file goes through its own converter (AppleScript → Office on macOS, or p
 - 🧠 **Smart buttons** — the UI adapts to what's in your file list
 - 🌐 **Bilingual UI** — switch between Chinese and English (Settings > Language)
 
-## 🤖 CLI Mode (for AI Agents)
+## 🤖 AI Agent Integration (MCP Server)
 
-The compiled executable works as a **headless CLI tool** — no Python, no GUI, no dependencies:
+PDFeverything comes with a built-in **Model Context Protocol (MCP)** server. Any AI agent (Claude Desktop, Claude Code, Cursor, etc.) can discover all 13 PDF tools and call them directly — **no Python, no install, just the app file**.
 
-```bash
-# AI agents can call these commands directly:
-PDFeverything.exe merge -i a.pdf b.pdf -o merged.pdf
-PDFeverything.exe info -i document.pdf
-PDFeverything.exe compress -i big.pdf -o small.pdf
-PDFeverything.exe -h          # full help
-PDFeverything.exe --version   # 1.1.0
+### How it works
+
+The same `.exe` / `.app` binary supports three modes:
+
+| Mode | macOS | Windows |
+|---|---|---|
+| 🖥️ **GUI** | double-click `.app` | double-click `.exe` |
+| ⌨️ **CLI** | ``/path/to/PDFeverything.app/Contents/MacOS/PDFeverything merge -i a.pdf -o out.pdf`` | `PDFeverything.exe merge -i a.pdf b.pdf -o out.pdf` |
+| 🔌 **MCP** | ``/path/to/PDFeverything.app/Contents/MacOS/PDFeverything --mcp`` | `PDFeverything.exe --mcp` |
+
+### Setup — Claude Desktop
+
+Add to `~/.claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "pdfeverything": {
+      "command": "/Applications/PDFeverything.app/Contents/MacOS/PDFeverything",
+      "args": ["--mcp"]
+    }
+  }
+}
 ```
 
-Any AI agent (Claude, ChatGPT, local automation scripts) can drive PDFeverything without installing anything — just the one `.exe` or `.app` file.
+**Windows:**
+```json
+{
+  "mcpServers": {
+    "pdfeverything": {
+      "command": "C:\\Program Files\\PDFeverything\\PDFeverything.exe",
+      "args": ["--mcp"]
+    }
+  }
+}
+```
+
+### Setup — Claude Code
+
+Add to `.claude/settings.json` in your project:
+
+```json
+{
+  "mcpServers": {
+    "pdfeverything": {
+      "type": "stdio",
+      "command": "/Applications/PDFeverything.app/Contents/MacOS/PDFeverything",
+      "args": ["--mcp"]
+    }
+  }
+}
+```
+
+### What the AI sees (13 tools)
+
+Once connected, the agent automatically discovers these tools — no manual instruction needed:
+
+| Tool | Description |
+|---|---|
+| `pdf_merge` | Merge multiple PDFs into one |
+| `pdf_split` | Split PDF by pages or ranges |
+| `pdf_info` | Get metadata (pages, size, author, etc.) |
+| `pdf_extract_text` | Extract all text from PDF |
+| `pdf_extract_images` | Extract embedded images |
+| `pdf_to_images` | Convert PDF pages to PNG |
+| `images_to_pdf` | Images → single PDF |
+| `pdf_compress` | Reduce PDF file size |
+| `pdf_watermark` | Add text watermark |
+| `pdf_encrypt` | Set open password |
+| `pdf_decrypt` | Remove password |
+| `pdf_rotate` | Rotate pages 90/180/270° |
+| `pdf_mixed_merge` | 🔥 Mixed files → unified PDF |
+
+### Direct CLI mode (no MCP needed)
+
+AI agents can also call the binary directly:
+
+```bash
+# macOS
+/Applications/PDFeverything.app/Contents/MacOS/PDFeverything merge -i a.pdf b.pdf -o out.pdf
+/Applications/PDFeverything.app/Contents/MacOS/PDFeverything info -i doc.pdf
+/Applications/PDFeverything.app/Contents/MacOS/PDFeverything -h
+
+# Windows
+PDFeverything.exe merge -i a.pdf b.pdf -o out.pdf
+PDFeverything.exe info -i doc.pdf
+PDFeverything.exe -h
+```
+
+> 💡 **The `.app` and `.exe` are the SAME single binary.** Give it CLI args → headless mode. Give it `--mcp` → MCP server. No args → GUI. One file, three personalities.
 
 ## 🚀 Quick Start (for Developers)
 
@@ -141,6 +221,9 @@ python main.py
 # 3. Or use the CLI
 python pdf_tool.py merge -i a.pdf b.pdf -o merged.pdf
 python pdf_tool.py info -i document.pdf
+
+# 4. Or start the MCP server
+python mcp/server.py
 ```
 
 ### Build from Source
