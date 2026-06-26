@@ -56,6 +56,19 @@ T = {
     "tool_to_ppt":            {"zh": "📊 PDF → PowerPoint",                         "en": "📊 PDF → PowerPoint"},
     "tool_to_excel":          {"zh": "📈 PDF → Excel",                              "en": "📈 PDF → Excel"},
 
+    # ── Reader tab ──
+    "tab_reader":             {"zh": "📖 阅读",                                      "en": "📖 Reader"},
+    "reader_prev":            {"zh": "上一页 (←)",                                   "en": "Previous page (←)"},
+    "reader_next":            {"zh": "下一页 (→)",                                   "en": "Next page (→)"},
+    "reader_fit_width":       {"zh": "适应宽度",                                      "en": "Fit Width"},
+    "reader_fit_page":        {"zh": "适应页面",                                      "en": "Fit Page"},
+    "reader_zoom_tip":        {"zh": "缩放级别",                                      "en": "Zoom level"},
+    "reader_welcome":         {"zh": "打开 PDF 开始阅读",                              "en": "Open a PDF to start reading"},
+    "reader_cannot_open":     {"zh": "无法打开: {}",                                  "en": "Cannot open: {}"},
+    "reader_encrypted":       {"zh": "此 PDF 受密码保护",                               "en": "This PDF is password-protected"},
+    "reader_open_pdf":        {"zh": "打开 PDF...",                                  "en": "Open PDF..."},
+    "reader_file_filter":     {"zh": "PDF 文件 (*.pdf);;所有文件 (*)",                "en": "PDF files (*.pdf);;All files (*)"},
+
     # ── Status bar ──
     "status_ready":           {"zh": "就绪",                                        "en": "Ready"},
     "status_done":            {"zh": "✅ 完成",                                      "en": "✅ Done"},

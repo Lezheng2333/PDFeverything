@@ -43,6 +43,7 @@ from .dialogs import (
 )
 from .file_list_widget import FileListWidget
 from .i18n import tr, set_language, current_language
+from .pdf_reader_widget import PdfReaderWidget
 from .workers import BaseWorker
 
 
@@ -70,6 +71,7 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
         self._init_merge_tab()
         self._init_tools_tab()
+        self._init_reader_tab()
         main_layout.addWidget(self.tabs)
 
         self._init_status_bar(main_layout)
@@ -84,6 +86,9 @@ class MainWindow(QMainWindow):
             tr("menu_add_files"), "Ctrl+O", self._on_add_files_dialog)
         self.act_clear = self.menu_file.addAction(
             tr("menu_clear_list"), "Ctrl+Shift+N", self.file_list.clear)
+        self.menu_file.addSeparator()
+        self.act_open_reader = self.menu_file.addAction(
+            tr("reader_open_pdf"), "Ctrl+P", self._open_pdf_in_reader)
         self.menu_file.addSeparator()
         self.act_quit = self.menu_file.addAction(
             tr("menu_quit"), "Ctrl+Q", self.close)
@@ -129,6 +134,7 @@ class MainWindow(QMainWindow):
         self.menu_file.setTitle(tr("menu_file"))
         self.act_add.setText(tr("menu_add_files"))
         self.act_clear.setText(tr("menu_clear_list"))
+        self.act_open_reader.setText(tr("reader_open_pdf"))
         self.act_quit.setText(tr("menu_quit"))
         self.menu_op.setTitle(tr("menu_operations"))
         self.act_split.setText(tr("btn_split"))
@@ -160,6 +166,13 @@ class MainWindow(QMainWindow):
         # Tab names
         self.tabs.setTabText(0, tr("tab_merge"))
         self.tabs.setTabText(1, tr("tab_tools"))
+        self.tabs.setTabText(2, tr("tab_reader"))
+        # Reader toolbar
+        self.reader.btn_prev.setToolTip(tr("reader_prev"))
+        self.reader.btn_next.setToolTip(tr("reader_next"))
+        self.reader.btn_fit_width.setText(tr("reader_fit_width"))
+        self.reader.btn_fit_page.setText(tr("reader_fit_page"))
+        self.reader.zoom_combo.setToolTip(tr("reader_zoom_tip"))
         # Tool buttons
         if self._tool_buttons:
             labels = ["tool_extract_text", "tool_extract_images",
@@ -182,6 +195,8 @@ class MainWindow(QMainWindow):
 
         self.file_list = FileListWidget()
         self.file_list.files_changed.connect(self._update_button_states)
+        self.file_list.list_widget.itemDoubleClicked.connect(
+            self._on_file_list_double_click)
         splitter.addWidget(self.file_list)
 
         right = QWidget()
@@ -275,6 +290,29 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.office_status_label)
 
         self.tabs.addTab(tab, tr("tab_tools"))
+
+    def _init_reader_tab(self):
+        """Tab 3: PDF reader."""
+        self.reader = PdfReaderWidget()
+        self.tabs.addTab(self.reader, tr("tab_reader"))
+
+    def _open_pdf_in_reader(self, path: Path = None) -> None:
+        """Open a PDF in the reader tab. If path is None, show file dialog."""
+        if path is None:
+            from PyQt6.QtWidgets import QFileDialog
+            path_str, _ = QFileDialog.getOpenFileName(
+                self, tr("reader_open_pdf"), "", tr("reader_file_filter"))
+            if not path_str:
+                return
+            path = Path(path_str)
+        self.reader.open_pdf(path)
+        self.tabs.setCurrentIndex(2)  # switch to reader tab
+
+    def _on_file_list_double_click(self, item) -> None:
+        """Double-click a file in the list → open in reader tab."""
+        path = item.data(Qt.ItemDataRole.UserRole)
+        if path and path.suffix.lower() == ".pdf":
+            self._open_pdf_in_reader(path)
 
     def _init_status_bar(self, parent_layout):
         status_widget = QWidget()
