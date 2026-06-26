@@ -330,19 +330,98 @@ MIT — do whatever you want with it. [LICENSE](resources/LICENSE.txt)
 - ⚡ **多线程**处理 — 界面永不卡顿，实时进度条
 - 🧠 **智能按钮** — 根据文件列表内容自动变化
 
-### 🤖 命令行模式（供 AI Agent 调用）
+### 🤖 AI Agent 集成（MCP 服务器）
 
-编译好的 exe/app 可以直接作为**无头命令行工具**使用 — 无需安装 Python 或任何依赖：
+PDFeverything 内置了 **Model Context Protocol (MCP)** 服务器。任何 AI Agent（Claude Desktop、Claude Code、Cursor 等）都能自动发现全部 13 个 PDF 工具并直接调用——**无需安装 Python、无需额外依赖，只要有这个 app 文件就行**。
 
-```bash
-PDFeverything.exe merge -i a.pdf b.pdf -o merged.pdf
-PDFeverything.exe info -i document.pdf
-PDFeverything.exe compress -i big.pdf -o small.pdf
-PDFeverything.exe -h          # 查看完整帮助
-PDFeverything.exe --version   # v1.1.0
+#### 同一个文件，三种模式
+
+| 模式 | macOS | Windows |
+|---|---|---|
+| 🖥️ **GUI** | 双击 `.app` | 双击 `.exe` |
+| ⌨️ **命令行** | ``/Applications/PDFeverything.app/Contents/MacOS/PDFeverything merge -i a.pdf -o out.pdf`` | `PDFeverything.exe merge -i a.pdf b.pdf -o out.pdf` |
+| 🔌 **MCP** | ``/Applications/PDFeverything.app/Contents/MacOS/PDFeverything --mcp`` | `PDFeverything.exe --mcp` |
+
+#### 配置 Claude Desktop
+
+在 `~/.claude/claude_desktop_config.json` 中添加：
+
+```json
+{
+  "mcpServers": {
+    "pdfeverything": {
+      "command": "/Applications/PDFeverything.app/Contents/MacOS/PDFeverything",
+      "args": ["--mcp"]
+    }
+  }
+}
 ```
 
-任何 AI Agent（Claude、ChatGPT、自动化脚本）都能直接调用 PDFeverything，无需安装任何东西。
+**Windows：**
+```json
+{
+  "mcpServers": {
+    "pdfeverything": {
+      "command": "C:\\Program Files\\PDFeverything\\PDFeverything.exe",
+      "args": ["--mcp"]
+    }
+  }
+}
+```
+
+#### 配置 Claude Code
+
+在项目下的 `.claude/settings.json` 中添加：
+
+```json
+{
+  "mcpServers": {
+    "pdfeverything": {
+      "type": "stdio",
+      "command": "/Applications/PDFeverything.app/Contents/MacOS/PDFeverything",
+      "args": ["--mcp"]
+    }
+  }
+}
+```
+
+#### AI 能看到的 13 个工具
+
+连接后 Agent 会自动发现这些工具——无需手动教它：
+
+| 工具 | 说明 |
+|---|---|
+| `pdf_merge` | 合并多个 PDF |
+| `pdf_split` | 按页或范围拆分 |
+| `pdf_info` | 查看元数据（页数、大小、作者等） |
+| `pdf_extract_text` | 提取全部文字 |
+| `pdf_extract_images` | 提取嵌入的图片 |
+| `pdf_to_images` | PDF 每页 → PNG |
+| `images_to_pdf` | 多张图片 → 一个 PDF |
+| `pdf_compress` | 压缩 PDF 体积 |
+| `pdf_watermark` | 添加文字水印 |
+| `pdf_encrypt` | 设置打开密码 |
+| `pdf_decrypt` | 移除密码 |
+| `pdf_rotate` | 旋转页面 90/180/270° |
+| `pdf_mixed_merge` | 🔥 混合文件 → 统一 PDF |
+
+#### 直接 CLI 调用（无需 MCP）
+
+AI Agent 也可以直接调用二进制：
+
+```bash
+# macOS
+/Applications/PDFeverything.app/Contents/MacOS/PDFeverything merge -i a.pdf b.pdf -o out.pdf
+/Applications/PDFeverything.app/Contents/MacOS/PDFeverything info -i doc.pdf
+/Applications/PDFeverything.app/Contents/MacOS/PDFeverything -h
+
+# Windows
+PDFeverything.exe merge -i a.pdf b.pdf -o out.pdf
+PDFeverything.exe info -i doc.pdf
+PDFeverything.exe -h
+```
+
+> 💡 **`.app` 和 `.exe` 就是同一个二进制文件。** 给参数 → 命令行模式。给 `--mcp` → MCP 服务器。不给参数 → GUI。一个文件，三种用法。
 
 ### 🚀 开发者快速开始
 
@@ -374,6 +453,7 @@ pyinstaller PDFeverything.spec --noconfirm --clean
 | 🖼️ 界面 | **PyQt6** — macOS / Windows 原生体验 |
 | 🧠 PDF 引擎 | **PyMuPDF** + **pypdf** + **pikepdf** |
 | 📝 Office 转换 | **AppleScript** (macOS) / **COM** (Windows) / **python-docx** + **python-pptx** + **openpyxl** (备选) |
+| 🔌 AI 集成 | **MCP (Model Context Protocol)** — 13 个工具自动发现 |
 | 📦 打包 | **PyInstaller** (Windows onefile / macOS app bundle) |
 
 ### 📄 许可证
