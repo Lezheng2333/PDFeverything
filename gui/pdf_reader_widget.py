@@ -351,7 +351,7 @@ class PdfReaderWidget(QWidget):
 
     def _sharp_render(self):
         """Deferred real rendering: only re-render cache-missed pages at current zoom."""
-        if not self.doc or not self._labels or not hasattr(self, '_pending_zoom_pct'):
+        if not self.doc or not self._labels or self._pending_zoom_pct is None:
             return
         try:
             pct = self._pending_zoom_pct; self._zoom_mode = pct / 100.0
@@ -510,43 +510,60 @@ class PdfReaderWidget(QWidget):
 
     def _do_throttle_page(self):
         """Rough page estimate via division — fast, <1μs, updates UI immediately."""
-        if not self.doc or not self._page_heights or not self._total_pages:
-            return
-        sb = self.scroll_area.verticalScrollBar()
-        scroll_y = sb.value()
-        # Average page height from container
-        total_h = self.page_container.height()
-        if total_h <= 0: return
-        avg_h = total_h / self._total_pages
-        rough = max(0, min(self._total_pages - 1, int(scroll_y / avg_h)))
-        if rough != self._current_page:
-            self._current_page = rough
-            self._update_nav_ui()
+        try:
+            if not self.doc or not self._page_heights or not self._total_pages:
+                return
+            sb = self.scroll_area.verticalScrollBar()
+            if not sb: return
+            scroll_y = sb.value()
+            total_h = self.page_container.height()
+            if total_h <= 0: return
+            avg_h = total_h / self._total_pages
+            rough = max(0, min(self._total_pages - 1, int(scroll_y / avg_h)))
+            if rough != self._current_page:
+                self._current_page = rough
+                self._update_nav_ui()
+        except Exception:
+            pass
 
     def _do_debounce_calibration(self):
         """Precise calibration via bisect on _page_heights — O(log n)."""
-        if not self.doc or not self._page_heights:
-            return
-        sb = self.scroll_area.verticalScrollBar()
-        mid = max(0, sb.value() + sb.pageStep() // 2)
-        idx = bisect_right(self._page_heights, mid) - 1
-        if idx < 0: idx = 0
-        elif idx >= len(self._page_heights): idx = len(self._page_heights) - 1
-        if idx != self._current_page:
-            self._current_page = idx
-            self._update_nav_ui()
-            # Prefetch neighbors
-            self._prefetch_around(idx)
+        try:
+            if not self.doc or not self._page_heights:
+                return
+            sb = self.scroll_area.verticalScrollBar()
+            if not sb: return
+            mid = max(0, sb.value() + sb.pageStep() // 2)
+            idx = bisect_right(self._page_heights, mid) - 1
+            if idx < 0: idx = 0
+            elif idx >= len(self._page_heights): idx = len(self._page_heights) - 1
+            if idx != self._current_page:
+                self._current_page = idx
+                self._update_nav_ui()
+                self._prefetch_around(idx)
+        except Exception:
+            pass
 
     def _prefetch_around(self, page_idx: int):
-        """Low-priority prefetch of N-1 and N+1 pages after scroll stops."""
+        """Low-priority prefetch of N-1 and N+1 pages after scroll stops.
+        Uses a single-shot timer that re-validates self.doc before executing."""
         if not self.doc: return
         vw, vh = self._viewport_size()
         for pi in (page_idx - 1, page_idx + 1):
             if 0 <= pi < self._total_pages:
                 key = (pi, self._zoom_key(vw, vh))
                 if key not in PdfReaderWidget._cache:
-                    QTimer.singleShot(500, lambda p=pi: self._get_or_render(p, vw, vh))
+                    # Deferred prefetch — validates doc is still alive before rendering
+                    QTimer.singleShot(300, lambda p=pi, w=vw, h=vh: self._safe_prefetch(p, w, h))
+
+    def _safe_prefetch(self, pi, vw, vh):
+        """Prefetch guard: only render if doc and labels still alive."""
+        if not self.doc or not self._labels or pi >= len(self._labels):
+            return
+        try:
+            self._get_or_render(pi, vw, vh)
+        except Exception:
+            pass
 
     # ═══════════ Render ═══════════
 
@@ -732,33 +749,34 @@ class PdfReaderWidget(QWidget):
     # ═══════════ Touchpad pinch ═══════════
 
     def wheelEvent(self, e):
-        if self._view_mode != ViewMode.SCROLL:
+        if not self.doc or self._view_mode != ViewMode.SCROLL:
             super().wheelEvent(e); return
-        ad = e.angleDelta().y() if e.angleDelta() else 0
-        pd = e.pixelDelta().y() if e.pixelDelta() else 0
-        pinch = bool(e.modifiers() & Qt.KeyboardModifier.ControlModifier)
-        if not pinch:
-            try: ph = e.phase(); pinch = (int(ph) >= 1)
-            except (AttributeError, TypeError): pass
-        if not pinch and pd and ad:
-            if abs(ad) > abs(pd) * 1.5: pinch = True
-        if pinch:
-            self._pinch_acc += ad
-            threshold = 120
-            if abs(self._pinch_acc) >= threshold:
-                ticks = int(abs(self._pinch_acc) // threshold)
-                ticks = ticks if self._pinch_acc > 0 else -ticks
-                self._pinch_acc %= threshold
-                # Continuous pinch: instant scale only, no deferred render
-                self._set_zoom_pct(self._current_zoom_pct() + ticks * 5,
-                                   skip_deferred=True)
-            # On gesture end, trigger sharp render for the final zoom level
-            try:
-                if e.phase() and int(e.phase()) == 3:  # Qt.ScrollPhase.ScrollEnd = 3
-                    self._pending_zoom_pct = self._current_zoom_pct()
-                    QTimer.singleShot(180, self._sharp_render)
-            except (AttributeError, TypeError): pass
-        else:
+        try:
+            ad = e.angleDelta().y() if e.angleDelta() else 0
+            pd = e.pixelDelta().y() if e.pixelDelta() else 0
+            pinch = bool(e.modifiers() & Qt.KeyboardModifier.ControlModifier)
+            if not pinch:
+                try: ph = e.phase(); pinch = (int(ph) >= 1)
+                except (AttributeError, TypeError): pass
+            if not pinch and pd and ad:
+                if abs(ad) > abs(pd) * 1.5: pinch = True
+            if pinch:
+                self._pinch_acc += ad
+                threshold = 120
+                if abs(self._pinch_acc) >= threshold:
+                    ticks = int(abs(self._pinch_acc) // threshold)
+                    ticks = ticks if self._pinch_acc > 0 else -ticks
+                    self._pinch_acc %= threshold
+                    self._set_zoom_pct(self._current_zoom_pct() + ticks * 5,
+                                       skip_deferred=True)
+                try:
+                    if e.phase() and int(e.phase()) == 3:
+                        self._pending_zoom_pct = self._current_zoom_pct()
+                        QTimer.singleShot(180, self._sharp_render)
+                except (AttributeError, TypeError): pass
+            else:
+                super().wheelEvent(e)
+        except Exception:
             super().wheelEvent(e)
 
     def resizeEvent(self, e):
