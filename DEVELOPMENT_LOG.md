@@ -210,3 +210,17 @@ Ver 1.3.0 | 2026-06-26 — PDF 阅读器
     - BUGFIX: 页码不更新 — 二分查找替换逐页遍历
     - BUGFIX: 网格模式双击无效 — _on_grid_dbl_click 检查 view_mode==GRID
     - BUGFIX: 缩放过慢 — smooth 即时缩放 + real render 防抖
+
+  Ver 1.3.6 | 阅读器 v6 — 多分辨率缓存 + bisect 页码追踪 + 欢迎页 overlay
+    - 缩放性能重写：移除所有 PdfReaderWidget._cache.clear() 调用
+      · 多分辨率缓存：不同 zoom_key 的页面共存于 dict 中
+      · zoom 切换时只渲染缓存未命中的页面，已缓存直接复用
+      · 缓存上限 3000 entries LRU
+    - 页码追踪：bisect_right（Python C 级实现）在 _page_heights 排序数组上二分查找
+      · 100ms timer，O(log n)，379 页查找 <1μs
+    - 欢迎页重写：作为 self 的子 widget 覆盖在 scroll_area 上方
+      · showEvent 触发显示，不受 viewport 尺寸影响
+      · _destroy_welcome 确保关闭 PDF 时清理
+    - 关闭 PDF：page_container.setFixedSize(0,0) 彻底移除滚动条
+    - 缩放步长：+/- 按钮 5%，触控板 pinch 每 120 angle units = 5%
+    - fit_width/fit_height 不再清空缓存
