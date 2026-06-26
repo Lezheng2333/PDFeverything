@@ -66,16 +66,38 @@ Subsequent runs in the same session are instant.
 """
 
 
+PROJECT_DIR = Path(__file__).parent.resolve()
+
+
 def launch_mcp():
     """Launch the MCP server for AI agent integration."""
     from mcp.server import serve
     serve()
 
 
+def _app_icon_path():
+    """Find the app icon .png (bundled in app or in source tree)."""
+    candidates = [
+        PROJECT_DIR / "resources" / "app_icon.png",
+    ]
+    if getattr(sys, "frozen", False):
+        candidates.append(Path(sys.executable).parent / ".." / "Resources" / "app_icon.png")
+        if hasattr(sys, "_MEIPASS"):
+            candidates.append(Path(sys._MEIPASS) / "resources" / "app_icon.png")
+    for p in candidates:
+        if p and p.exists():
+            return str(p)
+    return ""
+
+
 def launch_gui():
     from PyQt6.QtWidgets import QApplication
+    from PyQt6.QtGui import QIcon
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
+    icon_path = _app_icon_path()
+    if icon_path:
+        app.setWindowIcon(QIcon(icon_path))
     app.setOrganizationName("PDFeverything")
     app.setApplicationName("PDFeverything")
     from gui.main_window import MainWindow
@@ -89,7 +111,7 @@ def main():
         print(HELP_TEXT)
         return
     if len(sys.argv) > 1 and sys.argv[1] in ("-v", "--version"):
-        print("PDFeverything v1.1.0")
+        print("PDFeverything v1.2.0")
         return
     if len(sys.argv) > 1 and sys.argv[1] == "--mcp":
         launch_mcp()

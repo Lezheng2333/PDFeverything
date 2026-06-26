@@ -18,6 +18,9 @@ for mod in ('fitz', 'PIL'):
     except Exception:
         pass
 
+# Bundle app icon for Dock display
+datas.append((str(PROJECT_ROOT / 'resources' / 'app_icon.png'), 'resources'))
+
 # ── 隐藏导入 ─────────────────────────────────────────────
 
 hiddenimports = [
@@ -128,8 +131,8 @@ app = BUNDLE(
         "NSHighResolutionCapable": True,
         "CFBundleName": "PDFeverything",
         "CFBundleDisplayName": "PDFeverything",
-        "CFBundleShortVersionString": "1.1.0",
-        "CFBundleVersion": "1.1.0",
+        "CFBundleShortVersionString": "1.2.0",
+        "CFBundleVersion": "1.2.0",
         "CFBundleDocumentTypes": [
             {
                 "CFBundleTypeName": "PDF Document",
