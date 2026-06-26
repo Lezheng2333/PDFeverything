@@ -224,3 +224,15 @@ Ver 1.3.0 | 2026-06-26 — PDF 阅读器
     - 关闭 PDF：page_container.setFixedSize(0,0) 彻底移除滚动条
     - 缩放步长：+/- 按钮 5%，触控板 pinch 每 120 angle units = 5%
     - fit_width/fit_height 不再清空缓存
+
+  Ver 1.3.7 | 二阶段缩放完整实现 + 整数缓存键 + 捏合终止检测
+    - **完整二阶段缩放流水线**：
+      · Pass 1（即时）：`_smooth_scale_all()` 对现有 QPixmap 做 SmoothTransformation 缩放
+        — <1ms 视觉反馈，用户立即看到页面大小变化
+      · Pass 2（延迟）：180ms `QTimer.singleShot` → `_sharp_render()` PyMuPDF 真实渲染
+        — 高清画质自动替换模糊图
+    - **快速缓存探测**：Pass 2 调度前检查是否所有页面已缓存，若是则完全跳过重渲染
+    - **整数百分比舍入**：`int(round(pct))` 确保 101%和 101.4% 共享同一缓存键
+    - **连续捏合优化**：`skip_deferred=True` 在手势期间仅做即时缩放，不触发后台渲染
+    - **捏合终止检测**：`ScrollEnd (phase=3)` → 触发 `_sharp_render` 产生最终高清画面
+    - BUGFIX: `_show_welcome` 重复居中代码 + `vw`/`vh` 未定义变量名
