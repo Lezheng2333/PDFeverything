@@ -252,3 +252,15 @@ Ver 1.3.0 | 2026-06-26 — PDF 阅读器
     - `_sharp_render` 改用 `_cache_get`（LRU 语义），`finally` 清除 `_pending_zoom_pct`
     - `_cancel_deferred_renders` 统一停止所有 timer
     - BUGFIX: 滚动→闪退 — `_on_scrollbar_changed` + throttle/debounce 双重守卫
+
+  Ver 1.3.9 | 缩放比例计算修正
+    - **删除 `_smooth_scale_all`** — 该方法使用 `_fw_ratio` 作为缩放基数，
+      但 pixmap 可能处于任意缩放级别（fit_height/fit_width/任意%）。
+      从 fit_height(83%) 缩放至 150% 时，计算出 scale=1.5/2.0=0.75 — 缩小而非放大
+    - **三处缩放路径重写为正确的相对比例**：
+      · `_set_zoom_pct`: 在修改 `self._zoom_mode` 前保存 `old_pct`，
+        计算 `scale = new_factor / old_factor`
+      · `_apply_fit_mode`: 同样先存旧值再算比值
+      · `_on_resize`: 使用旧 `_fw_ratio/_fh_ratio` 计算旧因子
+    - 所有缩放路径统一：old_pct → old_factor, new_factor, scale = new/old
+    - BUGFIX: 点 +/- 按钮页面反向缩放或不变 — 缩放基数错误导致方向反转
