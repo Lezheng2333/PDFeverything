@@ -1,0 +1,22 @@
+# Build artifacts
+dist/
+build/
+*.exe
+*.app
+__pycache__/
+*.pyc
+*.pyo
+
+# macOS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Test files
+test files/
+
+# Output logs
+*.log
