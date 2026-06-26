@@ -170,16 +170,14 @@ class MainWindow(QMainWindow):
         # Reader toolbar
         self.reader.btn_scroll.setText(tr("reader_scroll"))
         self.reader.btn_scroll.setToolTip(tr("reader_scroll_tip"))
-        self.reader.btn_single.setText(tr("reader_single"))
-        self.reader.btn_single.setToolTip(tr("reader_single_tip"))
         self.reader.btn_grid.setText(tr("reader_grid"))
         self.reader.btn_grid.setToolTip(tr("reader_grid_tip"))
         self.reader.btn_prev.setToolTip(tr("reader_prev"))
         self.reader.btn_next.setToolTip(tr("reader_next"))
         self.reader.btn_fit_width.setText(tr("reader_fit_width"))
         self.reader.btn_fit_width.setToolTip("Fit page width to viewport")
-        self.reader.btn_fit_page.setText(tr("reader_fit_page"))
-        self.reader.btn_fit_page.setToolTip("Fit entire page in viewport")
+        self.reader.btn_fit_height.setText(tr("reader_fit_height"))
+        self.reader.btn_fit_height.setToolTip("Fit page height to viewport")
         self.reader.zoom_combo.setToolTip(tr("reader_zoom_tip"))
         # Tool buttons
         if self._tool_buttons:
@@ -302,9 +300,10 @@ class MainWindow(QMainWindow):
     def _init_reader_tab(self):
         """Tab 3: PDF reader."""
         self.reader = PdfReaderWidget()
+        self.reader.close_requested.connect(self._on_reader_close)
         self.tabs.addTab(self.reader, tr("tab_reader"))
 
-    def _open_pdf_in_reader(self, path: Path = None) -> None:
+    def _open_pdf_in_reader(self, path: Path = None, from_file_list: bool = False) -> None:
         """Open a PDF in the reader tab. If path is None, show file dialog."""
         if path is None:
             from PyQt6.QtWidgets import QFileDialog
@@ -313,14 +312,20 @@ class MainWindow(QMainWindow):
             if not path_str:
                 return
             path = Path(path_str)
+        self.reader.opened_from_file_list = from_file_list
         self.reader.open_pdf(path)
         self.tabs.setCurrentIndex(2)  # switch to reader tab
+
+    def _on_reader_close(self):
+        """Handle user clicking × on reader. Jump back to file list if opened from there."""
+        if self.reader.opened_from_file_list:
+            self.tabs.setCurrentIndex(0)  # back to Merge tab
 
     def _on_file_list_double_click(self, item) -> None:
         """Double-click a file in the list → open in reader tab."""
         path = item.data(Qt.ItemDataRole.UserRole)
         if path and path.suffix.lower() == ".pdf":
-            self._open_pdf_in_reader(path)
+            self._open_pdf_in_reader(path, from_file_list=True)
 
     def _init_status_bar(self, parent_layout):
         status_widget = QWidget()

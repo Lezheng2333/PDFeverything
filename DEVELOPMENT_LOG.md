@@ -165,3 +165,18 @@ Ver 1.3.0 | 2026-06-26 — PDF 阅读器
     - BUGFIX: setFixedSize 容器无显示 — label.setParent + absolute move 解决
     - BUGFIX: QWheelEvent 缩放不支持 macOS 原生手势 — phase + angleDelta 双检测
     - BUGFIX: Grid 模式切换耗时 2.7s — 标签池复用消除重建开销
+
+  Ver 1.3.3 | 阅读器 v3 — 仅 Scroll+Grid，适应高度，3 列网格，关闭按钮
+    - 移除单页模式，仅保留 Scroll 和 Grid 两种模式
+    - 新增 Fit Height：将单页高度缩放至窗口高度
+    - Fit Width/Fit Height 改为独立 checkable 按钮，互斥切换
+    - Grid 改为 3 列排列，双击缩略图→Fit Height+Scroll 跳转该页
+    - 连续滚动模式翻页按钮和页码常驻显示
+    - 滚动时自动追踪当前页（>50% 可见区域即为当前页）
+    - 翻页按钮/←→键盘：滚动到目标页，页面顶部对齐窗口顶部
+    - 右下角文件名旁新增 ✕ 关闭按钮
+      · 从 "File→Open" 进入→关闭后留在阅读器欢迎页
+      · 从文件列表双击→关闭后自动跳转回合并 Tab
+    - 预渲染改为分批异步（每批 40 页），初次加载保持 UI 响应
+    - BUGFIX: Fit Width 和 Fit Page 完全相同 — 拆分为 Width/Height 两个维度
+    - BUGFIX: 连续模式底栏显示翻页按钮和页码 — 改为仅 Grid 隐藏
