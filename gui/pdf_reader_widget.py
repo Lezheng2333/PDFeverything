@@ -293,24 +293,31 @@ class PdfReaderWidget(QWidget):
             return self._default_zoom_pct
         return max(50, min(300, int(self._zoom_mode * 100)))
 
-    def _set_zoom_pct(self, pct: int):
+    def _set_zoom_pct(self, pct: int, skip_deferred: bool = False):
         """Two-pass zoom:
         Pass 1 (instant): QPixmap.scaled() on existing images — <1ms visual feedback.
-        Pass 2 (deferred): 250ms debounce → PyMuPDF real render for sharp quality.
-          Skip pass 2 for zoom levels already cached."""
-        pct = max(50, min(300, pct))
+        Pass 2 (deferred): 180ms debounce → PyMuPDF real render.
+          Skip pass 2 if skip_deferred=True (e.g. continuous pinch) or
+          if the cache already contains all pages at this zoom level.
+        Zoom value rounded to integer for consistent cache key matching."""
+        pct = max(50, min(300, int(round(pct))))
         self._zoom_mode = pct / 100.0
         self.btn_fit_width.setChecked(False); self.btn_fit_height.setChecked(False)
         self.zoom_edit.setText(str(pct))
-        if not self.doc:
-            return
+        if not self.doc: return
         # Pass 1: instant smooth pixel scaling
         self._smooth_scale_all(pct / 100.0)
         self._layout_labels()
         self._show_zoom_popup(pct)
-        # Pass 2: deferred sharp re-render
-        self._pending_zoom_pct = pct
-        QTimer.singleShot(180, self._sharp_render)
+        # Pass 2: deferred sharp render (skip for continuous pinch / already cached)
+        if not skip_deferred:
+            # Quick cache probe: if ALL pages already cached at new zoom, skip re-render
+            vw, vh = self._viewport_size()
+            zk = self._zoom_key(vw, vh)
+            all_cached = all((pi, zk) in PdfReaderWidget._cache for pi in range(self._total_pages))
+            if not all_cached:
+                self._pending_zoom_pct = pct
+                QTimer.singleShot(180, self._sharp_render)
 
     def _smooth_scale_all(self, factor: float):
         """Scale all existing pixmaps by factor relative to fit_width base."""
@@ -670,7 +677,15 @@ class PdfReaderWidget(QWidget):
                 ticks = int(abs(self._pinch_acc) // threshold)
                 ticks = ticks if self._pinch_acc > 0 else -ticks
                 self._pinch_acc %= threshold
-                self._set_zoom_pct(self._current_zoom_pct() + ticks * 5)
+                # Continuous pinch: instant scale only, no deferred render
+                self._set_zoom_pct(self._current_zoom_pct() + ticks * 5,
+                                   skip_deferred=True)
+            # On gesture end, trigger sharp render for the final zoom level
+            try:
+                if e.phase() and int(e.phase()) == 3:  # Qt.ScrollPhase.ScrollEnd = 3
+                    self._pending_zoom_pct = self._current_zoom_pct()
+                    QTimer.singleShot(180, self._sharp_render)
+            except (AttributeError, TypeError): pass
         else:
             super().wheelEvent(e)
 
