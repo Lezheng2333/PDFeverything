@@ -58,8 +58,14 @@ T = {
 
     # ── Reader tab ──
     "tab_reader":             {"zh": "📖 阅读",                                      "en": "📖 Reader"},
-    "reader_prev":            {"zh": "上一页 (←)",                                   "en": "Previous page (←)"},
-    "reader_next":            {"zh": "下一页 (→)",                                   "en": "Next page (→)"},
+    "reader_scroll":          {"zh": "连续",                                        "en": "Scroll"},
+    "reader_single":          {"zh": "单页",                                        "en": "Single"},
+    "reader_grid":            {"zh": "网格",                                        "en": "Grid"},
+    "reader_scroll_tip":      {"zh": "连续垂直滚动（默认）",                           "en": "Continuous vertical scroll (default)"},
+    "reader_single_tip":      {"zh": "逐页翻看",                                     "en": "One page at a time"},
+    "reader_grid_tip":        {"zh": "缩略图网格浏览",                                "en": "Thumbnail grid view"},
+    "reader_prev":            {"zh": "上一页",                                       "en": "Prev"},
+    "reader_next":            {"zh": "下一页",                                       "en": "Next"},
     "reader_fit_width":       {"zh": "适应宽度",                                      "en": "Fit Width"},
     "reader_fit_page":        {"zh": "适应页面",                                      "en": "Fit Page"},
     "reader_zoom_tip":        {"zh": "缩放级别",                                      "en": "Zoom level"},

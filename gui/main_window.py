@@ -168,6 +168,12 @@ class MainWindow(QMainWindow):
         self.tabs.setTabText(1, tr("tab_tools"))
         self.tabs.setTabText(2, tr("tab_reader"))
         # Reader toolbar
+        self.reader.btn_scroll.setText(tr("reader_scroll"))
+        self.reader.btn_scroll.setToolTip(tr("reader_scroll_tip"))
+        self.reader.btn_single.setText(tr("reader_single"))
+        self.reader.btn_single.setToolTip(tr("reader_single_tip"))
+        self.reader.btn_grid.setText(tr("reader_grid"))
+        self.reader.btn_grid.setToolTip(tr("reader_grid_tip"))
         self.reader.btn_prev.setToolTip(tr("reader_prev"))
         self.reader.btn_next.setToolTip(tr("reader_next"))
         self.reader.btn_fit_width.setText(tr("reader_fit_width"))

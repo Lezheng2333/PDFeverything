@@ -129,15 +129,22 @@ Ver 1.2.0 | 2026-06-26 — PDF 反向转换 + GUI 简化 + 批量处理
 Ver 1.3.0 | 2026-06-26 — PDF 阅读器
 ----------------------------------------------------------------
 
-  Ver 1.3.0 | PDF 阅读器
+  Ver 1.3.0 | PDF 阅读器（初版）
     - 新增 gui/pdf_reader_widget.py：清爽单页 PDF 阅读器
       —— fitz Pixmap → QImage → QPixmap 渲染管线
-    - 导航：◀▶ 翻页 / 页码输入 / Home/End 首页末页 / ←→ 键盘
-    - 缩放：适应宽度 / 适应页面 / 100% / 150% / 200% / 300% / Ctrl+滚轮
-    - 深色背景 (#2c2c2c) + 自定义滚动条，沉浸式阅读体验
-    - MainWindow 新增第 3 个 Tab "📖 Reader"
-    - 文件菜单新增 "Open PDF..." (Ctrl+P)
-    - 在文件列表中双击 PDF → 自动切换到阅读器 Tab 并打开
-    - i18n 新增 11 个 reader_* 翻译键
-    - 加密 PDF 提示密码保护
+    - 顶部工具栏 + 单页翻页模式
+    - 缩放：适应宽度 / 适应页面 / 100-300% / Ctrl+滚轮
+    - MainWindow 第 3 个 Tab "📖 Reader"，File → Open PDF (Ctrl+P)
+    - 双击文件列表 PDF → 自动切换到阅读器
+
+  Ver 1.3.1 | 阅读器重设计 — 底栏 + 3 种阅读模式 + 触控板
+    - 工具栏移至窗口底部，最大化阅读区域
+    - 3 种阅读模式：
+      · Scroll（默认）：连续垂直滚动，所有页面堆叠，触控板平滑滚动
+      · Single：逐页翻看，◀▶ 按钮 / ←→ 键盘 / 页码跳转
+      · Grid：2 列缩略图网格，点击缩略图切换到 Single 模式
+    - 触控板双指捏合缩放（Ctrl+触控板→smooth zoom）
+    - QScrollArea 原生触控板惯性滚动
+    - 底栏新增 Scroll / Single / Grid 三按钮切换模式
+    - i18n 新增 reader_scroll / reader_single / reader_grid 翻译键
     - .gitignore 排除 .claude/，skill 文件本地保存不推送
