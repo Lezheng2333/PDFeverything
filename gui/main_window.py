@@ -177,7 +177,9 @@ class MainWindow(QMainWindow):
         self.reader.btn_prev.setToolTip(tr("reader_prev"))
         self.reader.btn_next.setToolTip(tr("reader_next"))
         self.reader.btn_fit_width.setText(tr("reader_fit_width"))
+        self.reader.btn_fit_width.setToolTip("Fit page width to viewport")
         self.reader.btn_fit_page.setText(tr("reader_fit_page"))
+        self.reader.btn_fit_page.setToolTip("Fit entire page in viewport")
         self.reader.zoom_combo.setToolTip(tr("reader_zoom_tip"))
         # Tool buttons
         if self._tool_buttons:

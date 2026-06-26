@@ -5,7 +5,7 @@
 
 <p align="center">
   <b>🪄 The PDF Swiss Army Knife</b><br>
-  <sub>Clean · Minimal · Comprehensive · Fast · Lightweight</sub>
+  <sub>Throw in PDFs, Word docs, PowerPoints, Excel sheets, images, text files —<br>get one clean PDF out the other end. No fuss.</sub>
 </p>
 
 <p align="center">
@@ -265,7 +265,7 @@ MIT — do whatever you want with it. [LICENSE](resources/LICENSE.txt)
 
 <p align="center">
   <b>🪄 PDF 万能工具箱</b><br>
-  <sub>清爽 · 简约 · 全面 · 速度快 · 轻量化</sub>
+  <sub>把 PDF、Word、PPT、Excel、图片、文本文件统统丢进来 ——<br>一键合成一个整整齐齐的 PDF。就这么简单。</sub>
 </p>
 
 ### 🎯 核心功能：混合文件合并

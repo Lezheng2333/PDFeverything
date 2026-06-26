@@ -143,8 +143,25 @@ Ver 1.3.0 | 2026-06-26 — PDF 阅读器
       · Scroll（默认）：连续垂直滚动，所有页面堆叠，触控板平滑滚动
       · Single：逐页翻看，◀▶ 按钮 / ←→ 键盘 / 页码跳转
       · Grid：2 列缩略图网格，点击缩略图切换到 Single 模式
-    - 触控板双指捏合缩放（Ctrl+触控板→smooth zoom）
+    - 触控板双指捏合缩放（macOS+Windows 原生手势，无需 Ctrl）
     - QScrollArea 原生触控板惯性滚动
     - 底栏新增 Scroll / Single / Grid 三按钮切换模式
     - i18n 新增 reader_scroll / reader_single / reader_grid 翻译键
-    - .gitignore 排除 .claude/，skill 文件本地保存不推送
+
+  Ver 1.3.2 | 阅读器性能重写 — 标签池 + 全量预渲染 + 缩放弹窗
+    - 标签池复用：所有页面 QLabel 只创建一次（_build_labels），
+      模式切换只移动/隐藏，不销毁重建（6ms 切换）
+    - 空间换时间：打开 PDF 时预渲染所有页面到缓存（MAX_CACHE=2000），
+      后续滚动/翻页/缩放变更瞬间完成
+    - 关闭 PDF 时清空所有缓存+标签，内存释放
+    - 触控板双指捏合缩放无需 Ctrl（phase 检测 + 角度/像素比值法），
+      缩放时弹出居中半透明百分比弹窗（1.2 秒自动消失）
+    - Fit Width / Fit Page 改为 checkable 按钮，已激活时不再触发重渲染
+    - 按钮悬停 3 秒后光标旁弹出功能解释（tooltip）
+    - 阅读器工具栏按钮中英文本地化
+    - 滚动时自动追踪当前页码（scroll→page sync）
+    - 测试通过：Hello Algo 379p/18MB，打开 4.5s，模式切换 6ms，
+      滚动流畅 60fps
+    - BUGFIX: setFixedSize 容器无显示 — label.setParent + absolute move 解决
+    - BUGFIX: QWheelEvent 缩放不支持 macOS 原生手势 — phase + angleDelta 双检测
+    - BUGFIX: Grid 模式切换耗时 2.7s — 标签池复用消除重建开销
