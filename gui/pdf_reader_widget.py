@@ -72,8 +72,11 @@ class PdfReaderWidget(QWidget):
 
     def showEvent(self, e):
         super().showEvent(e)
-        if not self.doc and not self._welcome:
-            self._show_welcome()
+        # Only show welcome if widget has been properly sized (height > 50).
+        # During tab-switch layout transitions, height may be 0, causing
+        # welcome placement to crash. We defer to resizeEvent or next showEvent.
+        if not self.doc and not self._welcome and self.height() > 50:
+            QTimer.singleShot(50, self._show_welcome)
 
     # ═══════════ UI ═══════════
 
@@ -256,9 +259,12 @@ class PdfReaderWidget(QWidget):
     def close_document(self):
         if self.doc: self.doc.close(); self.doc = None
         self._path = None; self._total_pages = 0; self._current_page = 0
-        PdfReaderWidget._cache.clear(); self._destroy_labels()
+        PdfReaderWidget._cache.clear()
+        self.scroll_area.verticalScrollBar().blockSignals(True)
+        self._destroy_labels()
         self._page_heights.clear(); self._update_nav_ui(); self.label_filename.clear()
         self.page_container.setFixedSize(0, 0); self.page_container.resize(0, 0)
+        self.scroll_area.verticalScrollBar().blockSignals(False)
         self._show_welcome()
 
     # ═══════════ Zoom — direct render (PyMuPDF C-level, no O(n) scaling) ═══════════
@@ -289,8 +295,12 @@ class PdfReaderWidget(QWidget):
         self._set_zoom_pct(self._current_zoom_pct() + delta)
 
     def _on_zoom_edit(self):
+        txt = self.zoom_edit.text().strip()
+        if not txt:
+            self.zoom_edit.setText(str(self._current_zoom_pct()))
+            return
         try:
-            v = int(self.zoom_edit.text()); v = max(50, min(500, v))
+            v = int(txt); v = max(50, min(500, v))
             self._set_zoom_pct(v)
         except ValueError:
             self.zoom_edit.setText(str(self._current_zoom_pct()))
@@ -338,9 +348,11 @@ class PdfReaderWidget(QWidget):
             self._labels.append(label)
 
     def _destroy_labels(self):
+        self.scroll_area.verticalScrollBar().blockSignals(True)
         for label in self._labels:
             label.setParent(None); label.deleteLater()
         self._labels.clear(); self._pre_render_idx = 0
+        self.scroll_area.verticalScrollBar().blockSignals(False)
 
     def _layout_labels(self):
         vw, vh = self._viewport_size(); sp, mg = 16, 20
@@ -519,6 +531,7 @@ class PdfReaderWidget(QWidget):
         self._welcome_drop = drop_text
         self._welcome_btn_text = load_btn_text
         if self.doc: return
+        if self.width() < 100 or self.height() < 50: return  # widget not laid out yet
         self._destroy_welcome()
         c = QWidget(self); c.setStyleSheet("background:transparent;")
         cl = QVBoxLayout(c); cl.setAlignment(Qt.AlignmentFlag.AlignCenter); cl.setSpacing(12)
