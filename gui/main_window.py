@@ -183,7 +183,7 @@ class MainWindow(QMainWindow):
         self.reader.btn_fit_height.setToolTip(tr("reader_fit_height_tip"))
         self.reader.btn_zoom_out.setToolTip(tr("reader_zoom_out"))
         self.reader.btn_zoom_in.setToolTip(tr("reader_zoom_in"))
-        self.reader.zoom_combo.setToolTip(tr("reader_zoom_tip"))
+        self.reader.zoom_edit.setToolTip(tr("reader_zoom_edit"))
         self.reader.btn_close.setToolTip(tr("reader_close"))
         # Refresh welcome screen text if no document loaded
         if not self.reader.has_document():
