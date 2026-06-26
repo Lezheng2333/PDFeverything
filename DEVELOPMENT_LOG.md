@@ -191,3 +191,22 @@ Ver 1.3.0 | 2026-06-26 — PDF 阅读器
       系统"打开方式"菜单中出现 PDFeverything，文件自动加入文件列表
     - main.py 新增 _collect_file_args()，忽略 -psn_ 等 macOS 噪声参数
     - 版本号升级至 1.3.0
+
+  Ver 1.3.5 | 阅读器 v5 — 跟手缩放 + WPS 网格 + 点击编辑缩放 + 高速页码追踪
+    - 缩放改为双重架构：_apply_smooth_zoom() 即时缩放现有 pixmap（跟手），
+      _real_zoom_timer 250ms 防抖后执行真实渲染（清晰画质）
+    - 触控板双指捏合：累积 angleDelta，每 120 单位 = 3% 缩放，50-300% 范围
+    - [+] [-] 按钮 ±1% 步长，smooth=True 模式即时响应
+    - 缩放比例下拉菜单（QComboBox）完全删除，替换为可点击编辑的 QLineEdit
+      · QIntValidator(25-500) 限制合法输入，>500→500，<50→50，小数四舍五入
+      · Enter 或失焦生效
+    - 网格模式重设计（参照 WPS 网格视图）：
+      · 3 列居中均匀分布，gutter 20px，缩略图按可用宽度动态计算
+      · 左侧边距自动调整使网格居中
+    - 页码追踪重写：_page_heights[] 数组记录每页 Y 位置，二分查找 O(log n)
+      · _scroll_timer 间隔 16ms（~60fps），滚动停止立即更新页码
+    - 欢迎页修复：QTimer.singleShot(100ms) 延迟显示，确保 viewport 已布局
+    - BUGFIX: 欢迎页不显示 — _destroy_welcome() 清理 + center.raise_() 置顶
+    - BUGFIX: 页码不更新 — 二分查找替换逐页遍历
+    - BUGFIX: 网格模式双击无效 — _on_grid_dbl_click 检查 view_mode==GRID
+    - BUGFIX: 缩放过慢 — smooth 即时缩放 + real render 防抖
