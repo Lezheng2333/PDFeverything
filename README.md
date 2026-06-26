@@ -31,6 +31,12 @@ Drag everything in — any combination of PDFs, Word documents, PowerPoint decks
 
 > 🔗 [**Latest Release →**](https://github.com/Lezheng2333/PDFeverything/releases/latest)
 
+## 🆕 What's New in v1.1.0
+
+- 🌐 **English UI** — toggle between Chinese and English in Settings > Language
+- 🪟 **Windows Office COM** — native Word/PPT/Excel conversion on Windows (no fallback renderer needed!)
+- 🤖 **AI Agent CLI mode** — `PDFeverything.exe merge -i a.pdf b.pdf -o out.pdf` from any terminal
+
 ---
 
 ## 🎯 The Killer Feature: Mixed-File Merge
@@ -106,6 +112,22 @@ Every file goes through its own converter (AppleScript → Office on macOS, or p
 - 🔄 **Reorder** with arrow buttons or by dragging inside the list
 - ⚡ **Multi-threaded** — never freezes, always shows progress
 - 🧠 **Smart buttons** — the UI adapts to what's in your file list
+- 🌐 **Bilingual UI** — switch between Chinese and English (Settings > Language)
+
+## 🤖 CLI Mode (for AI Agents)
+
+The compiled executable works as a **headless CLI tool** — no Python, no GUI, no dependencies:
+
+```bash
+# AI agents can call these commands directly:
+PDFeverything.exe merge -i a.pdf b.pdf -o merged.pdf
+PDFeverything.exe info -i document.pdf
+PDFeverything.exe compress -i big.pdf -o small.pdf
+PDFeverything.exe -h          # full help
+PDFeverything.exe --version   # 1.1.0
+```
+
+Any AI agent (Claude, ChatGPT, local automation scripts) can drive PDFeverything without installing anything — just the one `.exe` or `.app` file.
 
 ## 🚀 Quick Start (for Developers)
 
