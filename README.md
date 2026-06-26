@@ -1,5 +1,5 @@
 <h1 align="center">
-  <img src="resources/app_icon.ico" width="64" align="center" />
+  <img src="resources/app_icon_readme.png" width="64" align="center" />
   &nbsp;PDFeverything
 </h1>
 
