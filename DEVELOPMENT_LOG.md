@@ -419,3 +419,37 @@ Ver 1.3.0 | 2026-06-26 — PDF 阅读器
     - BUGFIX: QPinchGesture 导入崩溃 — 移除, 回归 wheelEvent phase 检测
     - BUGFIX: 动画引擎破坏基础缩放 — 移除, 回归简洁累加器方案
 
+
+  Ver 1.4.0 | Grid View 编辑模块 — Core page_editor + GUI 编辑模式 + CLI/MCP 页面操作
+
+    - **Core 层 page_editor.py (新建)**:
+      PdfPageEditor 命令模式撤销/重做 (MAX_UNDO_DEPTH=50)
+      delete_pages / rotate_pages / move_pages / extract_pages
+      on_change() 观察者模式事件回调
+      page_count / page_order / page_rotation / can_undo / can_redo
+    - **Grid 自适应填充**:
+      min(scale_w, scale_h) 保证页面绝不超出网格边界且最大化填充
+      网格 A4 比例 1:√2, 水平间距 20px, 垂直间距 30px
+      黑白/横向/长条/正方形页面均居中不溢出
+      page_num_label 半透明灰色页码在网格正下方
+    - **编辑模式分层**:
+      非编辑状态: 仅缩略图, 双击跳转连续滚动
+      点击 Edit toggle: 动态初始化编辑模块 (toolbar + 选择 + 快捷键)
+      关闭编辑: 卸载模块, 释放事件监听
+    - **编辑工具栏** (48px):
+      Select / Rotate 90° / Delete (二次确认) / Extract / Export / Undo / Redo
+      无选中时操作按钮禁用, undo/redo 根据栈状态启用
+    - **选择交互**:
+      单击选中 / Ctrl+单击多选 / Shift+单击范围选 / Ctrl+A 全选 / Esc 清空
+      矩形框选: 空白处拖拽矩形选中框内页面, 蓝色边框 2px
+    - **拖拽排序**:
+      单击已选页面→拖拽到目标→释放→Core.move_pages() 重排序
+      Ctrl+Z/Ctrl+Shift+Z 撤销/重做排序
+    - **CLI 新增 8 命令** (所有支持 --json 输出):
+      delete-pages / rotate-pages / move-pages / extract-pages
+      page-undo / page-redo / page-history / page-list
+    - **MCP 工具 16→23**:
+      pdf_delete_pages / pdf_rotate_pages / pdf_move_pages / pdf_extract_pages
+      pdf_undo / pdf_redo / pdf_history
+    - BUGFIX: 软件崩溃 — _destroy_labels 未回收 _page_num_label, 内存泄漏
+
