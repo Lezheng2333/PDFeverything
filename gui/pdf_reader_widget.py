@@ -357,12 +357,20 @@ class PdfReaderWidget(QWidget):
         # Use LOGICAL size: the 100% base may have devicePixelRatio set (HiDPI),
         # and QPixmap.scaled() returns a pixmap with dpr=1.0 — so targets must
         # be in logical pixels or the label appears 2× oversized.
+        # If 100% base is not yet cached (lazy pre-render hasn't reached this page),
+        # render it on-the-fly so every label gets a correctly-sized pixmap.
         target_factor = pct / 100.0
         from PyQt6.QtCore import Qt as QtCore
         for pi, label in enumerate(self._labels):
             try:
                 base_key = (pi, "z:1.000")
                 base = PdfReaderWidget._cache_get(base_key)
+                if base is None or base.isNull():
+                    old_zm = self._zoom_mode
+                    self._zoom_mode = 1.0
+                    vw2, vh2 = self._viewport_size()
+                    base = self._get_or_render(pi, vw2, vh2)
+                    self._zoom_mode = old_zm
                 if base is None or base.isNull(): continue
                 bw, bh = self._logical_size(base)
                 tw, th = max(1, int(bw * target_factor)), max(1, int(bh * target_factor))
@@ -522,12 +530,19 @@ class PdfReaderWidget(QWidget):
 
         # Pass 1: instant — scale from 100% base using LOGICAL size
         # (base may have HiDPI devicePixelRatio set; scaled result has dpr=1.0)
+        # Render 100% base on demand if not yet cached.
         target_factor = pct / 100.0
         from PyQt6.QtCore import Qt as QtCore
         for pi, label in enumerate(self._labels):
             try:
                 base_key = (pi, "z:1.000")
                 base = PdfReaderWidget._cache_get(base_key)
+                if base is None or base.isNull():
+                    old_zm = self._zoom_mode
+                    self._zoom_mode = 1.0
+                    vw2, vh2 = self._viewport_size()
+                    base = self._get_or_render(pi, vw2, vh2)
+                    self._zoom_mode = old_zm
                 if base is None or base.isNull(): continue
                 bw, bh = self._logical_size(base)
                 tw, th = max(1, int(bw * target_factor)), max(1, int(bh * target_factor))
@@ -566,29 +581,24 @@ class PdfReaderWidget(QWidget):
             self._page_heights = []; y = mg
             for pi, label in enumerate(self._labels):
                 pix = label.pixmap()
-                # Initial load: render everything. Otherwise, keep existing pixmap
-                # (already set by Pass 1 or prior render) and just reflow layout.
+                # Initial load: render missing pixmaps
                 if render_missing and (pix is None or pix.isNull()):
                     if self.doc and pi < self._total_pages:
                         pix = self._get_or_render(pi, vw, vh)
                         if pix:
                             label.setPixmap(pix)
-                            lw, lh = self._logical_size(pix)
-                            label.setFixedSize(lw, lh)
-                if pix and not pix.isNull():
-                    w, h = self._logical_size(pix)
+                # Always derive w,h from PDF page geometry × current zoom.
+                # Never use pixmap dimensions — a stale pixmap from a different
+                # zoom level would produce wrong heights and a cascading Y shift.
+                if self.doc and pi < self._total_pages:
+                    pw = self.doc[pi].rect.width
+                    ph = self.doc[pi].rect.height
+                    pct = self._current_zoom_pct()
+                    z = pct / 100.0
+                    w, h = int(pw * z), int(ph * z)
                 else:
-                    # Compute expected dimensions from PDF page size × current zoom
-                    # instead of hardcoded 600×800 — prevents Y-offset cascade
-                    # when pages are not yet rendered at current zoom level.
-                    if self.doc and pi < self._total_pages:
-                        pw = self.doc[pi].rect.width
-                        ph = self.doc[pi].rect.height
-                        pct = self._current_zoom_pct()
-                        z = pct / 100.0
-                        w, h = int(pw * z), int(ph * z)
-                    else:
-                        w, h = 600, 800
+                    w, h = 600, 800
+                label.setFixedSize(w, h)
                 label.setStyleSheet("QLabel{background:white;}")
                 label.setCursor(Qt.CursorShape.ArrowCursor)
                 x = max(0, (vw - w) // 2)
