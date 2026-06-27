@@ -453,10 +453,9 @@ class PdfReaderWidget(QWidget):
     def _revert_to_original(self):
         """Discard all edits: reload the original document snapshot."""
         if self._original_snapshot and self.doc:
-            import io
+            import io, fitz
             self.doc.close()
             new_doc = fitz.open(stream=self._original_snapshot, filetype="pdf")
-            # Copy pages over: save new doc to stream, reload into self.doc
             buf = io.BytesIO()
             new_doc.save(buf)
             new_doc.close()
@@ -470,14 +469,8 @@ class PdfReaderWidget(QWidget):
             PdfReaderWidget._clear_cache()
             self._destroy_labels()
             self._build_labels()
-            # Re-render thumbnails
-            vw, vh = self._viewport_size()
-            old_zm = self._zoom_mode
-            self._zoom_mode = 1.0
-            for pi in range(self._total_pages):
-                self._get_or_render(pi, vw, vh)
-            self._zoom_mode = old_zm
-            self._layout_labels()
+            # Don't call _layout_labels here — _leave_edit_mode calls it after cleanup.
+            self._edit_buttons_dirty = True
 
     def closeEvent(self, event):
         """Window close — check unsaved edits before closing."""
@@ -538,6 +531,12 @@ class PdfReaderWidget(QWidget):
         if self.doc: self.doc.close(); self.doc = None
         self._path = None; self._total_pages = 0; self._current_page = 0
         self._saved_scroll_zoom = None
+        # Reset to default Scroll mode
+        self._view_mode = ViewMode.SCROLL
+        self.btn_scroll.setChecked(True); self.btn_grid.setChecked(False)
+        self.btn_edit.hide(); self.btn_edit.setChecked(False)
+        self._zoom_mode = 1.0; self.zoom_edit.setText("100")
+        self._unsaved_edits = False
         PdfReaderWidget._clear_cache()
         self.scroll_area.verticalScrollBar().blockSignals(True)
         self._destroy_labels()
