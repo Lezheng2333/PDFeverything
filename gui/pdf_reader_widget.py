@@ -270,19 +270,20 @@ class PdfReaderWidget(QWidget):
                 self.doc.close(); self.doc = None; self._show_welcome(); return
         self._path = path
         self._total_pages = len(self.doc); self._current_page = 0
-        self._zoom_mode = "fit_height"
-        self.btn_fit_width.setChecked(False); self.btn_fit_height.setChecked(True)
+        self._zoom_mode = 1.0              # default: 100%
+        self.btn_fit_width.setChecked(False); self.btn_fit_height.setChecked(False)
         self._view_mode = ViewMode.SCROLL
         self.btn_scroll.setChecked(True); self.btn_grid.setChecked(False)
-        # Pre-compute zoom ratios
+        # Pre-compute fit ratios for later use
         page = self.doc[0]; pw, ph = page.rect.width, page.rect.height
         vw, vh = self._viewport_size()
         self._fw_ratio = vw / pw if pw > 0 else 1.0
         self._fh_ratio = vh / ph if ph > 0 else 1.0
         self._default_zoom_pct = max(50, min(300, int(self._fh_ratio * 100)))
-        self.zoom_edit.setText(str(self._default_zoom_pct))
+        self.zoom_edit.setText("100")
         self._build_labels()
-        self._render_visible_range()   # only render ~5 pages near current
+        # Pre-render ALL pages at 100% — scale base for future zooms
+        self._pre_render_100_all()
         self._layout_labels()
         self._update_nav_ui()
         self.label_filename.setText(path.name)
@@ -321,7 +322,9 @@ class PdfReaderWidget(QWidget):
             return max(50, min(300, int(self._fw_ratio * 100)))
         if self._zoom_mode == "fit_height":
             return self._default_zoom_pct
-        return max(50, min(300, int(self._zoom_mode * 100)))
+        if isinstance(self._zoom_mode, (int, float)):
+            return max(50, min(300, int(self._zoom_mode * 100)))
+        return 100
 
     def _set_zoom_pct(self, pct: int, skip_deferred: bool = False):
         """Two-pass zoom.
@@ -390,6 +393,15 @@ class PdfReaderWidget(QWidget):
         s = max(0, self._current_page - 2)
         e = min(self._total_pages, self._current_page + 3)
         return s, e
+
+    def _pre_render_100_all(self):
+        """Render every page at 100% zoom — space-for-time on first load.
+        Creates a high-quality base that all future zooms can scale from."""
+        if not self.doc or not self._labels: return
+        vw, vh = self._viewport_size()
+        # Bypass _zoom_key — render at hard-coded 1.0 (100%) ratio via viewport
+        for pi in range(self._total_pages):
+            self._get_or_render(pi, vw, vh)
 
     def _render_visible_range(self):
         """Render only pages near the current position (view-driven, ~5 pages)."""
