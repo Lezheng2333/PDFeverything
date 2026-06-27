@@ -160,6 +160,10 @@ def main():
     p_hist.add_argument("-i", "--input", required=True)
     p_hist.add_argument("--json", action="store_true")
 
+    p_list = sub.add_parser("page-list", help="列出所有页面状态")
+    p_list.add_argument("-i", "--input", required=True)
+    p_list.add_argument("--json", action="store_true")
+
     args = parser.parse_args()
 
     if not args.command:
@@ -241,7 +245,8 @@ def main():
             print(f"✅ 已提取 {sheets} 个工作表 → {args.output}")
 
         elif args.command in ("delete-pages", "rotate-pages", "move-pages",
-                              "extract-pages", "page-undo", "page-redo", "page-history"):
+                              "extract-pages", "page-undo", "page-redo",
+                              "page-history", "page-list"):
             from core.page_editor import PdfPageEditor
 
             def _parse_pages(pages_str: str, total: int) -> list[int]:
@@ -268,6 +273,24 @@ def main():
             input_path = Path(args.input)
             output_path = Path(args.output) if hasattr(args, 'output') and args.output else None
             editor = PdfPageEditor(input_path)
+
+            if args.command == "page-list":
+                import json
+                pages = []
+                for i in range(editor.page_count):
+                    rotation = editor.page_rotation(i)
+                    pages.append({"index": i + 1, "rotation": rotation})
+                if getattr(args, "json", False):
+                    print(json.dumps({"success": True, "operation": "list",
+                                      "pageCount": editor.page_count, "pages": pages},
+                                     ensure_ascii=False))
+                else:
+                    print(f"总页数: {editor.page_count}")
+                    for p in pages:
+                        rot = f" (旋转 {p['rotation']}°)" if p['rotation'] else ""
+                        print(f"  第 {p['index']} 页{rot}")
+                editor.close()
+                return
 
             if args.command == "page-history":
                 history = editor.undo_stack_desc

@@ -735,7 +735,7 @@ def serve() -> None:
                     "capabilities": {"tools": {}},
                     "serverInfo": {
                         "name": "pdfeverything",
-                        "version": "1.3.17"
+                        "version": "1.4.0"
                     }
                 }
             })

@@ -83,7 +83,9 @@ class PdfReaderWidget(QWidget):
         self._page_editor = None     # PdfPageEditor (lazy init on edit)
         self._selected_pages: set[int] = set()
         self._drag_source = None     # page index being dragged
-        self._drag_start_pos = None  # QPoint of drag start
+        self._rubber_origin = None   # QPoint of box-select / drag start
+        self._drag_active = False
+        self._drag_target = None
 
         # ── Custom compact tooltip (small, at cursor, not system QToolTip) ──
         self._tooltip_texts = {}
@@ -662,6 +664,9 @@ class PdfReaderWidget(QWidget):
     def _destroy_labels(self):
         self.scroll_area.verticalScrollBar().blockSignals(True)
         for label in self._labels:
+            # Destroy attached page number labels
+            pn = getattr(label, '_page_num_label', None)
+            if pn: pn.setParent(None); pn.deleteLater()
             label.setParent(None); label.deleteLater()
         self._labels.clear()
         self.scroll_area.verticalScrollBar().blockSignals(False)
@@ -800,6 +805,11 @@ class PdfReaderWidget(QWidget):
             self._page_editor = PdfPageEditor(self._path)
             self._page_editor.on_change(lambda e: self._layout_labels())
         self._update_edit_buttons()
+        # Install container-level event handlers for box-select + drag
+        self.page_container._edit_widget = self
+        self.page_container.mousePressEvent = self._grid_mouse_press
+        self.page_container.mouseMoveEvent = self._grid_mouse_move
+        self.page_container.mouseReleaseEvent = self._grid_mouse_release
         self.edit_toolbar.show()
         self._layout_labels()
 
@@ -808,7 +818,106 @@ class PdfReaderWidget(QWidget):
         self.btn_edit.setText("✎ Edit")
         self._selected_pages.clear(); self._drag_source = None
         self.edit_toolbar.hide()
+        # Restore container event handlers
+        self.page_container.mousePressEvent = lambda e: None
+        self.page_container.mouseMoveEvent = lambda e: None
+        self.page_container.mouseReleaseEvent = lambda e: None
         self._layout_labels()
+
+    # ── Rectangle box-select ──
+
+    def _cell_rect(self, pi: int):
+        """Return the cell rectangle for page index pi on the container."""
+        vw, vh = self._viewport_size()
+        COLS = 3; gutter_h = 20; gutter_v = 30; side_margin = 20; mg = 20
+        usable = vw - 2*side_margin - (COLS-1)*gutter_h
+        cell_w = max(140, usable // COLS); cell_h = int(cell_w * 1.414)
+        grid_w = COLS*cell_w + (COLS-1)*gutter_h
+        left = (vw - grid_w) // 2
+        col, row = pi % COLS, pi // COLS
+        cx = left + col*(cell_w + gutter_h)
+        cy = mg + row*(cell_h + gutter_v)
+        return (cx, cy, cell_w, cell_h)
+
+    def _grid_page_at_pos(self, pos):
+        """Find which page cell contains the given point, or -1 if none."""
+        for pi in range(self._total_pages):
+            cx, cy, cw, ch = self._cell_rect(pi)
+            if cx <= pos.x() <= cx + cw and cy <= pos.y() <= cy + ch:
+                return pi
+        return -1
+
+    def _grid_mouse_press(self, e):
+        """Container-level mouse press: selection or drag start."""
+        if not self._edit_mode: return
+        pos = e.position().toPoint()
+        self._rubber_origin = pos
+        self._drag_active = False
+        pi = self._grid_page_at_pos(pos)
+        if pi >= 0 and pi in self._selected_pages:
+            # Clicked a selected page — prepare for drag
+            self._drag_active = True
+            self._drag_source = pi
+            self._drag_origin = pos
+            # Float the selected pages visually
+            self._layout_labels()
+        elif pi >= 0:
+            # Clicked unselected page — select it
+            self._selected_pages = {pi}
+            self._drag_active = False
+            self._update_edit_buttons()
+            self._layout_labels()
+        else:
+            # Clicked blank area — start rectangle select
+            self._drag_active = False
+
+    def _grid_mouse_move(self, e):
+        """Container-level mouse move: drag sort or rectangle selection."""
+        if not self._edit_mode: return
+        pos = e.position().toPoint()
+        if not hasattr(self, '_rubber_origin') or not self._rubber_origin: return
+
+        if self._drag_active and self._selected_pages:
+            # Drag mode — highlight insertion position
+            target = self._grid_page_at_pos(pos)
+            if target >= 0 and target != self._drag_target:
+                self._drag_target = target
+                # Temporarily highlight insertion cell
+                self._layout_labels()
+            return
+
+        # Rectangle select mode
+        dist = (pos - self._rubber_origin).manhattanLength()
+        if dist < 8: return
+        x1, y1 = self._rubber_origin.x(), self._rubber_origin.y()
+        x2, y2 = pos.x(), pos.y()
+        rx, ry = min(x1, x2), min(y1, y2)
+        rw, rh = abs(x2 - x1), abs(y2 - y1)
+        if rw < 4 and rh < 4: return
+        self._selected_pages.clear()
+        for pi in range(self._total_pages):
+            cx, cy, cw, ch = self._cell_rect(pi)
+            if rx < cx + cw and rx + rw > cx and ry < cy + ch and ry + rh > cy:
+                self._selected_pages.add(pi)
+        self._update_edit_buttons()
+        self._layout_labels()
+
+    def _grid_mouse_release(self, e):
+        """End selection or complete drag-sort."""
+        if not self._edit_mode: return
+        if self._drag_active and self._selected_pages:
+            target = self._grid_page_at_pos(e.position().toPoint())
+            if target >= 0 and self._page_editor:
+                source_list = sorted(self._selected_pages)
+                self._page_editor.move_pages(source_list, target)
+                self._selected_pages.clear()
+                self._rebuild_labels_from_editor()
+                self._layout_labels()
+                self._update_edit_buttons()
+                self._update_nav_ui()
+        self._rubber_origin = None
+        self._drag_active = False
+        self._drag_target = None
 
     def _on_grid_click(self, pi: int, e):
         """Handle click in Grid edit mode for selection."""

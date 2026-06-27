@@ -25,6 +25,7 @@ CLI_COMMANDS = {
     "to-word", "to-ppt", "to-excel",
     "delete-pages", "rotate-pages", "move-pages",
     "extract-pages", "page-undo", "page-redo", "page-history",
+    "page-list",
 }
 
 HELP_TEXT = """PDFeverything — One-stop PDF processing tool
@@ -138,7 +139,7 @@ def main():
         print(HELP_TEXT)
         return
     if len(sys.argv) > 1 and sys.argv[1] in ("-v", "--version"):
-        print("PDFeverything v1.3.17")
+        print("PDFeverything v1.4.0")
         return
     if len(sys.argv) > 1 and sys.argv[1] == "--mcp":
         launch_mcp()
