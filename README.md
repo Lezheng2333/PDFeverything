@@ -190,7 +190,7 @@ Add to `.claude/settings.json` in your project:
 }
 ```
 
-### What the AI sees (16 tools)
+### What the AI sees (23 tools)
 
 Once connected, the agent automatically discovers these tools — no manual instruction needed:
 
@@ -373,7 +373,7 @@ MIT — do whatever you want with it. [LICENSE](resources/LICENSE.txt)
 
 ### 🤖 AI Agent 集成（MCP 服务器）
 
-PDFeverything 内置了 **Model Context Protocol (MCP)** 服务器。任何 AI Agent（Claude Desktop、Claude Code、Cursor 等）都能自动发现全部 16 个 PDF 工具并直接调用——**无需安装 Python、无需额外依赖，只要有这个 app 文件就行**。
+PDFeverything 内置了 **Model Context Protocol (MCP)** 服务器。任何 AI Agent（Claude Desktop、Claude Code、Cursor 等）都能自动发现全部 23 个 PDF 工具并直接调用——**无需安装 Python、无需额外依赖，只要有这个 app 文件就行**。
 
 #### 同一个文件，三种模式
 
@@ -426,7 +426,7 @@ PDFeverything 内置了 **Model Context Protocol (MCP)** 服务器。任何 AI A
 }
 ```
 
-#### AI 能看到的 16 个工具
+#### AI 能看到的 23 个工具
 
 连接后 Agent 会自动发现这些工具——无需手动教它：
 
@@ -497,7 +497,7 @@ pyinstaller PDFeverything.spec --noconfirm --clean
 | 🖼️ 界面 | **PyQt6** — macOS / Windows 原生体验 |
 | 🧠 PDF 引擎 | **PyMuPDF** + **pypdf** + **pikepdf** |
 | 📝 Office 转换 | **AppleScript** (macOS) / **COM** (Windows) / **python-docx** + **python-pptx** + **openpyxl** (备选) |
-| 🔌 AI 集成 | **MCP (Model Context Protocol)** — 16 个工具自动发现 |
+| 🔌 AI 集成 | **MCP (Model Context Protocol)** — 23 个工具自动发现 |
 | 📦 打包 | **PyInstaller** (Windows onefile / macOS app bundle) |
 
 ### 📄 许可证

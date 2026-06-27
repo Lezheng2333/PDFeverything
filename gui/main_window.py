@@ -189,10 +189,12 @@ class MainWindow(QMainWindow):
         self.reader.btn_edit.setText(tr("reader_edit"))
         self.reader.btn_edit.setToolTip(tr("reader_edit"))
         self.reader.btn_edit_sel.setText(tr("reader_edit_select"))
+        self.reader.btn_edit_sort.setText(tr("reader_edit_sort"))
         self.reader.btn_edit_rot.setText(tr("reader_edit_rotate"))
         self.reader.btn_edit_del.setText(tr("reader_edit_delete"))
         self.reader.btn_edit_extract.setText(tr("reader_edit_extract"))
         self.reader.btn_edit_export.setText(tr("reader_edit_export"))
+        self.reader.btn_edit_print.setText(tr("reader_edit_print"))
         self.reader.btn_edit_undo.setText(tr("reader_edit_undo"))
         self.reader.btn_edit_redo.setText(tr("reader_edit_redo"))
         self.reader._store_tooltips()  # capture translated text, kill Qt big tooltips

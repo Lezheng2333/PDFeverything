@@ -80,6 +80,7 @@ class PdfReaderWidget(QWidget):
         self._pinch_acc = 0
         # ── Grid edit mode ──
         self._edit_mode = False
+        self._drag_sort_mode = False
         self._page_editor = None     # PdfPageEditor (lazy init on edit)
         self._selected_pages: set[int] = set()
         self._drag_source = None     # page index being dragged
@@ -146,7 +147,11 @@ class PdfReaderWidget(QWidget):
             "QPushButton:hover{background:#444}"
             "QPushButton:disabled{color:#555;background:#2a2a2a}")
         etb = QHBoxLayout(self.edit_toolbar); etb.setContentsMargins(8,4,8,4); etb.setSpacing(6)
-        self.btn_edit_sel = QPushButton("☝ Select"); etb.addWidget(self.btn_edit_sel)
+        self.btn_edit_sel = QPushButton("☝ Select"); self.btn_edit_sel.clicked.connect(self._edit_select_mode)
+        etb.addWidget(self.btn_edit_sel)
+        self.btn_edit_sort = QPushButton("↕ Sort"); self.btn_edit_sort.clicked.connect(self._edit_sort_mode)
+        self.btn_edit_sort.setCheckable(True)
+        etb.addWidget(self.btn_edit_sort)
         etb.addSpacing(8)
         self.btn_edit_rot = QPushButton("↻ Rotate 90°"); self.btn_edit_rot.clicked.connect(self._edit_rotate)
         etb.addWidget(self.btn_edit_rot)
@@ -157,6 +162,8 @@ class PdfReaderWidget(QWidget):
         etb.addWidget(self.btn_edit_extract)
         self.btn_edit_export = QPushButton("💾 Export"); self.btn_edit_export.clicked.connect(self._edit_export)
         etb.addWidget(self.btn_edit_export)
+        self.btn_edit_print = QPushButton("🖨 Print"); self.btn_edit_print.clicked.connect(self._edit_print)
+        etb.addWidget(self.btn_edit_print)
         etb.addStretch()
         self.btn_edit_undo = QPushButton("↩ Undo"); self.btn_edit_undo.clicked.connect(self._edit_undo)
         etb.addWidget(self.btn_edit_undo)
@@ -324,7 +331,19 @@ class PdfReaderWidget(QWidget):
 
     # ═══════════ Mode ═══════════
 
+    def _hide_page_numbers(self):
+        """Destroy all page-number labels in the container."""
+        for label in self._labels:
+            pn = getattr(label, '_page_num_label', None)
+            if pn:
+                pn.hide()
+                pn.setParent(None)
+                pn.deleteLater()
+                label._page_num_label = None
+
     def _set_mode(self, mode: ViewMode):
+        if self._view_mode == ViewMode.GRID and mode == ViewMode.SCROLL:
+            self._hide_page_numbers()
         self._view_mode = mode
         self.btn_scroll.setChecked(mode == ViewMode.SCROLL)
         self.btn_grid.setChecked(mode == ViewMode.GRID)
@@ -730,7 +749,9 @@ class PdfReaderWidget(QWidget):
 
             for pi, label in enumerate(self._labels):
                 dw, dh, ox, oy = page_dims[pi]
-                pix = self._get_or_render(pi, cell_w, cell_h, force_fit=True)
+                # Render thumbnail at exact page display size (not cell size),
+                # so the pixmap matches label.setFixedSize precisely — no clipping.
+                pix = self._get_or_render(pi, dw, dh, force_fit=True)
                 if pix:
                     label.setPixmap(pix)
                     label.setFixedSize(dw, dh)
@@ -777,13 +798,24 @@ class PdfReaderWidget(QWidget):
 
     def _on_grid_dbl_click(self, page_idx: int):
         if self._view_mode != ViewMode.GRID: return
-        if self._edit_mode:
-            return  # no jump in edit mode
+        if self._edit_mode: return  # no jump in edit mode
+        self._hide_page_numbers()
         self._current_page = page_idx
+        # Force re-render of target page at Scroll resolution — flush grid thumbnail
+        old_zoom = self._zoom_mode
+        self._zoom_mode = 1.0  # ensure 100% base exists
+        vw, vh = self._viewport_size()
+        self._get_or_render(page_idx, vw, vh)
+        self._zoom_mode = old_zoom
+        # Set view mode and apply fit_height (will re-render from 100% base with proper zoom)
         self._view_mode = ViewMode.SCROLL
         self.btn_scroll.setChecked(True); self.btn_grid.setChecked(False)
+        self._available_height = vh
         self._apply_fit_mode("fit_height", self._default_zoom_pct)
-        self._scroll_to_page_top(); self._update_nav_ui()
+        self._scroll_to_page_top()
+        self._update_nav_ui()
+        # Schedule sharp render for visible pages
+        self._schedule_render_visible(0)
 
     # ═══════════ Grid Edit Mode ═══════════
 
@@ -952,11 +984,48 @@ class PdfReaderWidget(QWidget):
         self.btn_edit_del.setEnabled(has_sel)
         self.btn_edit_extract.setEnabled(has_sel)
         self.btn_edit_export.setEnabled(has_sel)
+        self.btn_edit_print.setEnabled(has_sel)
+        self.btn_edit_sort.setEnabled(has_sel)
         if self._page_editor:
             self.btn_edit_undo.setEnabled(self._page_editor.can_undo())
             self.btn_edit_redo.setEnabled(self._page_editor.can_redo())
 
+    # ── Edit mode toggles ──
+
+    def _edit_select_mode(self):
+        """Exit drag-sort mode, return to normal selection."""
+        self._drag_sort_mode = False
+        self.btn_edit_sort.setChecked(False)
+        self._drag_active = False; self._drag_target = None
+
+    def _edit_sort_mode(self):
+        """Enter drag-sort mode."""
+        if not self._selected_pages: return
+        self._drag_sort_mode = True
+        self.btn_edit_sort.setChecked(True)
+        self._drag_active = False; self._drag_target = None
+
     # ── Edit operations ──
+
+    def _edit_print(self):
+        if not self._selected_pages: return
+        try:
+            import tempfile
+            tmp = Path(tempfile.gettempdir()) / "pdfeverything_print.pdf"
+            if self._page_editor:
+                self._page_editor.extract_pages(list(self._selected_pages), tmp)
+            else:
+                from core.page_editor import PdfPageEditor
+                e = PdfPageEditor(self._path)
+                e.extract_pages(list(self._selected_pages), tmp)
+                e.close()
+            import subprocess, sys
+            if sys.platform == "darwin":
+                subprocess.Popen(["open", str(tmp)])
+            elif sys.platform == "win32":
+                subprocess.Popen(["start", str(tmp)], shell=True)
+        except Exception as ex:
+            QMessageBox.warning(self, "打印", f"打印失败: {ex}")
 
     def _edit_rotate(self):
         if not self._page_editor or not self._selected_pages: return
@@ -1009,7 +1078,7 @@ class PdfReaderWidget(QWidget):
         """Sync labels with editor state after page deletion/reorder."""
         if not self._page_editor: return
         new_count = self._page_editor.page_count
-        # Destroy old labels and rebuild
+        self._hide_page_numbers()
         self._destroy_labels()
         self._total_pages = new_count
         self._build_labels()
@@ -1190,7 +1259,12 @@ class PdfReaderWidget(QWidget):
         cls._cache_memory_bytes = 0
 
     def _get_or_render(self, pi, vw, vh=99999, force_fit=False, render_hq=False):
-        key = (pi, self._zoom_key(vw, vh))
+        """Get from cache or render a page. force_fit thumbnails use a
+        separate cache namespace to avoid colliding with 100% base renders."""
+        if force_fit:
+            key = (pi, f"thumb_{vw}_{vh}")  # Grid-specific key: avoids base cache collision
+        else:
+            key = (pi, self._zoom_key(vw, vh))
         cached = PdfReaderWidget._cache_get(key)
         if cached is not None and not render_hq:
             return cached

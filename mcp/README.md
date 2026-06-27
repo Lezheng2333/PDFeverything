@@ -49,7 +49,7 @@ Add to `.claude/settings.json` in your project:
 }
 ```
 
-## 🔧 Available Tools (16 tools)
+## 🔧 Available Tools (23 tools)
 
 The AI agent will see these tools automatically:
 
@@ -94,7 +94,7 @@ AI Agent                          PDFeverything MCP Server
    │                                       │
    │── {"method":"tools/list"} ──────────► │
    │                                       │
-   │◄─ {"result":{"tools":[...16 tools]}} │
+   │◄─ {"result":{"tools":[...23 tools]}} │
    │                                       │
    │── {"method":"tools/call",            │
    │     "params":{"name":"pdf_info",      │
@@ -104,4 +104,4 @@ AI Agent                          PDFeverything MCP Server
    │     "{'pages':5,'title':'Report'}"}]}}
 ```
 
-No setup required — the agent calls `pdfeverything --mcp`, the server starts, and all 16 tools appear in its toolbox automatically.
+No setup required — the agent calls `pdfeverything --mcp`, the server starts, and all 23 tools appear in its toolbox automatically.
