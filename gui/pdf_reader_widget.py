@@ -10,7 +10,7 @@ from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QImage, QPixmap, QKeyEvent, QWheelEvent, QIntValidator
 from PyQt6.QtWidgets import (
     QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea,
-    QVBoxLayout, QWidget, QToolTip,
+    QVBoxLayout, QWidget,
 )
 
 
@@ -80,6 +80,7 @@ class PdfReaderWidget(QWidget):
         self._pinch_acc = 0
 
         # ── Custom compact tooltip (small, at cursor, not system QToolTip) ──
+        self._tooltip_texts = {}
         self._tooltip = QLabel(self)
         self._tooltip.setStyleSheet(
             "QLabel{color:#ddd;background:#2a2a2a;border:1px solid #555;"
@@ -227,8 +228,16 @@ class PdfReaderWidget(QWidget):
 
         root.addWidget(self.toolbar)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus); self.setMouseTracking(True)
+        # Collect all toolbar widgets for tooltip management
+        self._toolbar_buttons = [
+            self.btn_scroll, self.btn_grid, self.btn_prev, self.btn_next,
+            self.btn_zoom_out, self.btn_zoom_in, self.zoom_edit, self.btn_fit_width,
+            self.btn_fit_height, self.btn_close,
+        ]
+        self._store_tooltips()
 
     def _hover_on(self, widget):
+        """Attach mouse tracking to a toolbar button."""
         widget._oe = widget.enterEvent; widget._ol = widget.leaveEvent
         def enter_event(e):
             self._hover_widget = widget; self._hover_timer.start(500)
@@ -247,10 +256,19 @@ class PdfReaderWidget(QWidget):
                 if widget._om: widget._om(e)
             widget.mouseMoveEvent = move_event
 
+    def _store_tooltips(self):
+        """Read all tooltip texts from buttons, then clear Qt system tooltips
+        so only our compact custom QLabel shows."""
+        for w in self._toolbar_buttons:
+            t = w.toolTip()
+            if t:
+                self._tooltip_texts[id(w)] = t
+            w.setToolTip("")   # kill Qt system big tooltip
+
     def _show_tooltip(self):
         w = getattr(self, '_hover_widget', None)
         if w and hasattr(self, '_hover_pos'):
-            t = w.toolTip()
+            t = self._tooltip_texts.get(id(w), "")
             if t:
                 p = self.mapFromGlobal(self._hover_pos)
                 self._tooltip.setText(t); self._tooltip.adjustSize()

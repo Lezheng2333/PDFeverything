@@ -185,6 +185,7 @@ class MainWindow(QMainWindow):
         self.reader.btn_zoom_in.setToolTip(tr("reader_zoom_in"))
         self.reader.zoom_edit.setToolTip(tr("reader_zoom_edit"))
         self.reader.btn_close.setToolTip(tr("reader_close"))
+        self.reader._store_tooltips()  # capture translated text, kill Qt big tooltips
         # Refresh welcome screen text if no document loaded
         if not self.reader.has_document():
             self.reader._show_welcome(
