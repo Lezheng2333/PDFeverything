@@ -56,10 +56,6 @@ class PdfReaderWidget(QWidget):
         self._scroll_debounce.setInterval(PAGE_DEBOUNCE_MS)
         self._scroll_debounce.timeout.connect(self._do_debounce_calibration)
 
-        self._pre_render_timer = QTimer(self); self._pre_render_timer.setSingleShot(True)
-        self._pre_render_timer.setInterval(0)
-        self._pre_render_timer.timeout.connect(self._pre_render_batch)
-
         self._hover_timer = QTimer(self); self._hover_timer.setSingleShot(True)
         self._hover_timer.setInterval(3000)
         self._hover_timer.timeout.connect(self._show_tooltip)
@@ -74,7 +70,7 @@ class PdfReaderWidget(QWidget):
         self._zoom_popup.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._zoom_popup.hide()
 
-        self._pre_render_idx = 0; self._welcome = None
+        self._welcome = None
         self._welcome_drop = "Drop PDF here to read"
         self._welcome_btn_text = "Load file..."
         self._init_ui()
@@ -286,7 +282,7 @@ class PdfReaderWidget(QWidget):
         self._default_zoom_pct = max(50, min(300, int(self._fh_ratio * 100)))
         self.zoom_edit.setText(str(self._default_zoom_pct))
         self._build_labels()
-        self._pre_render_all()
+        self._render_visible_range()   # only render ~5 pages near current
         self._layout_labels()
         self._update_nav_ui()
         self.label_filename.setText(path.name)
@@ -378,29 +374,43 @@ class PdfReaderWidget(QWidget):
             QTimer.singleShot(40, self._sharp_render)
 
     def _sharp_render(self):
-        """Deferred real rendering: render ALL pages at target zoom, then layout."""
+        """Deferred: render only the visible ±2 pages at target zoom, then layout."""
         if not self.doc or not self._labels or self._pending_zoom_pct is None:
             return
         try:
-            pct = self._pending_zoom_pct
-            vw, vh = self._viewport_size()
-            zk = self._zoom_key(vw, vh)
-            for pi, label in enumerate(self._labels):
-                try:
-                    key = (pi, zk)
-                    pix = PdfReaderWidget._cache_get(key)
-                    if pix is None:
-                        pix = self._get_or_render(pi, vw, vh)
-                    if pix:
-                        label.setPixmap(pix)
-                        label.setFixedSize(pix.size())
-                except Exception:
-                    pass
+            self._render_visible_range()
             self._layout_labels()
         except Exception:
             pass
         finally:
             self._pending_zoom_pct = None
+
+    def _visible_page_range(self):
+        """Return (start, end) of pages to render — current page ± 2, clamped."""
+        s = max(0, self._current_page - 2)
+        e = min(self._total_pages, self._current_page + 3)
+        return s, e
+
+    def _render_visible_range(self):
+        """Render only pages near the current position (view-driven, ~5 pages)."""
+        if not self.doc or not self._labels:
+            return
+        vw, vh = self._viewport_size()
+        zk = self._zoom_key(vw, vh)
+        s, e = self._visible_page_range()
+        for pi in range(s, e):
+            if pi >= len(self._labels):
+                continue
+            try:
+                key = (pi, zk)
+                pix = PdfReaderWidget._cache_get(key)
+                if pix is None:
+                    pix = self._get_or_render(pi, vw, vh)
+                if pix:
+                    self._labels[pi].setPixmap(pix)
+                    self._labels[pi].setFixedSize(pix.size())
+            except Exception:
+                pass
 
     def _adjust_zoom(self, delta: int):
         if not self.doc: return
@@ -485,7 +495,7 @@ class PdfReaderWidget(QWidget):
         self.scroll_area.verticalScrollBar().blockSignals(True)
         for label in self._labels:
             label.setParent(None); label.deleteLater()
-        self._labels.clear(); self._pre_render_idx = 0
+        self._labels.clear()
         self.scroll_area.verticalScrollBar().blockSignals(False)
 
     def _layout_labels(self):
@@ -547,18 +557,7 @@ class PdfReaderWidget(QWidget):
 
     # ═══════════ Pre-render ═══════════
 
-    def _pre_render_all(self):
-        self._pre_render_idx = 0; self._pre_render_timer.start()
-
-    def _pre_render_batch(self):
-        if not self.doc: return
-        vw, vh = self._viewport_size()
-        end = min(self._pre_render_idx + BATCH, self._total_pages)
-        for pi in range(self._pre_render_idx, end):
-            self._get_or_render(pi, vw, vh)
-        self._pre_render_idx = end
-        if self._pre_render_idx < self._total_pages:
-            self._pre_render_timer.start()
+    # pre-render removed — now lazy-renders visible range on scroll stop
 
     # ═══════════ Scroll tracking (bisect, O(log n)) ═══════════
 
@@ -569,10 +568,12 @@ class PdfReaderWidget(QWidget):
             max(0, self._page_heights[self._current_page]))
 
     def _on_scrollbar_changed(self, value):
-        """Scrollbar moved — fire both throttle (rough) and debounce (precise)."""
+        """Scrollbar moved — fire throttle (rough page), debounce (precise+render)."""
         if self.doc:
             self._scroll_throttle.start()
             self._scroll_debounce.start()
+            # When scroll stops, debounce triggers _do_debounce_calibration
+            # which calls _render_visible_range for the current viewport
 
     def _do_throttle_page(self):
         """Throttle: only update when the estimated page has changed significantly
@@ -599,10 +600,10 @@ class PdfReaderWidget(QWidget):
         except Exception: pass
 
     def _do_debounce_calibration(self):
-        """Precise calibration via bisect on _page_heights — O(log n)."""
+        """Precise calibration via bisect on _page_heights — O(log n).
+        On page change, trigger visible-range lazy render."""
         try:
-            if not self.doc or not self._page_heights:
-                return
+            if not self.doc or not self._page_heights: return
             sb = self.scroll_area.verticalScrollBar()
             if not sb: return
             mid = max(0, sb.value() + sb.pageStep() // 2)
@@ -612,30 +613,8 @@ class PdfReaderWidget(QWidget):
             if idx != self._current_page:
                 self._current_page = idx
                 self._update_nav_ui()
-                self._prefetch_around(idx)
-        except Exception:
-            pass
-
-    def _prefetch_around(self, page_idx: int):
-        """Low-priority prefetch of N-1 and N+1 pages after scroll stops.
-        Uses a single-shot timer that re-validates self.doc before executing."""
-        if not self.doc: return
-        vw, vh = self._viewport_size()
-        for pi in (page_idx - 1, page_idx + 1):
-            if 0 <= pi < self._total_pages:
-                key = (pi, self._zoom_key(vw, vh))
-                if key not in PdfReaderWidget._cache:
-                    # Deferred prefetch — validates doc is still alive before rendering
-                    QTimer.singleShot(300, lambda p=pi, w=vw, h=vh: self._safe_prefetch(p, w, h))
-
-    def _safe_prefetch(self, pi, vw, vh):
-        """Prefetch guard: only render if doc and labels still alive."""
-        if not self.doc or not self._labels or pi >= len(self._labels):
-            return
-        try:
-            self._get_or_render(pi, vw, vh)
-        except Exception:
-            pass
+                self._render_visible_range()  # lazy-render nearby pages
+        except Exception: pass
 
     # ═══════════ Render ═══════════
 

@@ -280,3 +280,19 @@ Ver 1.3.0 | 2026-06-26 — PDF 阅读器
     - BUGFIX: 滚动到边界后捏合误触发缩放 — 真实 pinch 检测 pixelDelta==0
     - BUGFIX: 双 timer 页码跳动 — throttle 仅在 >1 页跳变时更新
     - BUGFIX: 工具栏布局报错 — setEnabled 移到 btn_next 创建之后
+
+  Ver 1.3.11 | 懒渲染策略：只渲染可见范围 ±2 页
+
+    - **删除全量预渲染**：移除 _pre_render_all / _pre_render_batch / BATCH 常量
+      —— 打开 PDF 不再渲染所有页面，仅渲染当前页 ± 2 页（约 5 页）
+    - **按需渲染流水线**：
+      · `_render_visible_range()` — 渲染当前页 ± 2 页（约 5 页）
+      · `_visible_page_range()` — 计算 (start, end) 范围，边界钳位
+      · `_sharp_render` — 缩放后只渲染可见范围，不再遍历全部页面
+      · `_do_debounce_calibration` — 滚动停止后自动调用 _render_visible_range
+    - **即时缩放不变**：Pass 1 仍然是可见 label 的即时像素拉伸 (<5ms)
+    - **缓存保留**：已渲染过的缩放比例不再重复渲染（多分辨率 cache 仍然有效）
+    - **内存优化**：删除 _prefetch_around / _safe_prefetch + 预渲染 timer
+    - **效果**：点按 +/- 瞬时响应 → 40ms 后仅附近 5 页变清晰
+      → 用户滚动时，停下的位置立即渲染可见页
+      → 从未见过的页面在滚动停止时才首次渲染
