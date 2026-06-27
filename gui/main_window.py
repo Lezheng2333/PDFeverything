@@ -409,8 +409,8 @@ class MainWindow(QMainWindow):
             self.file_list.add_files(paths)
 
     def closeEvent(self, event: QCloseEvent):
-        # Check if reader has unsaved edits before closing
-        if self.reader.has_unsaved_edits:
+        # Check if reader has unsaved edits — only when a document is loaded
+        if self.reader.has_document() and self.reader.has_unsaved_edits:
             result = self.reader._prompt_save_changes()
             if result == "cancel":
                 event.ignore(); return

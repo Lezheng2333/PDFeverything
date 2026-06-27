@@ -497,7 +497,7 @@ class PdfReaderWidget(QWidget):
 
     def close_document(self):
         self._cancel_deferred_renders()
-        if self._edit_mode: self._leave_edit_mode()
+        if self._edit_mode: self._leave_edit_mode(skip_prompt=True)  # prompt handled by caller
         if self._page_editor:
             # Don't close the editor's doc — it's our shared self.doc. We'll close it below.
             self._page_editor._doc = None
@@ -947,6 +947,7 @@ class PdfReaderWidget(QWidget):
         self._update_edit_buttons()
         # Install container-level event handlers for box-select + drag
         self.page_container._edit_widget = self
+        self.page_container.setMouseTracking(True)
         self.page_container.mousePressEvent = self._grid_mouse_press
         self.page_container.mouseMoveEvent = self._grid_mouse_move
         self.page_container.mouseReleaseEvent = self._grid_mouse_release
@@ -993,43 +994,54 @@ class PdfReaderWidget(QWidget):
         return -1
 
     def _grid_mouse_press(self, e):
-        """Container-level mouse press: selection or drag sort.
-        Drag only activates when Sort button is checked and page is selected."""
+        """Container-level mouse press: selection or start drag-sort."""
         if not self._edit_mode: return
         pos = e.position().toPoint()
         self._rubber_origin = pos
-        self._drag_active = False
         pi = self._grid_page_at_pos(pos)
-        can_drag = self.btn_edit_sort.isChecked() and pi >= 0 and pi in self._selected_pages
-        if can_drag:
+        self._drag_start_page = pi
+
+        # Sort mode: if Sort is checked and page is selected, prepare to drag
+        if self.btn_edit_sort.isChecked() and pi >= 0 and pi in self._selected_pages:
             self._drag_active = True
-            self._drag_source = pi
-            self._drag_origin = pos
-            self._layout_labels()
-        elif pi >= 0:
-            self._selected_pages = {pi}
+            self._drag_source_page = pi
+            return
+
+        # Normal selection
+        mods = QApplication.keyboardModifiers()
+        ctrl = bool(mods & Qt.KeyboardModifier.ControlModifier)
+        shift = bool(mods & Qt.KeyboardModifier.ShiftModifier)
+
+        if pi >= 0:
+            if ctrl:
+                if pi in self._selected_pages: self._selected_pages.discard(pi)
+                else: self._selected_pages.add(pi)
+            elif shift and self._selected_pages:
+                start = min(self._selected_pages)
+                end = pi
+                if end < start: start, end = end, start
+                self._selected_pages = set(range(start, end + 1))
+            else:
+                self._selected_pages = {pi}
             self._drag_active = False
             self._update_edit_buttons()
             self._layout_labels()
-        else:
-            self._drag_active = False
 
     def _grid_mouse_move(self, e):
-        """Container-level mouse move: drag sort or rectangle selection."""
+        """Container-level mouse move: rectangle select or drag-sort tracking."""
         if not self._edit_mode: return
         pos = e.position().toPoint()
         if not hasattr(self, '_rubber_origin') or not self._rubber_origin: return
 
-        if self._drag_active and self._selected_pages:
-            # Drag mode — highlight insertion position
+        if self._drag_active and self._drag_start_page is not None:
             target = self._grid_page_at_pos(pos)
-            if target >= 0 and target != self._drag_target:
+            if target >= 0 and target not in self._selected_pages and target != self._drag_target:
                 self._drag_target = target
-                # Temporarily highlight insertion cell
-                self._layout_labels()
+                self._layout_labels()  # show insertion highlight
             return
 
-        # Rectangle select mode
+        # Rectangle select (non-drag mode)
+        if self._drag_active: return  # dragging, don't select
         dist = (pos - self._rubber_origin).manhattanLength()
         if dist < 8: return
         x1, y1 = self._rubber_origin.x(), self._rubber_origin.y()
@@ -1046,22 +1058,31 @@ class PdfReaderWidget(QWidget):
         self._layout_labels()
 
     def _grid_mouse_release(self, e):
-        """End selection or complete drag-sort."""
+        """End selection or complete drag-sort move."""
         if not self._edit_mode: return
-        if self._drag_active and self._selected_pages:
-            target = self._grid_page_at_pos(e.position().toPoint())
-            if target >= 0 and self._page_editor:
+        pos = e.position().toPoint()
+
+        if self._drag_active and self._selected_pages and self._page_editor:
+            target = self._grid_page_at_pos(pos)
+            if target >= 0 and target not in self._selected_pages:
                 source_list = sorted(self._selected_pages)
-                self._page_editor.move_pages(source_list, target)
+                # Adjust target: if source pages are before target, they shift after deletion
+                offset = sum(1 for s in source_list if s < target)
+                effective_target = target - offset
+                self._page_editor.move_pages(source_list, effective_target)
                 self._unsaved_edits = True
                 self._selected_pages.clear()
+                PdfReaderWidget._clear_cache()
                 self._rebuild_labels_from_editor()
                 self._layout_labels()
                 self._update_edit_buttons()
                 self._update_nav_ui()
+
+        # Reset drag state
         self._rubber_origin = None
         self._drag_active = False
         self._drag_target = None
+        self._drag_start_page = None
 
     def _on_grid_click(self, pi: int, e):
         """Handle click in Grid edit mode for selection."""
@@ -1165,6 +1186,7 @@ class PdfReaderWidget(QWidget):
         self.doc = self._page_editor._doc  # sync shared doc
         self._unsaved_edits = True
         self._selected_pages.clear()
+        PdfReaderWidget._clear_cache()  # ALL cache is stale after page deletion
         self._rebuild_labels_from_editor()
         self._layout_labels(); self._update_edit_buttons()
         self._update_nav_ui()
