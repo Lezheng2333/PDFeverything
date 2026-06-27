@@ -76,6 +76,7 @@ A high-performance PDF reader with **vector-grade rendering** — rivaling Acrob
 
 | Operation | What it does |
 |---|---|
+| 📖 **PDF Reader** | Scroll & Grid modes, vector-grade rendering, trackpad pinch-to-zoom |
 | 🔀 **Mixed Merge** | PDF + Word + PPT + Excel + images + text → one PDF |
 | 🔗 **PDF Merge** | Combine multiple PDFs in any order |
 | ✂️ **PDF Split** | Split by page, by chunks of N pages, or by custom ranges |
@@ -319,6 +320,7 @@ MIT — do whatever you want with it. [LICENSE](resources/LICENSE.txt)
 
 | 操作 | 说明 |
 |---|---|
+| 📖 **PDF 阅读器** | 连续/网格双模式，矢量级渲染画质，触控板捏合缩放 |
 | 🔀 **混合合并** | PDF + Word + PPT + Excel + 图片 + 文本 → 一个 PDF |
 | 🔗 **PDF 合并** | 多个 PDF 按任意顺序合并 |
 | ✂️ **PDF 拆分** | 按页码、每 N 页或自定义范围拆分 |
