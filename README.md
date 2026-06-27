@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/Lezheng2333/PDFeverything/releases"><img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-blue?style=flat-square" /></a>
-  <a href="https://github.com/Lezheng2333/PDFeverything/releases/latest"><img src="https://img.shields.io/badge/version-v1.3.9-007aff?style=flat-square" /></a>
+  <a href="https://github.com/Lezheng2333/PDFeverything/releases/latest"><img src="https://img.shields.io/badge/version-v1.3.10-007aff?style=flat-square" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" /></a>
 </p>
 
@@ -31,7 +31,7 @@ Drag everything in — any combination of PDFs, Word documents, PowerPoint decks
 
 > 🔗 [**Latest Release →**](https://github.com/Lezheng2333/PDFeverything/releases/latest)
 
-## 🆕 What's New in v1.3.9
+## 🆕 What's New in v1.3.10
 
 - 🌐 **English UI** — toggle between Chinese and English in Settings > Language
 - 🪟 **Windows Office COM** — native Word/PPT/Excel conversion on Windows (no fallback renderer needed!)
@@ -308,7 +308,7 @@ MIT — do whatever you want with it. [LICENSE](resources/LICENSE.txt)
 | 🔄 **旋转** | 旋转页面 90° / 180° / 270° |
 | ℹ️ **信息** | 查看页数、元数据、加密状态 |
 
-### 🆕 v1.3.9 新功能
+### 🆕 v1.3.10 新功能
 
 - 🌐 **英文界面** — 设置 → 语言 切换中英文
 - 🪟 **Windows Office 集成** — 调用本机 Word/PPT/Excel 高保真转换

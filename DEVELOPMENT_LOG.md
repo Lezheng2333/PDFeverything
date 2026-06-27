@@ -264,3 +264,19 @@ Ver 1.3.0 | 2026-06-26 — PDF 阅读器
       · `_on_resize`: 使用旧 `_fw_ratio/_fh_ratio` 计算旧因子
     - 所有缩放路径统一：old_pct → old_factor, new_factor, scale = new/old
     - BUGFIX: 点 +/- 按钮页面反向缩放或不变 — 缩放基数错误导致方向反转
+
+  Ver 1.3.10 | 阅读器 UI 完善 + 缩放性能优化
+    - 空文档状态规范化：文件名和 ✕ 按钮隐藏；页码 0/0；翻页按钮禁用
+      1 页文档显示 1/1 且翻页按钮禁用；关闭文档后恢复空状态
+    - 文件名标签样式更新：圆角药丸 + 内阴影模拟凹陷感
+    - 翻页/缩放按钮 30px→34px 放大，◀▶−+ 全量显示
+    - 页面居中：竖版/横版混合 PDF 各自在视口宽度居中对齐
+    - 缩放性能重写：
+      · Pass 1 仅缩放可见 labels（<5ms），不再遍历全部页面
+      · `_layout_labels` 空 pixmap 时用 PDF 尺寸估算，不阻塞 UI
+      · Pass 2 延迟 180ms→40ms，高清渲染更快到位
+      · `_on_resize` 简化为比率更新 + 延迟渲染
+    - Tooltip：按钮正上方弹出（mapToGlobal），白字深黑紧凑样式
+    - BUGFIX: 滚动到边界后捏合误触发缩放 — 真实 pinch 检测 pixelDelta==0
+    - BUGFIX: 双 timer 页码跳动 — throttle 仅在 >1 页跳变时更新
+    - BUGFIX: 工具栏布局报错 — setEnabled 移到 btn_next 创建之后
