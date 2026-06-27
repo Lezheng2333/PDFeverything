@@ -153,7 +153,7 @@ class PdfReaderWidget(QWidget):
         self.btn_prev.clicked.connect(self.prev_page)
         self._hover_on(self.btn_prev)
 
-        self.page_label = QLabel("1 / 1")
+        self.page_label = QLabel("0 / 0")
         self.page_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.page_label.setFixedWidth(70)
         self.page_label.setStyleSheet("QLabel{color:#bbb}")
@@ -163,6 +163,10 @@ class PdfReaderWidget(QWidget):
         self._hover_on(self.btn_next)
 
         tb.addWidget(self.btn_prev); tb.addWidget(self.page_label); tb.addWidget(self.btn_next)
+
+        # Initially disabled — no document loaded yet
+        self.btn_prev.setEnabled(False)
+        self.btn_next.setEnabled(False)
         tb.addStretch()
 
         self.btn_zoom_out = QPushButton("−"); self.btn_zoom_out.setFixedSize(34,34)
@@ -197,12 +201,13 @@ class PdfReaderWidget(QWidget):
 
         self.label_filename = QLabel("")
         self.label_filename.setStyleSheet("color:#777;")
+        self.label_filename.hide()  # hidden until a document is loaded
         tb.addWidget(self.label_filename)
 
         self.btn_close = QPushButton("✕"); self.btn_close.setObjectName("btn_close")
         self.btn_close.setFixedSize(26,26); self.btn_close.setToolTip("Close this document")
-        self.btn_close.clicked.connect(
-            lambda: (self.close_document(), self.close_requested.emit()))
+        self.btn_close.clicked.connect(self._on_close)
+        self.btn_close.hide()  # hidden until a document is loaded
         tb.addWidget(self.btn_close)
 
         root.addWidget(self.toolbar)
@@ -243,6 +248,12 @@ class PdfReaderWidget(QWidget):
             if mode == ViewMode.SCROLL:
                 self._scroll_to_page_top()
 
+    def _on_close(self):
+        """Close button handler — only acts when document is loaded."""
+        if self.doc:
+            self.close_document()
+            self.close_requested.emit()
+
     # ═══════════ Open / Close ═══════════
 
     def open_pdf(self, path: Path) -> None:
@@ -272,6 +283,8 @@ class PdfReaderWidget(QWidget):
         self._layout_labels()
         self._update_nav_ui()
         self.label_filename.setText(path.name)
+        self.label_filename.show()
+        self.btn_close.show()
         self.document_changed.emit(str(path))
         self.setFocus()
 
@@ -282,7 +295,11 @@ class PdfReaderWidget(QWidget):
         PdfReaderWidget._clear_cache()
         self.scroll_area.verticalScrollBar().blockSignals(True)
         self._destroy_labels()
-        self._page_heights.clear(); self._update_nav_ui(); self.label_filename.clear()
+        self._page_heights.clear()
+        self.label_filename.clear()
+        self.label_filename.hide()
+        self.btn_close.hide()
+        self._update_nav_ui()
         self.page_container.setFixedSize(0, 0); self.page_container.resize(0, 0)
         self.scroll_area.verticalScrollBar().blockSignals(False)
         self._show_welcome()
@@ -735,9 +752,14 @@ class PdfReaderWidget(QWidget):
         QTimer.singleShot(180, self._sharp_render)
 
     def _update_nav_ui(self):
-        self.page_label.setText(f"{self._current_page + 1} / {self._total_pages}")
-        self.btn_prev.setEnabled(self._current_page > 0)
-        self.btn_next.setEnabled(self._current_page < self._total_pages - 1)
+        if self._total_pages == 0:
+            self.page_label.setText("0 / 0")
+            self.btn_prev.setEnabled(False)
+            self.btn_next.setEnabled(False)
+        else:
+            self.page_label.setText(f"{self._current_page + 1} / {self._total_pages}")
+            self.btn_prev.setEnabled(self._current_page > 0)
+            self.btn_next.setEnabled(self._current_page < self._total_pages - 1)
 
     # ═══════════ Welcome (overlay on self, immune to scroll) ═══════════
 
