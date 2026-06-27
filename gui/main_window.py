@@ -169,6 +169,11 @@ class MainWindow(QMainWindow):
         # Tab names
         self.tabs.setTabText(0, tr("tab_merge"))
         self.tabs.setTabText(1, tr("tab_reader"))
+        # Reader edit button labels
+        self.reader._normal_label = tr("reader_edit")
+        self.reader._editing_label = tr("reader_editing")
+        if not self.reader._edit_mode:
+            self.reader.btn_edit.setText(self.reader._normal_label)
         # Reader toolbar
         self.reader.btn_scroll.setText(tr("reader_scroll"))
         self.reader.btn_scroll.setToolTip(tr("reader_scroll_tip"))

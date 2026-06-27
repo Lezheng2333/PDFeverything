@@ -84,6 +84,9 @@ class PdfReaderWidget(QWidget):
         # ── Grid edit mode ──
         self._edit_mode = False
         self._drag_sort_mode = False
+        self._normal_label = "✎ Edit"     # i18n overrides in main_window
+        self._editing_label = "✎ Editing"
+        self._original_snapshot = None
         self._page_editor = None     # PdfPageEditor (lazy init on edit)
         self._selected_pages: set[int] = set()
         self._drag_source = None     # page index being dragged
@@ -445,6 +448,36 @@ class PdfReaderWidget(QWidget):
         if path:
             self._page_editor.save(Path(path))
             self._unsaved_edits = False
+        self._layout_labels()  # Bug 4 fix: re-layout after dialog
+
+    def _revert_to_original(self):
+        """Discard all edits: reload the original document snapshot."""
+        if self._original_snapshot and self.doc:
+            import io
+            self.doc.close()
+            new_doc = fitz.open(stream=self._original_snapshot, filetype="pdf")
+            # Copy pages over: save new doc to stream, reload into self.doc
+            buf = io.BytesIO()
+            new_doc.save(buf)
+            new_doc.close()
+            buf.seek(0)
+            self.doc = fitz.open(stream=buf.read(), filetype="pdf")
+            if self._page_editor:
+                self._page_editor._doc = self.doc
+            self._unsaved_edits = False
+            self._total_pages = len(self.doc)
+            self._current_page = 0
+            PdfReaderWidget._clear_cache()
+            self._destroy_labels()
+            self._build_labels()
+            # Re-render thumbnails
+            vw, vh = self._viewport_size()
+            old_zm = self._zoom_mode
+            self._zoom_mode = 1.0
+            for pi in range(self._total_pages):
+                self._get_or_render(pi, vw, vh)
+            self._zoom_mode = old_zm
+            self._layout_labels()
 
     def closeEvent(self, event):
         """Window close — check unsaved edits before closing."""
@@ -937,13 +970,18 @@ class PdfReaderWidget(QWidget):
 
     def _enter_edit_mode(self):
         self._edit_mode = True; self.btn_edit.setChecked(True)
-        self.btn_edit.setText("✎ Editing")
+        self.btn_edit.setText(self._editing_label)  # use i18n string
         self._selected_pages.clear()
+        # Snapshot current document state for "discard changes" revert
+        if self.doc:
+            import io
+            buf = io.BytesIO()
+            self.doc.save(buf)
+            self._original_snapshot = buf.getvalue()
         # Lazy init page editor — share the GUI's fitz doc
         if self._page_editor is None and self.doc:
             from core.page_editor import PdfPageEditor
             self._page_editor = PdfPageEditor(self.doc, self._path)
-            self._page_editor.on_change(lambda e: self._rebuild_labels_from_editor())
         self._update_edit_buttons()
         # Install container-level event handlers for box-select + drag
         self.page_container._edit_widget = self
@@ -960,8 +998,10 @@ class PdfReaderWidget(QWidget):
             if result == "cancel": return
             if result == "save_as":
                 self._save_edited_copy()
+            elif result == "discard":
+                self._revert_to_original()
         self._edit_mode = False; self.btn_edit.setChecked(False)
-        self.btn_edit.setText("✎ Edit")
+        self.btn_edit.setText(self._normal_label)  # use i18n string
         self._selected_pages.clear(); self._drag_source = None
         self.edit_toolbar.hide()
         # Restore container event handlers
@@ -1195,8 +1235,9 @@ class PdfReaderWidget(QWidget):
         if not self._page_editor or not self._selected_pages: return
         path, _ = QFileDialog.getSaveFileName(self, "提取页面", "extracted.pdf",
                                               "PDF (*.pdf)")
-        if not path: return
+        if not path: self._layout_labels(); return
         self._page_editor.extract_pages(list(self._selected_pages), Path(path))
+        self._layout_labels()
         QMessageBox.information(self, "完成", f"已提取到 {path}")
 
     def _edit_export_menu(self):
@@ -1266,17 +1307,23 @@ class PdfReaderWidget(QWidget):
         doc.close()
 
     def _edit_undo(self):
-        if self._page_editor:
+        if self._page_editor and self._page_editor.can_undo():
             self._page_editor.undo()
-            # Undo may rebuild the doc — sync widget's reference
+            # Undo restores snapshot → new fitz.Document in editor._doc
             self.doc = self._page_editor._doc
+            self._unsaved_edits = self._page_editor.can_undo()  # still unsaved if more undos possible
+            self._selected_pages.clear()
+            PdfReaderWidget._clear_cache()
             self._rebuild_labels_from_editor()
             self._layout_labels(); self._update_edit_buttons()
             self._update_nav_ui()
 
     def _edit_redo(self):
-        if self._page_editor:
+        if self._page_editor and self._page_editor.can_redo():
             self._page_editor.redo()
+            self.doc = self._page_editor._doc  # sync after snapshot restore
+            self._selected_pages.clear()
+            PdfReaderWidget._clear_cache()
             self._rebuild_labels_from_editor()
             self._layout_labels(); self._update_edit_buttons()
             self._update_nav_ui()
