@@ -47,7 +47,8 @@ T = {
     "label_output":           {"zh": "输出路径:",                                   "en": "Output:"},
     "btn_browse":             {"zh": "浏览...",                                     "en": "Browse..."},
 
-    # ── Tab 2 tools ──
+    # ── Tools group (merged into Merge & Convert tab) ──
+    "group_tools":            {"zh": "🔧 格式转换工具",                               "en": "🔧 Format Conversion Tools"},
     "tool_extract_text":      {"zh": "📄 PDF 提取文字",                             "en": "📄 Extract Text from PDF"},
     "tool_extract_images":    {"zh": "🖼️ PDF 提取图片",                             "en": "🖼️ Extract Images from PDF"},
     "tool_pdf_to_images":     {"zh": "🖼️ PDF → 图片",                               "en": "🖼️ PDF → Images"},

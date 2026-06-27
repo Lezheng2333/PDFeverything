@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QSplitter,
     QTabWidget,
     QVBoxLayout,
@@ -70,7 +71,6 @@ class MainWindow(QMainWindow):
 
         self.tabs = QTabWidget()
         self._init_merge_tab()
-        self._init_tools_tab()
         self._init_reader_tab()
         main_layout.addWidget(self.tabs)
 
@@ -168,8 +168,7 @@ class MainWindow(QMainWindow):
         self.label_output.setText(tr("label_output"))
         # Tab names
         self.tabs.setTabText(0, tr("tab_merge"))
-        self.tabs.setTabText(1, tr("tab_tools"))
-        self.tabs.setTabText(2, tr("tab_reader"))
+        self.tabs.setTabText(1, tr("tab_reader"))
         # Reader toolbar
         self.reader.btn_scroll.setText(tr("reader_scroll"))
         self.reader.btn_scroll.setToolTip(tr("reader_scroll_tip"))
@@ -229,9 +228,19 @@ class MainWindow(QMainWindow):
             self._on_file_list_double_click)
         splitter.addWidget(self.file_list)
 
+        # Right panel wrapped in scroll area — tools scroll when window is too short
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet(
+            "QScrollArea{background:#2c2c2c;border:none;}"
+            "QScrollBar:vertical{background:#1e1e1e;width:8px;margin:0}"
+            "QScrollBar::handle:vertical{background:#555;border-radius:3px;min-height:20px}"
+            "QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0}")
+
         right = QWidget()
+        right.setStyleSheet("background:transparent;")
         right_layout = QVBoxLayout(right)
-        right_layout.setContentsMargins(10, 0, 0, 0)
+        right_layout.setContentsMargins(10, 0, 0, 20)
 
         self.merge_group = QGroupBox(tr("group_merge_ops"))
         mg_layout = QVBoxLayout(self.merge_group)
@@ -245,7 +254,6 @@ class MainWindow(QMainWindow):
             "QPushButton:disabled { background-color: #aaa; }")
         self.btn_merge.clicked.connect(self._on_merge_clicked)
         mg_layout.addWidget(self.btn_merge)
-
         right_layout.addWidget(self.merge_group)
 
         self.single_group = QGroupBox(tr("group_pdf_ops"))
@@ -272,9 +280,35 @@ class MainWindow(QMainWindow):
         self.btn_info.clicked.connect(self._on_info_clicked)
         sg_layout.addWidget(self.btn_info)
         right_layout.addWidget(self.single_group)
+
+        # ── Tools group (formerly tab_tools) ──
+        self.tools_group = QGroupBox(tr("group_tools"))
+        tg_layout = QVBoxLayout(self.tools_group)
+        tool_keys = [
+            ("tool_extract_text", self._on_extract_text),
+            ("tool_extract_images", self._on_extract_images),
+            ("tool_pdf_to_images", self._on_pdf_to_images),
+            ("tool_images_to_pdf", self._on_single_images_to_pdf),
+            ("tool_to_word", self._on_to_word),
+            ("tool_to_ppt", self._on_to_ppt),
+            ("tool_to_excel", self._on_to_excel),
+        ]
+        self._tool_buttons = []
+        for key, slot in tool_keys:
+            btn = QPushButton(tr(key))
+            btn.setMinimumHeight(36)
+            btn.clicked.connect(slot)
+            tg_layout.addWidget(btn)
+            self._tool_buttons.append(btn)
+        right_layout.addWidget(self.tools_group)
+
+        self.office_status_label = QLabel(tr("office_checking"))
+        self.office_status_label.setStyleSheet("color: #666;")
+        right_layout.addWidget(self.office_status_label)
         right_layout.addStretch()
 
-        splitter.addWidget(right)
+        scroll.setWidget(right)
+        splitter.addWidget(scroll)
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 1)
         layout.addWidget(splitter)
@@ -292,34 +326,6 @@ class MainWindow(QMainWindow):
         layout.addLayout(out_layout)
 
         self.tabs.addTab(tab, tr("tab_merge"))
-
-    def _init_tools_tab(self):
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-
-        tool_keys = [
-            ("tool_extract_text", self._on_extract_text),
-            ("tool_extract_images", self._on_extract_images),
-            ("tool_pdf_to_images", self._on_pdf_to_images),
-            ("tool_images_to_pdf", self._on_single_images_to_pdf),
-            ("tool_to_word", self._on_to_word),
-            ("tool_to_ppt", self._on_to_ppt),
-            ("tool_to_excel", self._on_to_excel),
-        ]
-        self._tool_buttons = []
-        for key, slot in tool_keys:
-            btn = QPushButton(tr(key))
-            btn.setMinimumHeight(36)
-            btn.clicked.connect(slot)
-            layout.addWidget(btn)
-            self._tool_buttons.append(btn)
-
-        layout.addStretch()
-        self.office_status_label = QLabel(tr("office_checking"))
-        self.office_status_label.setStyleSheet("color: #666;")
-        layout.addWidget(self.office_status_label)
-
-        self.tabs.addTab(tab, tr("tab_tools"))
 
     def _init_reader_tab(self):
         """Tab 3: PDF reader."""
@@ -347,7 +353,7 @@ class MainWindow(QMainWindow):
             path = Path(path_str)
         self.reader.opened_from_file_list = from_file_list
         self.reader.open_pdf(path)
-        self.tabs.setCurrentIndex(2)  # switch to reader tab
+        self.tabs.setCurrentIndex(1)  # switch to reader tab
 
     def _on_reader_close(self):
         """Handle user clicking × on reader. Jump back to file list if opened from there."""
