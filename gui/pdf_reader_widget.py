@@ -280,7 +280,7 @@ class PdfReaderWidget(QWidget):
                 self._tooltip.move(x, y)
                 self._tooltip.show(); self._tooltip.raise_()
                 # Auto-hide after 2s
-                QTimer.singleShot(2000, self._tooltip.hide)
+                QTimer.singleShot(5000, self._tooltip.hide)
 
     # ═══════════ Mode ═══════════
 
