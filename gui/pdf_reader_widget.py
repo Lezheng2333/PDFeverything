@@ -66,6 +66,10 @@ class PdfReaderWidget(QWidget):
         self._hover_timer.setInterval(500)
         self._hover_timer.timeout.connect(self._show_tooltip)
 
+        self._hide_timer = QTimer(self); self._hide_timer.setSingleShot(True)
+        self._hide_timer.setInterval(200)
+        self._hide_timer.timeout.connect(self._tooltip.hide)
+
         self._zoom_popup_timer = QTimer(self); self._zoom_popup_timer.setSingleShot(True)
         self._zoom_popup_timer.setInterval(1200)
         self._zoom_popup_timer.timeout.connect(self._hide_zoom_popup)
@@ -149,26 +153,36 @@ class PdfReaderWidget(QWidget):
             "QPushButton:disabled{color:#555;background:#2a2a2a}")
         etb = QHBoxLayout(self.edit_toolbar); etb.setContentsMargins(8,4,8,4); etb.setSpacing(6)
         self.btn_edit_sel = QPushButton("☝ Select"); self.btn_edit_sel.clicked.connect(self._edit_select_mode)
+        self.btn_edit_sel.setToolTip("退出排序模式，返回选择模式")
         etb.addWidget(self.btn_edit_sel)
         self.btn_edit_sort = QPushButton("↕ Sort"); self.btn_edit_sort.clicked.connect(self._edit_sort_mode)
         self.btn_edit_sort.setCheckable(True)
+        self.btn_edit_sort.setToolTip("拖拽排序：选中页面后拖拽到目标位置重新排列")
         etb.addWidget(self.btn_edit_sort)
         etb.addSpacing(8)
         self.btn_edit_rot = QPushButton("↻ Rotate 90°"); self.btn_edit_rot.clicked.connect(self._edit_rotate)
+        self.btn_edit_rot.setToolTip("顺时针旋转选中页面 90°")
         etb.addWidget(self.btn_edit_rot)
         self.btn_edit_del = QPushButton("✕ Delete"); self.btn_edit_del.clicked.connect(self._edit_delete)
+        self.btn_edit_del.setToolTip("删除选中的页面（需二次确认）")
         etb.addWidget(self.btn_edit_del)
         etb.addSpacing(8)
         self.btn_edit_extract = QPushButton("📄 Extract"); self.btn_edit_extract.clicked.connect(self._edit_extract)
+        self.btn_edit_extract.setToolTip("将选中的页面提取合并为一个新 PDF")
         etb.addWidget(self.btn_edit_extract)
-        self.btn_edit_export = QPushButton("💾 Export"); self.btn_edit_export.clicked.connect(self._edit_export)
+        self.btn_edit_export = QPushButton("💾 Export")
+        self.btn_edit_export.clicked.connect(self._edit_export_menu)
+        self.btn_edit_export.setToolTip("导出选中页面为 PDF / JPG / Word / PowerPoint")
         etb.addWidget(self.btn_edit_export)
         self.btn_edit_print = QPushButton("🖨 Print"); self.btn_edit_print.clicked.connect(self._edit_print)
+        self.btn_edit_print.setToolTip("调系统打印对话框打印选中页面")
         etb.addWidget(self.btn_edit_print)
         etb.addStretch()
         self.btn_edit_undo = QPushButton("↩ Undo"); self.btn_edit_undo.clicked.connect(self._edit_undo)
+        self.btn_edit_undo.setToolTip("撤销上一次操作 (Ctrl+Z)")
         etb.addWidget(self.btn_edit_undo)
         self.btn_edit_redo = QPushButton("↪ Redo"); self.btn_edit_redo.clicked.connect(self._edit_redo)
+        self.btn_edit_redo.setToolTip("重做已撤销的操作 (Ctrl+Shift+Z)")
         etb.addWidget(self.btn_edit_redo)
         self.edit_toolbar.hide()
 
@@ -281,6 +295,10 @@ class PdfReaderWidget(QWidget):
             self.btn_scroll, self.btn_grid, self.btn_edit, self.btn_prev, self.btn_next,
             self.btn_zoom_out, self.btn_zoom_in, self.zoom_edit, self.btn_fit_width,
             self.btn_fit_height, self.btn_close,
+            # Edit toolbar buttons
+            self.btn_edit_sel, self.btn_edit_sort, self.btn_edit_rot,
+            self.btn_edit_del, self.btn_edit_extract, self.btn_edit_export,
+            self.btn_edit_print, self.btn_edit_undo, self.btn_edit_redo,
         ]
         self._store_tooltips()
 
@@ -290,11 +308,16 @@ class PdfReaderWidget(QWidget):
         def enter_event(e):
             self._hover_widget = widget; self._hover_timer.start(500)
             self._hover_pos = e.globalPosition().toPoint()
+            # Cancel any pending leave-hide timer
+            if self._hide_timer.isActive(): self._hide_timer.stop()
             if widget._oe: widget._oe(e)
         def leave_event(e):
-            self._hover_timer.stop(); self._tooltip.hide()
+            self._hover_timer.stop()
+            # Delay hide by 200ms to prevent flicker on brief boundary crossings
+            self._hide_timer.start(200)
             if widget._ol: widget._ol(e)
         widget.enterEvent = enter_event; widget.leaveEvent = leave_event
+        widget.setMouseTracking(True)
         if hasattr(widget, 'mouseMoveEvent'):
             widget._om = widget.mouseMoveEvent
             def move_event(e):
@@ -327,8 +350,11 @@ class PdfReaderWidget(QWidget):
                 if y < 0: y = p.y() + 16
                 self._tooltip.move(x, y)
                 self._tooltip.show(); self._tooltip.raise_()
-                # Auto-hide after 2s
-                QTimer.singleShot(5000, self._tooltip.hide)
+                # Cancel hide timer if tooltip was re-shown, then set 5s auto-hide
+                self._hide_timer.stop()  # stop any pending leave-hide
+                self._auto_hide_timer = QTimer(self); self._auto_hide_timer.setSingleShot(True)
+                self._auto_hide_timer.timeout.connect(self._tooltip.hide)
+                self._auto_hide_timer.start(5000)
 
     # ═══════════ Mode ═══════════
 
@@ -1076,13 +1102,77 @@ class PdfReaderWidget(QWidget):
         self._page_editor.extract_pages(list(self._selected_pages), Path(path))
         QMessageBox.information(self, "完成", f"已提取到 {path}")
 
-    def _edit_export(self):
+    def _edit_export_menu(self):
+        """Show a popup menu for export file type selection."""
+        if not self._selected_pages: return
+        from PyQt6.QtWidgets import QMenu
+        menu = QMenu(self)
+        act_pdf = menu.addAction("📄 导出为 PDF")
+        act_jpg = menu.addAction("🖼️ 导出为 JPG 图片")
+        act_word = menu.addAction("📝 导出为 Word (.docx)")
+        act_ppt = menu.addAction("📊 导出为 PowerPoint (.pptx)")
+        act = menu.exec(self.btn_edit_export.mapToGlobal(
+            self.btn_edit_export.rect().bottomLeft()))
+        if act == act_pdf:
+            self._edit_export("pdf")
+        elif act == act_jpg:
+            self._edit_export("jpg")
+        elif act == act_word:
+            self._edit_export("word")
+        elif act == act_ppt:
+            self._edit_export("ppt")
+
+    def _edit_export(self, fmt: str = "pdf"):
         if not self._page_editor or not self._selected_pages: return
-        path, _ = QFileDialog.getSaveFileName(self, "导出所选页面", "exported.pdf",
-                                              "PDF (*.pdf)")
+        filters = {"pdf": "PDF (*.pdf)", "jpg": "JPG (*.jpg)", "word": "Word (*.docx)", "ppt": "PowerPoint (*.pptx)"}
+        default_ext = {"pdf": ".pdf", "jpg": ".jpg", "word": ".docx", "ppt": ".pptx"}
+        filter_str = filters.get(fmt, filters["pdf"])
+        ext = default_ext.get(fmt, ".pdf")
+        path, _ = QFileDialog.getSaveFileName(self, "导出所选页面", "exported" + ext, filter_str)
         if not path: return
-        self._page_editor.extract_pages(list(self._selected_pages), Path(path))
+        if fmt == "pdf":
+            self._page_editor.extract_pages(list(self._selected_pages), Path(path))
+        elif fmt == "jpg":
+            import fitz, tempfile
+            reader = fitz.open(self._path) if self._path else None
+            txt_path = None
+            if reader:
+                import tempfile
+                tmp = Path(tempfile.gettempdir()) / "pdfeverything_export_tmp.pdf"
+                self._page_editor.extract_pages(list(self._selected_pages), tmp)
+                txt_path = tmp
+                reader.close()
+            if txt_path and txt_path.exists():
+                PdfReaderWidget._export_pages_to_images(txt_path, Path(path))
+                txt_path.unlink(missing_ok=True)
+        elif fmt == "word":
+            import tempfile
+            tmp = Path(tempfile.gettempdir()) / "pdfeverything_export_tmp.pdf"
+            self._page_editor.extract_pages(list(self._selected_pages), tmp)
+            from core.pdf_ops import PdfOperator
+            PdfOperator.to_word(tmp, Path(path))
+            tmp.unlink(missing_ok=True)
+        elif fmt == "ppt":
+            import tempfile
+            tmp = Path(tempfile.gettempdir()) / "pdfeverything_export_tmp.pdf"
+            self._page_editor.extract_pages(list(self._selected_pages), tmp)
+            from core.pdf_ops import PdfOperator
+            PdfOperator.to_ppt(tmp, Path(path))
+            tmp.unlink(missing_ok=True)
         QMessageBox.information(self, "完成", f"已导出到 {path}")
+
+    @staticmethod
+    def _export_pages_to_images(pdf_path: Path, output_dir: Path):
+        """Export PDF pages as JPG images to a directory."""
+        import fitz
+        doc = fitz.open(pdf_path)
+        stem = output_dir.stem
+        parent = output_dir.parent
+        for i, page in enumerate(doc, start=1):
+            pix = page.get_pixmap(dpi=200)
+            img_path = parent / f"{stem}_p{i:04d}.jpg"
+            pix.save(str(img_path))
+        doc.close()
 
     def _edit_undo(self):
         if self._page_editor:
