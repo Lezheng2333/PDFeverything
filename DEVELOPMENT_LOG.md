@@ -420,9 +420,13 @@ Ver 1.3.0 | 2026-06-26 — PDF 阅读器
     - BUGFIX: 动画引擎破坏基础缩放 — 移除, 回归简洁累加器方案
 
 
-  Ver 1.4.0 | Grid View 编辑模块 — Core page_editor + GUI 编辑模式 + CLI/MCP 页面操作
+----------------------------------------------------------------
 
-    - **Core 层 page_editor.py (新建)**:
+Ver 1.4.0 | 2026-06-27
+----------------------------------------------------------------
+
+  Ver 1.4.0 | Grid View 编辑模块 — Core page_editor + GUI 编辑模式 + CLI/MCP 页面操作
+    - Core 层 page_editor.py (新建):
       PdfPageEditor 命令模式撤销/重做 (MAX_UNDO_DEPTH=50)
       delete_pages / rotate_pages / move_pages / extract_pages
       on_change() 观察者模式事件回调
@@ -452,4 +456,46 @@ Ver 1.3.0 | 2026-06-26 — PDF 阅读器
       pdf_delete_pages / pdf_rotate_pages / pdf_move_pages / pdf_extract_pages
       pdf_undo / pdf_redo / pdf_history
     - BUGFIX: 软件崩溃 — _destroy_labels 未回收 _page_num_label, 内存泄漏
+
+
+  Ver 1.4.1 | Grid Editor 稳定版 — 编辑/撤销/保存闭环 + UI 修复
+    - Editor 共享 fitz.Document: GUI 与编辑器共享同一份 PDF 对象, 删除/旋转/排序立即可见
+    - Snapshot 撤销重做: 每次操作前拍完整 PDF 快照入栈(MAX=50), 撤销恢复快照, 重做再应用
+    - 保存闭环: 关闭文档/退出编辑/软件退出均检测未保存修改, 弹窗三选项(取消/不保存/另存为)
+    - 不保存还原: _enter_edit_mode 拍摄原始快照, 选不保存→_revert_to_original 回滚全部编辑
+    - 导出为菜单: PDF/JPG 图片/Word .docx/PowerPoint .pptx 四种格式可选
+    - Edit 按钮仅网格模式可见, 连续滚动自动隐藏; close_document 重置模式+清状态
+    - 编辑工具栏 10 按钮: Select/Sort/Rotate/Delete/Extract/Export/Print/SaveAs/Undo/Redo
+      所有按钮附带鼠标悬停小弹窗说明功能(0.5s延迟+5s消失+200ms离开保护)
+    - 排序: 选中页面(支持Shift多选)→点 Sort→拖拽到目标位置释放→move_pages 重排序
+      无选中点 Sort 弹出提示; Select 按钮退出排序模式恢复选择
+    - 自适应填充: min(scale_w,scale_h)保证各比例页面(A4横竖/A5/长幅/方块)居中不溢出
+    - 关闭文档→重置为 Scroll 模式+欢迎界面; 编辑模式关闭 PDF→先退出编辑再回到欢迎
+    - 缩放记忆: 从连续滚动进网格保存 zoom, 切回或双击跳转恢复原缩放数值
+    - 旋转累积: 清除被旋转页面全部缓存, 每次点击可见 90°→180°→270°→0° 完整旋转
+    - UI 合并: PDF 工具 tab 移除, 所有工具按钮并入合并与转换右侧面板(QScrollArea)
+    - 右侧面板默认宽度加大(QSplitter 3:1→2:1), 小窗口自动出现垂直滚动条
+    - 网格缩略图缓存隔离: force_fit 缩略图用独立 thumb_{w}_{h} 键名避免与 100% base 冲突
+    - 页码标签生命周期管理: _hide_page_numbers 在切换模式/重建标签/关闭文档时回收
+    - i18n: 编辑工具栏全部按钮+提示+导出菜单(10键)中英文双译; Edit 按钮切换语言正常
+    - MCP 工具 16→23: 新增 7 个页面编辑工具(delete_pages/rotate_pages/move_pages/
+      extract_pages/undo/redo/history)
+    - CLI 新增 8 命令: delete-pages/rotate-pages/move-pages/extract-pages
+      page-undo/page-redo/page-history/page-list(全部支持 --json 输出)
+    - requirements.txt 添加 pyinstaller, 项目 .venv(Python 3.14)完整可移植
+    - BUGFIX: 编辑操作无效果 — PdfPageEditor 独立 fitz.Document 副本, GUI 看不到修改
+      → 改为共享同一个 doc 对象, GUI 和 editor 双向同步
+    - BUGFIX: 删除后页面重复出现 — 残存缓存(_clear_cache 删除时未清)导致旧索引误匹配
+    - BUGFIX: 撤销闪退 — _restore_snapshot 后 GUI self.doc 未同步 editor._doc
+    - BUGFIX: 重做闪退 — _edit_redo 缺少 doc 同步和缓存清除
+    - BUGFIX: 编辑器不保存退出未还原 — 缺少 _revert_to_original(_original_snapshot)
+    - BUGFIX: 编辑按钮切中文后仍显示英文 — _normal_label/_editing_label 未走 i18n
+    - BUGFIX: 导出后灰屏 — 文件对话框后未调 _layout_labels()
+    - BUGFIX: 关闭文档后 toolbar 残留+Edit 按钮仍显示 — close_document 未重置 ViewMode
+    - BUGFIX: 排序按钮无响应 — page_container 缺 setMouseTracking(true)
+    - BUGFIX: 警告弹窗弹出两遍 — close_document→leave_edit 重复弹+MainWindow 空文档误弹
+    - BUGFIX: _revert_to_original 闪退 — 方法内 fitz.open 缺 import fitz
+    - BUGFIX: Tooltip 立刻消失 — QTimer.singleShot bound method GC + 缺离开延迟 _hide_timer
+    - BUGFIX: 编辑栏无悬浮弹窗 — 9个编辑按钮未调用 _hover_on 注册鼠标跟踪
+    - BUGFIX: 缩放弹窗 tooltip 重复 — Qt 系统 ToolTip 与自定义 QLabel 同时弹出, _store_tooltips 清空 setToolTip
 

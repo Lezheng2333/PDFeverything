@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/Lezheng2333/PDFeverything/releases"><img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-blue?style=flat-square" /></a>
-  <a href="https://github.com/Lezheng2333/PDFeverything/releases/latest"><img src="https://img.shields.io/badge/version-v1.4.0-007aff?style=flat-square" /></a>
+  <a href="https://github.com/Lezheng2333/PDFeverything/releases/latest"><img src="https://img.shields.io/badge/version-v1.4.1-007aff?style=flat-square" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" /></a>
 </p>
 
@@ -31,12 +31,14 @@ Drag everything in — any combination of PDFs, Word documents, PowerPoint decks
 
 > 🔗 [**Latest Release →**](https://github.com/Lezheng2333/PDFeverything/releases/latest)
 
-## 🆕 What's New in v1.4.0
+## 🆕 What's New in v1.4.1
 
-- 📖 **Built-in PDF Reader** — Scroll & Grid modes, two-pass zoom, trackpad pinch-to-zoom
-- 🎨 **Vector-grade rendering** — exact-resolution rendering, MuPDF native 8-bit sub-pixel AA (matching Acrobat/WPS)
-- 🖥️ **Full HiDPI/Retina** — renders at native physical-pixel resolution, 1:1 pixel mapping, zero blur
-- ⚡ **Instant zoom** — Pass 1 <5ms pixel scale + Pass 2 40ms sharp render at exact zoom×dpr
+- 🖼️ **Grid View Editor** — adaptive-fill thumbnails, click/box-select pages, drag-sort, delete/rotate/extract
+- 💾 **Save-before-close** — warns when exiting with unsaved edits, discard reverts to original document
+- ↩️ **Snapshot undo/redo** — full PDF snapshot per edit, reliable undo/redo stack (Ctrl+Z/Ctrl+Shift+Z)
+- 📄 **Export as...** — export selected pages as PDF / JPG / Word / PowerPoint
+- 🎨 **One-panel UI** — PDF Tools tab merged into Merge & Convert, edit toolbar, all hover tooltips
+- 🔌 **MCP 23 tools** — 7 new page-editing tools for AI agents
 
 ---
 
@@ -339,12 +341,14 @@ MIT — do whatever you want with it. [LICENSE](resources/LICENSE.txt)
 | 🔄 **旋转** | 旋转页面 90° / 180° / 270° |
 | ℹ️ **信息** | 查看页数、元数据、加密状态 |
 
-### 🆕 v1.4.0 新功能
+### 🆕 v1.4.1 新功能
 
-- 📖 **内置 PDF 阅读器** — 连续滚动 & 网格缩略图双模式，两阶段缩放，触控板捏合缩放
-- 🎨 **矢量级渲染画质** — 精确分辨率渲染，MuPDF 原生 8 位子像素抗锯齿（媲美 Acrobat/WPS）
-- 🖥️ **全 HiDPI/Retina 支持** — 原生物理像素渲染，1:1 像素映射，零模糊
-- ⚡ **跟手缩放** — Pass 1 <5ms 瞬时反馈 + Pass 2 40ms 精确分辨率渲染
+- 🖼️ **网格视图编辑器** — 自适应填充缩略图、单击/框选页面、拖拽排序、删除/旋转/提取
+- 💾 **保存提示** — 关闭时检测未保存修改，不保存则还原原始文档
+- ↩️ **快照撤销/重做** — 每次编辑拍 PDF 快照，可靠撤销重做栈 (Ctrl+Z/Ctrl+Shift+Z)
+- 📄 **导出为...** — 选中页面导出为 PDF / JPG 图片 / Word / PowerPoint
+- 🎨 **单面板 UI** — PDF 工具合并入合并与转换，编辑工具栏 10 按钮+全部悬浮提示
+- 🔌 **MCP 23 工具** — 新增 7 个页面编辑工具供 AI Agent 调用
 
 ### 🖥️ 界面预览
 
