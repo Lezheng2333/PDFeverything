@@ -87,6 +87,7 @@ class PdfReaderWidget(QWidget):
         self._rubber_origin = None   # QPoint of box-select / drag start
         self._drag_active = False
         self._drag_target = None
+        self._saved_scroll_zoom = None  # zoom before entering Grid
 
         # ── Custom compact tooltip (small, at cursor, not system QToolTip) ──
         self._tooltip_texts = {}
@@ -342,8 +343,26 @@ class PdfReaderWidget(QWidget):
                 label._page_num_label = None
 
     def _set_mode(self, mode: ViewMode):
-        if self._view_mode == ViewMode.GRID and mode == ViewMode.SCROLL:
+        if mode == ViewMode.GRID and self._view_mode == ViewMode.SCROLL:
+            # Save Scroll zoom before entering Grid
+            self._saved_scroll_zoom = self._zoom_mode
+        if mode == ViewMode.SCROLL and self._view_mode == ViewMode.GRID:
             self._hide_page_numbers()
+            # Restore Scroll zoom from before Grid
+            if self._saved_scroll_zoom is not None:
+                saved = self._saved_scroll_zoom
+                self._view_mode = mode
+                self.btn_scroll.setChecked(True)
+                self.btn_grid.setChecked(False)
+                if isinstance(saved, float):
+                    self._set_zoom_pct(int(saved * 100))
+                elif saved == "fit_width":
+                    self._on_fit_width()
+                elif saved == "fit_height":
+                    self._on_fit_height()
+                else:
+                    self._on_fit_height()  # fallback
+                return
         self._view_mode = mode
         self.btn_scroll.setChecked(mode == ViewMode.SCROLL)
         self.btn_grid.setChecked(mode == ViewMode.GRID)
@@ -398,8 +417,10 @@ class PdfReaderWidget(QWidget):
 
     def close_document(self):
         self._cancel_deferred_renders()
+        if self._edit_mode: self._leave_edit_mode()
         if self.doc: self.doc.close(); self.doc = None
         self._path = None; self._total_pages = 0; self._current_page = 0
+        self._saved_scroll_zoom = None
         PdfReaderWidget._clear_cache()
         self.scroll_area.verticalScrollBar().blockSignals(True)
         self._destroy_labels()
@@ -798,23 +819,26 @@ class PdfReaderWidget(QWidget):
 
     def _on_grid_dbl_click(self, page_idx: int):
         if self._view_mode != ViewMode.GRID: return
-        if self._edit_mode: return  # no jump in edit mode
+        if self._edit_mode: return
         self._hide_page_numbers()
         self._current_page = page_idx
-        # Force re-render of target page at Scroll resolution — flush grid thumbnail
-        old_zoom = self._zoom_mode
-        self._zoom_mode = 1.0  # ensure 100% base exists
-        vw, vh = self._viewport_size()
-        self._get_or_render(page_idx, vw, vh)
-        self._zoom_mode = old_zoom
-        # Set view mode and apply fit_height (will re-render from 100% base with proper zoom)
+        # Switch to Scroll mode and restore saved zoom (or fit_height as fallback)
         self._view_mode = ViewMode.SCROLL
         self.btn_scroll.setChecked(True); self.btn_grid.setChecked(False)
-        self._available_height = vh
-        self._apply_fit_mode("fit_height", self._default_zoom_pct)
+        if self._saved_scroll_zoom is not None:
+            saved = self._saved_scroll_zoom
+            if isinstance(saved, float):
+                self._set_zoom_pct(int(saved * 100))
+            elif saved == "fit_width":
+                self._on_fit_width()
+            elif saved == "fit_height":
+                self._on_fit_height()
+            else:
+                self._on_fit_height()
+        else:
+            self._on_fit_height()
         self._scroll_to_page_top()
         self._update_nav_ui()
-        # Schedule sharp render for visible pages
         self._schedule_render_visible(0)
 
     # ═══════════ Grid Edit Mode ═══════════
