@@ -200,7 +200,10 @@ class PdfReaderWidget(QWidget):
         tb.addWidget(self.btn_fit_width); tb.addWidget(self.btn_fit_height); tb.addStretch()
 
         self.label_filename = QLabel("")
-        self.label_filename.setStyleSheet("color:#777;")
+        self.label_filename.setStyleSheet(
+            "QLabel{color:#888;background:#1a1a1a;border:1px solid #333;"
+            "border-radius:6px;padding:4px 10px;font-size:12px;"
+            "border-top:1px solid #222;border-left:1px solid #222;}")
         self.label_filename.hide()  # hidden until a document is loaded
         tb.addWidget(self.label_filename)
 
