@@ -112,6 +112,10 @@ def launch_gui(open_files=None):
     from PyQt6.QtGui import QIcon
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
+    app.setStyleSheet(
+        "QToolTip {"
+        "  color: #eee; background: #2a2a2a; border: 1px solid #555;"
+        "  border-radius: 4px; padding: 4px 8px; font-size: 12px; }")
     icon_path = _app_icon_path()
     if icon_path:
         app.setWindowIcon(QIcon(icon_path))

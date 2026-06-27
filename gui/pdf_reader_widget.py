@@ -238,7 +238,11 @@ class PdfReaderWidget(QWidget):
         w = getattr(self, '_hover_widget', None)
         if w and hasattr(self, '_hover_pos'):
             t = w.toolTip()
-            if t: QToolTip.showText(self._hover_pos, t, self)
+            if t:
+                pos = self._hover_pos
+                # Offset above cursor by ~40px
+                pos.setY(pos.y() - 40)
+                QToolTip.showText(pos, t, self)
 
     # ═══════════ Mode ═══════════
 
