@@ -327,51 +327,40 @@ class PdfReaderWidget(QWidget):
         return 100
 
     def _set_zoom_pct(self, pct: int, skip_deferred: bool = False):
-        """Two-pass zoom.
-        Pass 1 (instant, <5ms): scale only VISIBLE labels, no re-render, no layout.
-        Pass 2 (deferred): render ALL pages at new zoom, then layout."""
+        """Two-pass zoom — always scales from 100% immortal base.
+        Pass 1 (instant, <5ms): scale 100% base pixmaps to target zoom.
+        Pass 2 (deferred): render visible range at target zoom for sharpness."""
         pct = max(50, min(300, int(round(pct))))
         if not self.doc or not self._labels:
             self._zoom_mode = pct / 100.0
             self.zoom_edit.setText(str(pct))
             return
 
-        old_pct = self._current_zoom_pct()
         self._zoom_mode = pct / 100.0
         self.btn_fit_width.setChecked(False)
         self.btn_fit_height.setChecked(False)
         self.zoom_edit.setText(str(pct))
 
-        # Pass 1: instant — scale only currently visible labels (<5ms)
-        new_factor = self._zoom_mode
-        if isinstance(self._zoom_mode, str):
-            new_factor = (self._fw_ratio if self._zoom_mode == "fit_width"
-                          else self._fh_ratio / self._default_zoom_pct)
-        old_val = old_pct / 100.0
-        new_val = pct / 100.0
-        scale = new_val / old_val if old_val > 0 else 1.0
-        if abs(scale - 1.0) > 0.001:
-            from PyQt6.QtCore import Qt as QtCore
-            # Only scale labels that HAVE a pixmap (already rendered). Skip null ones.
-            for label in self._labels:
-                if not label.isVisible():
-                    continue
-                try:
-                    pix = label.pixmap()
-                    if pix is None or pix.isNull():
-                        continue
-                    pw, ph = pix.size().width(), pix.size().height()
-                    tw, th = max(1, int(pw * scale)), max(1, int(ph * scale))
-                    label.setPixmap(pix.scaled(tw, th,
-                        QtCore.AspectRatioMode.IgnoreAspectRatio,
-                        QtCore.TransformationMode.SmoothTransformation))
-                    label.setFixedSize(tw, th)
-                except Exception:
-                    pass
+        # Pass 1: scale each page's 100% base pixmap to target zoom
+        target_factor = pct / 100.0
+        from PyQt6.QtCore import Qt as QtCore
+        for pi, label in enumerate(self._labels):
+            if not label.isVisible(): continue
+            try:
+                base_key = (pi, "z:1.000")
+                base = PdfReaderWidget._cache_get(base_key)
+                if base is None or base.isNull(): continue
+                bw, bh = base.size().width(), base.size().height()
+                tw, th = max(1, int(bw * target_factor)), max(1, int(bh * target_factor))
+                label.setPixmap(base.scaled(tw, th,
+                    QtCore.AspectRatioMode.IgnoreAspectRatio,
+                    QtCore.TransformationMode.SmoothTransformation))
+                label.setFixedSize(tw, th)
+            except Exception: pass
 
         self._show_zoom_popup(pct)
+        self._layout_labels()
 
-        # Pass 2: deferred — render all pages at target zoom, then layout.
         if not skip_deferred:
             self._pending_zoom_pct = pct
             QTimer.singleShot(40, self._sharp_render)
@@ -475,22 +464,23 @@ class PdfReaderWidget(QWidget):
         self.zoom_edit.setText(str(pct))
 
         # Pass 1: instant — scale visible labels only
-        scale = (pct / 100.0) / (old_pct / 100.0) if old_pct > 0 else 1.0
-        if abs(scale - 1.0) > 0.001:
-            from PyQt6.QtCore import Qt as QtCore
-            for label in self._labels:
-                if not label.isVisible(): continue
-                try:
-                    pix = label.pixmap()
-                    if pix is None or pix.isNull(): continue
-                    pw, ph = pix.size().width(), pix.size().height()
-                    tw, th = max(1, int(pw * scale)), max(1, int(ph * scale))
-                    label.setPixmap(pix.scaled(tw, th,
-                        QtCore.AspectRatioMode.IgnoreAspectRatio,
-                        QtCore.TransformationMode.SmoothTransformation))
-                    label.setFixedSize(tw, th)
-                except Exception: pass
+        target_factor = pct / 100.0
+        from PyQt6.QtCore import Qt as QtCore
+        for pi, label in enumerate(self._labels):
+            if not label.isVisible(): continue
+            try:
+                base_key = (pi, "z:1.000")
+                base = PdfReaderWidget._cache_get(base_key)
+                if base is None or base.isNull(): continue
+                bw, bh = base.size().width(), base.size().height()
+                tw, th = max(1, int(bw * target_factor)), max(1, int(bh * target_factor))
+                label.setPixmap(base.scaled(tw, th,
+                    QtCore.AspectRatioMode.IgnoreAspectRatio,
+                    QtCore.TransformationMode.SmoothTransformation))
+                label.setFixedSize(tw, th)
+            except Exception: pass
 
+        self._layout_labels()
         self._show_zoom_popup(pct)
         self._pending_zoom_pct = pct
         QTimer.singleShot(40, self._sharp_render)
@@ -516,21 +506,19 @@ class PdfReaderWidget(QWidget):
         if self._view_mode == ViewMode.SCROLL:
             self._page_heights = []; y = mg
             for pi, label in enumerate(self._labels):
+                # Use the label's existing pixmap if present (e.g. from pass 1 scale)
+                # Only render from cache if no pixmap is set (e.g. initial load)
                 pix = label.pixmap()
-                if pix is not None and not pix.isNull():
+                if pix is None or pix.isNull():
+                    if self.doc and pi < self._total_pages:
+                        pix = self._get_or_render(pi, vw, vh)
+                        if pix:
+                            label.setPixmap(pix)
+                            label.setFixedSize(pix.size())
+                if pix and not pix.isNull():
                     h, w = pix.height(), pix.width()
                 else:
-                    # Estimate from PDF dimensions if pixmap not yet rendered
-                    if self.doc and pi < self._total_pages:
-                        pr = self.doc[pi].rect
-                        zoom = (self._fw_ratio if self._zoom_mode == "fit_width"
-                                else self._fh_ratio if self._zoom_mode == "fit_height"
-                                else self._zoom_mode if isinstance(self._zoom_mode, float)
-                                else self._fh_ratio)
-                        w = int(pr.width * zoom)
-                        h = int(pr.height * zoom)
-                    else:
-                        w, h = 600, 800
+                    w, h = 600, 800
                 label.setStyleSheet("QLabel{background:white;}")
                 label.setCursor(Qt.CursorShape.ArrowCursor)
                 x = max(0, (vw - w) // 2)
@@ -662,22 +650,20 @@ class PdfReaderWidget(QWidget):
 
     @classmethod
     def _cache_put(cls, key, pix: QPixmap):
-        """LRU insert with memory-aware eviction. Pinned keys never evicted."""
-        # Move to end (most-recently-used) if already present
+        """LRU insert with memory-aware eviction. 100% base + fit modes are immortal."""
         if key in cls._cache:
             cls._cache.move_to_end(key)
             cls._cache[key] = pix
             return
-        # Estimate memory: RGBA = width * height * 4 bytes
         mem = pix.width() * pix.height() * 4
         cls._cache_memory_bytes += mem
         cls._cache[key] = pix
-        # Evict until under target, skipping pinned entries
         while cls._cache_memory_bytes > MAX_CACHE_MB * 1024 * 1024 and len(cls._cache) > 1:
             oldest_key, oldest_pix = next(iter(cls._cache.items()))
             pi, zk = oldest_key
-            if zk in ("fh", "fw"):  # pinned: fit_height / fit_width for first page
-                break  # cannot evict, will exceed limit (acceptable edge case)
+            # Immortal: 100% base + fit modes
+            if zk in ("fh", "fw", "z:1.000"):
+                break
             ow, oh = oldest_pix.width(), oldest_pix.height()
             cls._cache_memory_bytes -= ow * oh * 4
             cls._cache.popitem(last=False)
