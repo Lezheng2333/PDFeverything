@@ -68,7 +68,6 @@ class PdfReaderWidget(QWidget):
 
         self._hide_timer = QTimer(self); self._hide_timer.setSingleShot(True)
         self._hide_timer.setInterval(200)
-        self._hide_timer.timeout.connect(self._tooltip.hide)
 
         self._zoom_popup_timer = QTimer(self); self._zoom_popup_timer.setSingleShot(True)
         self._zoom_popup_timer.setInterval(1200)
@@ -105,6 +104,8 @@ class PdfReaderWidget(QWidget):
         self._welcome_drop = "Drop PDF here to read"
         self._welcome_btn_text = "Load file..."
         self._init_ui()
+        # Late bind: _hide_timer needs _tooltip which is created in _init_ui
+        self._hide_timer.timeout.connect(self._tooltip.hide)
 
     def showEvent(self, e):
         super().showEvent(e)
