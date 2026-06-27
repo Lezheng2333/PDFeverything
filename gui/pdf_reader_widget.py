@@ -29,7 +29,7 @@ RESIZE_DEBOUNCE = 350
 MAX_CACHE_MB = 400; CACHE_TARGET_MB = 280
 PRE_RENDER_EAGER = 5  # render first N pages eagerly, rest lazily
 PAGE_THROTTLE_MS = 30  # rough page update
-PAGE_DEBOUNCE_MS = 150  # precise bisect calibration
+PAGE_DEBOUNCE_MS = 80  # precise bisect calibration + render trigger
 
 
 class PdfReaderWidget(QWidget):
@@ -354,16 +354,16 @@ class PdfReaderWidget(QWidget):
         self.btn_fit_height.setChecked(False)
         self.zoom_edit.setText(str(pct))
 
-        # Pass 1: scale each page's 100% base pixmap to target zoom.
-        # Use LOGICAL size: the 100% base may have devicePixelRatio set (HiDPI),
-        # and QPixmap.scaled() returns a pixmap with dpr=1.0 — so targets must
-        # be in logical pixels or the label appears 2× oversized.
-        # If 100% base is not yet cached (lazy pre-render hasn't reached this page),
-        # render it on-the-fly so every label gets a correctly-sized pixmap.
+        # Pass 1: scale only VISIBLE pages' 100% base pixmap to target zoom.
+        # Non-visible pages don't need a pixmap — _layout_labels computes their
+        # dimensions from PDF geometry × zoom. This saves ~500 iterations for
+        # large PDFs while producing identical visual results.
         target_factor = pct / 100.0
         from PyQt6.QtCore import Qt as QtCore
-        for pi, label in enumerate(self._labels):
+        s, e = self._visible_page_range()
+        for pi in range(s, e):
             try:
+                label = self._labels[pi]
                 base_key = (pi, "z:1.000")
                 base = PdfReaderWidget._cache_get(base_key)
                 if base is None or base.isNull():
@@ -390,12 +390,12 @@ class PdfReaderWidget(QWidget):
             QTimer.singleShot(40, self._sharp_render)
 
     def _sharp_render(self):
-        """Deferred: render only the visible ±2 pages at target zoom, then layout."""
+        """Deferred: render visible pages at target zoom asynchronously.
+        Yields to event loop between pages — UI stays responsive."""
         if not self.doc or not self._labels or self._pending_zoom_pct is None:
             return
         try:
-            self._render_visible_range()
-            self._layout_labels()
+            self._render_visible_range_async(0)
         except Exception:
             pass
         finally:
@@ -454,30 +454,49 @@ class PdfReaderWidget(QWidget):
         if self._lazy_pre_render_index < self._total_pages:
             QTimer.singleShot(10, self._lazy_pre_render)
 
-    def _render_visible_range(self):
-        """Render pages near the current position at native HiDPI resolution (~3 pages).
-        Uses cache when available, renders fresh for misses."""
+    def _schedule_render_visible(self, delay_ms: int = 0):
+        """Schedule async visible-range render after delay_ms.
+        All render triggers (zoom, scroll stop, nav) go through here."""
+        if not self.doc: return
+        if delay_ms == 0:
+            self._render_visible_range_async(0)
+        else:
+            QTimer.singleShot(delay_ms, lambda: self._render_visible_range_async(0))
+
+    def _render_visible_range_async(self, pi_index=0):
+        """Render visible pages one at a time, yielding to the event loop
+        between each page. Current page always rendered first.
+        On first call (pi_index=0), builds the ordered page list."""
         if not self.doc or not self._labels:
             return
-        vw, vh = self._viewport_size()
-        zk = self._zoom_key(vw, vh)
-        s, e = self._visible_page_range()
-        # Render current page first (it's the priority), then neighbors
-        order = [self._current_page] + [p for p in range(s, e) if p != self._current_page]
-        for pi in order:
-            if pi < 0 or pi >= len(self._labels):
-                continue
-            try:
-                key = (pi, zk)
-                pix = PdfReaderWidget._cache_get(key)
-                if pix is None:
-                    pix = self._get_or_render(pi, vw, vh)
-                if pix:
-                    self._labels[pi].setPixmap(pix)
-                    lw, lh = self._logical_size(pix)
-                    self._labels[pi].setFixedSize(lw, lh)
-            except Exception:
-                pass
+        if pi_index == 0:
+            vw, vh = self._viewport_size()
+            s, e = self._visible_page_range()
+            self._async_order = [self._current_page] + [p for p in range(s, e) if p != self._current_page]
+            self._async_vw, self._async_vh = vw, vh
+        if pi_index >= len(self._async_order):
+            self._layout_labels()
+            return
+        pi = self._async_order[pi_index]
+        if pi < 0 or pi >= len(self._labels):
+            QTimer.singleShot(0, lambda: self._render_visible_range_async(pi_index + 1))
+            return
+        try:
+            key = (pi, self._zoom_key(self._async_vw, self._async_vh))
+            pix = PdfReaderWidget._cache_get(key)
+            if pix is None:
+                pix = self._get_or_render(pi, self._async_vw, self._async_vh)
+            if pix:
+                self._labels[pi].setPixmap(pix)
+                lw, lh = self._logical_size(pix)
+                self._labels[pi].setFixedSize(lw, lh)
+        except Exception:
+            pass
+        QTimer.singleShot(0, lambda: self._render_visible_range_async(pi_index + 1))
+
+    def _render_visible_range(self):
+        """Deprecated — kept for backward compat. Routes to async version."""
+        self._render_visible_range_async(0)
 
     def _adjust_zoom(self, delta: int):
         if not self.doc: return
@@ -529,13 +548,14 @@ class PdfReaderWidget(QWidget):
         self.btn_fit_height.setChecked(mode == "fit_height")
         self.zoom_edit.setText(str(pct))
 
-        # Pass 1: instant — scale from 100% base using LOGICAL size
-        # (base may have HiDPI devicePixelRatio set; scaled result has dpr=1.0)
-        # Render 100% base on demand if not yet cached.
+        # Pass 1: instant — scale VISIBLE pages' 100% base using LOGICAL size.
+        # Visible-only: same optimization as _set_zoom_pct Pass 1.
         target_factor = pct / 100.0
         from PyQt6.QtCore import Qt as QtCore
-        for pi, label in enumerate(self._labels):
+        s, e = self._visible_page_range()
+        for pi in range(s, e):
             try:
+                label = self._labels[pi]
                 base_key = (pi, "z:1.000")
                 base = PdfReaderWidget._cache_get(base_key)
                 if base is None or base.isNull():
@@ -682,7 +702,8 @@ class PdfReaderWidget(QWidget):
 
     def _do_debounce_calibration(self):
         """Precise calibration via bisect on _page_heights — O(log n).
-        On page change, trigger visible-range lazy render."""
+        Always triggers visible-range render regardless of page change,
+        so that stale zoom pixmaps get refreshed on scroll stop."""
         try:
             if not self.doc or not self._page_heights: return
             sb = self.scroll_area.verticalScrollBar()
@@ -694,7 +715,7 @@ class PdfReaderWidget(QWidget):
             if idx != self._current_page:
                 self._current_page = idx
                 self._update_nav_ui()
-                self._render_visible_range()  # lazy-render nearby pages
+            self._schedule_render_visible(50)  # 50ms for inertia to fully stop
         except Exception: pass
 
     # ═══════════ Render ═══════════
@@ -810,14 +831,17 @@ class PdfReaderWidget(QWidget):
         if not self.doc: return
         n = max(1, min(n, self._total_pages))
         self._current_page = n - 1; self._scroll_to_page_top(); self._update_nav_ui()
+        self._schedule_render_visible(0)  # instant high-quality render
 
     def next_page(self):
         if self.doc and self._current_page < self._total_pages - 1:
             self._current_page += 1; self._scroll_to_page_top(); self._update_nav_ui()
+            self._schedule_render_visible(0)  # instant high-quality render
 
     def prev_page(self):
         if self.doc and self._current_page > 0:
             self._current_page -= 1; self._scroll_to_page_top(); self._update_nav_ui()
+            self._schedule_render_visible(0)  # instant high-quality render
 
     def first_page(self): self.go_to_page(1)
     def last_page(self): self.go_to_page(self._total_pages)
