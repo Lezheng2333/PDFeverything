@@ -838,11 +838,18 @@ class PdfReaderWidget(QWidget):
             ad = e.angleDelta().y() if e.angleDelta() else 0
             pd = e.pixelDelta().y() if e.pixelDelta() else 0
             pinch = bool(e.modifiers() & Qt.KeyboardModifier.ControlModifier)
+            # macOS native pinch: phase=2 (ScrollUpdate) with no pixelDelta
+            # (only angleDelta). Overscroll rubber-banding has BOTH non-zero.
             if not pinch:
-                try: ph = e.phase(); pinch = (int(ph) >= 1)
-                except (AttributeError, TypeError): pass
-            if not pinch and pd and ad:
-                if abs(ad) > abs(pd) * 1.5: pinch = True
+                try:
+                    ph = e.phase()
+                    pinch = (int(ph) >= 1 and pd == 0)
+                except (AttributeError, TypeError):
+                    pass
+            # Windows / fallback: Ctrl+wheel, or extreme angle/pixel ratio
+            if not pinch and pd != 0 and ad != 0:
+                if abs(ad) > abs(pd) * 5:
+                    pinch = True
             if pinch:
                 self._pinch_acc += ad
                 threshold = 120
