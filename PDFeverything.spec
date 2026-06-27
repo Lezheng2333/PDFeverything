@@ -18,7 +18,8 @@ for mod in ('fitz', 'PIL'):
     except Exception:
         pass
 
-# Dock icon comes from CFBundleIconFile (.icns), no PNG bundling needed
+# Bundle PNG for QIcon.setWindowIcon (handles alpha correctly for Dock)
+datas.append((str(PROJECT_ROOT / 'resources' / 'app_icon.png'), 'resources'))
 
 # ── 隐藏导入 ─────────────────────────────────────────────
 
@@ -130,8 +131,8 @@ app = BUNDLE(
         "NSHighResolutionCapable": True,
         "CFBundleName": "PDFeverything",
         "CFBundleDisplayName": "PDFeverything",
-        "CFBundleShortVersionString": "1.3.10",
-        "CFBundleVersion": "1.3.10",
+        "CFBundleShortVersionString": "1.3.12",
+        "CFBundleVersion": "1.3.12",
         "CFBundleDocumentTypes": [
             {
                 "CFBundleTypeName": "PDF Document",

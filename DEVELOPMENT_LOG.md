@@ -296,3 +296,22 @@ Ver 1.3.0 | 2026-06-26 — PDF 阅读器
     - **效果**：点按 +/- 瞬时响应 → 40ms 后仅附近 5 页变清晰
       → 用户滚动时，停下的位置立即渲染可见页
       → 从未见过的页面在滚动停止时才首次渲染
+
+  Ver 1.3.12 | 图标重绘 — 液态玻璃艺术风格 + Dock 修复 + UI 微调
+    - **图标重绘** (1024×1024 px)：
+      · 硬对角蒙版 + TR/BL 圆角处高斯渐变过渡（r=12px）
+      · 左上白色高光 outline (rgba 120) + 右下暗色阴影 outline (rgba 70)
+      · PDF 240px Helvetica Bold，everything 192px SignPainter
+      · 外框 radius=160 + 内面板 radius=120，双层结构
+    - **备份**：平面版本 (app_icon_flat_1024) 保存在 resource 子目录
+    - **Dock 图标修复**：移除 app.setWindowIcon()，依赖 CFBundleIconFile 原生加载 .icns
+      — 彻底消除启动时的白边闪现
+    - **Skill 文档**：.claude/skills/ICON_DESIGN.md 记录完整制图流程和代码
+    - BUGFIX: 翻页/缩放按钮箭头被裁切 — 30px→34px
+    - BUGFIX: 空文档状态工具栏显示文件名和 ✕ — 改为隐藏
+    - BUGFIX: 空文档点击 Fit W/H/+/- 崩溃 — 增加 if not self.doc guard
+    - BUGFIX: 滚动到边界捏合误触发 — pixelDelta==0 检测
+    - BUGFIX: 缓慢滚动页码跳动 — throttle 仅在 >1 页跳变时更新
+    - BUGFIX: 混合竖版/横版 PDF 左对齐 — 每页独立居中对齐
+    - BUGFIX: Tooltip 暗色不可见 — 全局白字深黑紧凑样式
+    - BUGFIX: 缩放基数错误导致反向缩放 — new/old ratio 替换 _fw_ratio
