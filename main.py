@@ -75,21 +75,6 @@ def launch_mcp():
     serve()
 
 
-def _app_icon_path():
-    """Find the app icon .png (bundled in app or in source tree)."""
-    candidates = [
-        PROJECT_DIR / "resources" / "app_icon.png",
-    ]
-    if getattr(sys, "frozen", False):
-        candidates.append(Path(sys.executable).parent / ".." / "Resources" / "app_icon.png")
-        if hasattr(sys, "_MEIPASS"):
-            candidates.append(Path(sys._MEIPASS) / "resources" / "app_icon.png")
-    for p in candidates:
-        if p and p.exists():
-            return str(p)
-    return ""
-
-
 def _collect_file_args():
     """Collect file paths from argv that aren't known flags or commands.
     Filters out macOS launch-service noise like -psn_*."""
@@ -109,16 +94,14 @@ def _collect_file_args():
 
 def launch_gui(open_files=None):
     from PyQt6.QtWidgets import QApplication
-    from PyQt6.QtGui import QIcon
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     app.setStyleSheet(
         "QToolTip {"
         "  color: #fff; background: #1e1e1e; border: 1px solid #444;"
         "  border-radius: 4px; padding: 3px 7px; font-size: 11px; }")
-    icon_path = _app_icon_path()
-    if icon_path:
-        app.setWindowIcon(QIcon(icon_path))
+    # Dock icon comes from CFBundleIconFile (.icns embedded in .app bundle).
+    # No setWindowIcon override needed — ensures clean full-size icon from launch.
     app.setOrganizationName("PDFeverything")
     app.setApplicationName("PDFeverything")
     from gui.main_window import MainWindow

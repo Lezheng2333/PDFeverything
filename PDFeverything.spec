@@ -18,8 +18,7 @@ for mod in ('fitz', 'PIL'):
     except Exception:
         pass
 
-# Bundle app icon for Dock display
-datas.append((str(PROJECT_ROOT / 'resources' / 'app_icon.png'), 'resources'))
+# Dock icon comes from CFBundleIconFile (.icns), no PNG bundling needed
 
 # ── 隐藏导入 ─────────────────────────────────────────────
 
