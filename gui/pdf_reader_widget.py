@@ -487,7 +487,7 @@ class PdfReaderWidget(QWidget):
         vw, vh = self._viewport_size(); sp, mg = 16, 20
 
         if self._view_mode == ViewMode.SCROLL:
-            self._page_heights = []; y = mg; mx = 0
+            self._page_heights = []; y = mg
             for pi, label in enumerate(self._labels):
                 pix = label.pixmap()
                 if not pix or pix.isNull():
@@ -496,9 +496,11 @@ class PdfReaderWidget(QWidget):
                 h = pix.height() if pix else 800; w = pix.width() if pix else 600
                 label.setStyleSheet("QLabel{background:white;}")
                 label.setCursor(Qt.CursorShape.ArrowCursor)
-                label.move(mg, y); label.show()
-                mx = max(mx, w); self._page_heights.append(y); y += h + sp
-            self.page_container.setFixedSize(mx + 2*mg, y - sp + mg)
+                # Center each page individually regardless of orientation
+                x = max(0, (vw - w) // 2)
+                label.move(x, y); label.show()
+                self._page_heights.append(y); y += h + sp
+            self.page_container.setFixedSize(vw, y - sp + mg)
 
         elif self._view_mode == ViewMode.GRID:
             self._page_heights = []
