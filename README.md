@@ -58,6 +58,20 @@ Drag everything in — any combination of PDFs, Word documents, PowerPoint decks
 
 Every file goes through its own converter (AppleScript → Office on macOS, or pure-Python fallback), then everything gets stitched together. If one file fails, the rest still go through — you get a summary of what worked and what didn't.
 
+## 📖 Built-in PDF Reader
+
+A high-performance PDF reader with **vector-grade rendering** — rivaling Acrobat and WPS.
+
+| Feature | Detail |
+|---|---|
+| 🎨 **Vector-grade quality** | Exact zoom×dpr rendering, MuPDF native 8-bit sub-pixel anti-aliasing |
+| 🖥️ **Full HiDPI/Retina** | 1:1 native pixel mapping, crisp text at any zoom level |
+| 📜 **Scroll & Grid modes** | Continuous vertical scroll or 3-column thumbnail grid |
+| ⚡ **Two-pass zoom** | Pass 1 (<5ms) instant pixel scale + Pass 2 (40ms) sharp re-render |
+| 🤏 **Trackpad pinch** | Native pinch-to-zoom with phase detection |
+| 💾 **LRU cache** | 400MB memory limit, immortal 100% base, zoom-level cache reuse |
+| 🔍 **Smart navigation** | Bisect page tracking, async visible-range refresh on scroll stop |
+
 ## 🔧 Everything It Can Do
 
 | Operation | What it does |
@@ -286,6 +300,20 @@ MIT — do whatever you want with it. [LICENSE](resources/LICENSE.txt)
 ```
 
 把不同类型的文件拖进来，每个文件经过专用转换器处理，然后按顺序合并。某个文件转换失败了也不影响其他的——最后会给你一份汇总报告。
+
+### 📖 内置 PDF 阅读器
+
+高性能 PDF 阅读器，**矢量级渲染画质**——媲美 Acrobat 和 WPS。
+
+| 特性 | 详情 |
+|---|---|
+| 🎨 **矢量级画质** | 精确 zoom×dpr 渲染，MuPDF 原生 8 位子像素抗锯齿 |
+| 🖥️ **全 HiDPI/Retina** | 1:1 原生物理像素映射，任意缩放级别文字锐利 |
+| 📜 **连续 / 网格双模式** | 连续垂直滚动或 3 列缩略图网格 |
+| ⚡ **两阶段缩放** | Pass 1 (<5ms) 瞬时像素拉伸 + Pass 2 (40ms) 高清重绘 |
+| 🤏 **触控板捏合** | 原生手势检测，跟手缩放 |
+| 💾 **LRU 缓存** | 400MB 内存上限，100% 基础永生，缩放级别缓存复用 |
+| 🔍 **智能导航** | 二分页码追踪，滚动停止时异步刷新可见区域 |
 
 ### 🔧 全部功能
 
