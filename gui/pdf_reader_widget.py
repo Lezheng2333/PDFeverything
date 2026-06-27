@@ -186,6 +186,11 @@ class PdfReaderWidget(QWidget):
         self.btn_edit_redo.setToolTip("重做已撤销的操作 (Ctrl+Shift+Z)")
         etb.addWidget(self.btn_edit_redo)
         self.edit_toolbar.hide()
+        # Attach hover tracking for tooltips
+        for btn in [self.btn_edit_sel, self.btn_edit_sort, self.btn_edit_rot,
+                     self.btn_edit_del, self.btn_edit_extract, self.btn_edit_export,
+                     self.btn_edit_print, self.btn_edit_undo, self.btn_edit_redo]:
+            self._hover_on(btn)
 
         self.page_container = QWidget()
         self.page_container.setStyleSheet("background:transparent;")
@@ -445,6 +450,10 @@ class PdfReaderWidget(QWidget):
     def close_document(self):
         self._cancel_deferred_renders()
         if self._edit_mode: self._leave_edit_mode()
+        if self._page_editor:
+            # Don't close the editor's doc — it's our shared self.doc. We'll close it below.
+            self._page_editor._doc = None
+            self._page_editor = None
         if self.doc: self.doc.close(); self.doc = None
         self._path = None; self._total_pages = 0; self._current_page = 0
         self._saved_scroll_zoom = None
@@ -882,11 +891,11 @@ class PdfReaderWidget(QWidget):
         self._edit_mode = True; self.btn_edit.setChecked(True)
         self.btn_edit.setText("✎ Editing")
         self._selected_pages.clear()
-        # Lazy init page editor
-        if self._page_editor is None and self._path:
+        # Lazy init page editor — share the GUI's fitz doc
+        if self._page_editor is None and self.doc:
             from core.page_editor import PdfPageEditor
-            self._page_editor = PdfPageEditor(self._path)
-            self._page_editor.on_change(lambda e: self._layout_labels())
+            self._page_editor = PdfPageEditor(self.doc, self._path)
+            self._page_editor.on_change(lambda e: self._rebuild_labels_from_editor())
         self._update_edit_buttons()
         # Install container-level event handlers for box-select + drag
         self.page_container._edit_widget = self
@@ -1059,17 +1068,11 @@ class PdfReaderWidget(QWidget):
     # ── Edit operations ──
 
     def _edit_print(self):
-        if not self._selected_pages: return
+        if not self._selected_pages or not self._page_editor: return
         try:
             import tempfile
             tmp = Path(tempfile.gettempdir()) / "pdfeverything_print.pdf"
-            if self._page_editor:
-                self._page_editor.extract_pages(list(self._selected_pages), tmp)
-            else:
-                from core.page_editor import PdfPageEditor
-                e = PdfPageEditor(self._path)
-                e.extract_pages(list(self._selected_pages), tmp)
-                e.close()
+            self._page_editor.extract_pages(list(self._selected_pages), tmp)
             import subprocess, sys
             if sys.platform == "darwin":
                 subprocess.Popen(["open", str(tmp)])
@@ -1081,6 +1084,13 @@ class PdfReaderWidget(QWidget):
     def _edit_rotate(self):
         if not self._page_editor or not self._selected_pages: return
         self._page_editor.rotate_pages(list(self._selected_pages), 90)
+        self.doc = self._page_editor._doc
+        # Re-render thumbnails for rotated pages (rotation changed page aspect ratio)
+        vw, vh = self._viewport_size()
+        for pi in self._selected_pages:
+            if pi < len(self._labels):
+                cache_key = (pi, f"thumb_{vw}_{vh}")
+                PdfReaderWidget._cache_pop(cache_key)  # invalidate old thumbnail
         self._layout_labels(); self._update_edit_buttons()
 
     def _edit_delete(self):
@@ -1090,6 +1100,7 @@ class PdfReaderWidget(QWidget):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         if reply != QMessageBox.StandardButton.Yes: return
         self._page_editor.delete_pages(list(self._selected_pages))
+        self.doc = self._page_editor._doc  # sync shared doc
         self._selected_pages.clear()
         self._rebuild_labels_from_editor()
         self._layout_labels(); self._update_edit_buttons()
@@ -1134,18 +1145,12 @@ class PdfReaderWidget(QWidget):
         if fmt == "pdf":
             self._page_editor.extract_pages(list(self._selected_pages), Path(path))
         elif fmt == "jpg":
-            import fitz, tempfile
-            reader = fitz.open(self._path) if self._path else None
-            txt_path = None
-            if reader:
-                import tempfile
-                tmp = Path(tempfile.gettempdir()) / "pdfeverything_export_tmp.pdf"
+            import tempfile
+            tmp = Path(tempfile.gettempdir()) / "pdfeverything_export_tmp.pdf"
+            if self._page_editor:
                 self._page_editor.extract_pages(list(self._selected_pages), tmp)
-                txt_path = tmp
-                reader.close()
-            if txt_path and txt_path.exists():
-                PdfReaderWidget._export_pages_to_images(txt_path, Path(path))
-                txt_path.unlink(missing_ok=True)
+                PdfReaderWidget._export_pages_to_images(tmp, Path(path))
+                tmp.unlink(missing_ok=True)
         elif fmt == "word":
             import tempfile
             tmp = Path(tempfile.gettempdir()) / "pdfeverything_export_tmp.pdf"
@@ -1178,6 +1183,8 @@ class PdfReaderWidget(QWidget):
     def _edit_undo(self):
         if self._page_editor:
             self._page_editor.undo()
+            # Undo may rebuild the doc — sync widget's reference
+            self.doc = self._page_editor._doc
             self._rebuild_labels_from_editor()
             self._layout_labels(); self._update_edit_buttons()
             self._update_nav_ui()
@@ -1190,13 +1197,14 @@ class PdfReaderWidget(QWidget):
             self._update_nav_ui()
 
     def _rebuild_labels_from_editor(self):
-        """Sync labels with editor state after page deletion/reorder."""
-        if not self._page_editor: return
-        new_count = self._page_editor.page_count
+        """Sync labels with shared doc state after page deletion/reorder."""
+        if not self.doc: return
+        new_count = len(self.doc)
         self._hide_page_numbers()
         self._destroy_labels()
         self._total_pages = new_count
         self._build_labels()
+        self._current_page = min(self._current_page, new_count - 1) if new_count else 0
         # Render thumbnails for new layout
         vw, vh = self._viewport_size()
         old_zm = self._zoom_mode
@@ -1367,6 +1375,17 @@ class PdfReaderWidget(QWidget):
             cls._cache.move_to_end(key)
             return cls._cache[key]
         return None
+
+    @classmethod
+    def _cache_pop(cls, key):
+        """Remove a specific key from cache (e.g. stale thumbnail)."""
+        if key in cls._cache:
+            pix = cls._cache.pop(key)
+            r = pix.devicePixelRatio()
+            mem = pix.width() * pix.height() * 4
+            if r != 1.0:
+                mem = int(mem * r * r)
+            cls._cache_memory_bytes -= mem
 
     @classmethod
     def _clear_cache(cls):

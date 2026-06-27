@@ -318,7 +318,7 @@ class MainWindow(QMainWindow):
 
         scroll.setWidget(right)
         splitter.addWidget(scroll)
-        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(0, 2)
         splitter.setStretchFactor(1, 1)
         layout.addWidget(splitter)
 
