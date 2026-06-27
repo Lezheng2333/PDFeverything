@@ -284,7 +284,7 @@ class PdfReaderWidget(QWidget):
         self._build_labels()
         # Pre-render ALL pages at 100% — scale base for future zooms
         self._pre_render_100_all()
-        self._layout_labels()
+        self._layout_labels(render_missing=True)
         self._update_nav_ui()
         self.label_filename.setText(path.name)
         self.label_filename.show()
@@ -345,7 +345,6 @@ class PdfReaderWidget(QWidget):
         target_factor = pct / 100.0
         from PyQt6.QtCore import Qt as QtCore
         for pi, label in enumerate(self._labels):
-            if not label.isVisible(): continue
             try:
                 base_key = (pi, "z:1.000")
                 base = PdfReaderWidget._cache_get(base_key)
@@ -467,7 +466,6 @@ class PdfReaderWidget(QWidget):
         target_factor = pct / 100.0
         from PyQt6.QtCore import Qt as QtCore
         for pi, label in enumerate(self._labels):
-            if not label.isVisible(): continue
             try:
                 base_key = (pi, "z:1.000")
                 base = PdfReaderWidget._cache_get(base_key)
@@ -500,16 +498,16 @@ class PdfReaderWidget(QWidget):
         self._labels.clear()
         self.scroll_area.verticalScrollBar().blockSignals(False)
 
-    def _layout_labels(self):
+    def _layout_labels(self, render_missing: bool = False):
         vw, vh = self._viewport_size(); sp, mg = 16, 20
 
         if self._view_mode == ViewMode.SCROLL:
             self._page_heights = []; y = mg
             for pi, label in enumerate(self._labels):
-                # Use the label's existing pixmap if present (e.g. from pass 1 scale)
-                # Only render from cache if no pixmap is set (e.g. initial load)
                 pix = label.pixmap()
-                if pix is None or pix.isNull():
+                # Only render missing pixmaps when explicitly asked (initial load).
+                # otherwise use existing pixmap dimensions (set by pass 1 zoom).
+                if render_missing and (pix is None or pix.isNull()):
                     if self.doc and pi < self._total_pages:
                         pix = self._get_or_render(pi, vw, vh)
                         if pix:
