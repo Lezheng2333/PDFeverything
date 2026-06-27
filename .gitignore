@@ -18,5 +18,8 @@ Thumbs.db
 # Test files
 test files/
 
+# Python virtual environment
+.venv/
+
 # Claude / AI assistant workspace (local only, never push)
 .claude/

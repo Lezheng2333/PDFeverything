@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/Lezheng2333/PDFeverything/releases"><img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-blue?style=flat-square" /></a>
-  <a href="https://github.com/Lezheng2333/PDFeverything/releases/latest"><img src="https://img.shields.io/badge/version-v1.3.16-007aff?style=flat-square" /></a>
+  <a href="https://github.com/Lezheng2333/PDFeverything/releases/latest"><img src="https://img.shields.io/badge/version-v1.3.17-007aff?style=flat-square" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" /></a>
 </p>
 
@@ -31,7 +31,7 @@ Drag everything in — any combination of PDFs, Word documents, PowerPoint decks
 
 > 🔗 [**Latest Release →**](https://github.com/Lezheng2333/PDFeverything/releases/latest)
 
-## 🆕 What's New in v1.3.16
+## 🆕 What's New in v1.3.17
 
 - 📖 **Built-in PDF Reader** — Scroll & Grid modes, two-pass zoom, trackpad pinch-to-zoom
 - 🎨 **Vector-grade rendering** — exact-resolution rendering, MuPDF native 8-bit sub-pixel AA (matching Acrobat/WPS)
@@ -309,7 +309,7 @@ MIT — do whatever you want with it. [LICENSE](resources/LICENSE.txt)
 | 🔄 **旋转** | 旋转页面 90° / 180° / 270° |
 | ℹ️ **信息** | 查看页数、元数据、加密状态 |
 
-### 🆕 v1.3.16 新功能
+### 🆕 v1.3.17 新功能
 
 - 📖 **内置 PDF 阅读器** — 连续滚动 & 网格缩略图双模式，两阶段缩放，触控板捏合缩放
 - 🎨 **矢量级渲染画质** — 精确分辨率渲染，MuPDF 原生 8 位子像素抗锯齿（媲美 Acrobat/WPS）

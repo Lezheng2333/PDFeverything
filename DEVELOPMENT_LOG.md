@@ -387,20 +387,37 @@ Ver 1.3.0 | 2026-06-26 — PDF 阅读器
       — 乘以 dpr² 得到真实物理内存占用量
 
 
-  Ver 1.3.16 | 布局修复 + 原生触控板捏合缩放
 
-    - **Scroll 布局重叠修复**: _layout_labels 不再使用硬编码 600x800 默认尺寸
-      . 对于尚未渲染的页面, 从 PDF 页面尺寸 x 当前缩放比例计算预期尺寸
-      . w,h = int(pw*z), int(ph*z) 确保 Y 位置计算精确
-      . 修复了懒预渲染期间未渲染页面尺寸不匹配导致的级联偏移和重叠
-    - **原生 QPinchGesture 捏合缩放**:
-      . grabGesture(PinchGesture) + event() override 取代 wheelEvent 相位探测
-      . _handle_pinch_gesture() 直接读取 macOS 原生 scaleFactor
-      . 缩放公式: delta_pct = (scaleFactor - 1.0) * 250
-      . 手势结束 (GestureFinished) 时触发 40ms 高清渲染
-      . 与 Preview/Acrobat/WPS 相同的实现方式
-    - **Ctrl+滚轮回退**: wheelEvent 仅处理 Ctrl+wheel, 不再探测捏合
+
+  Ver 1.3.16 | 布局修复 + QPinchGesture 捏合缩放
+
+    - **Scroll 布局重叠修复**: _layout_labels 从 PDF页面尺寸x当前缩放计算预期尺寸
+      w,h = int(pw*z), int(ph*z) 精确 Y 定位，消除级联偏移和重叠
+    - **QPinchGesture 捏合**: grabGesture(PinchGesture) + event() override
+      缩放公式: delta_pct = (scaleFactor - 1.0) * 250, GestureFinished 时 40ms 高清渲染
+    - **Ctrl+滚轮单独处理**: wheelEvent 仅处理 Ctrl+wheel, 不再探测捏合
     - **代码清理**: 移除 e.phase()/pixelDelta/angleDelta 探测, 移除 _pinch_acc
-    - BUGFIX: 500 页 PDF 中未预渲染页面在缩放后位置偏移/重叠
-    - BUGFIX: 触控板捏合缩放不响应 / 滚动时误触发缩放
+    - BUGFIX: 500页 PDF 未预渲染页面在缩放后位置偏移/重叠
+    - BUGFIX: 捏合不响应/误触发 — 原生 QPinchGesture 替换 wheelEvent 探测
+
+
+  Ver 1.3.17 | pinch 修复 + 渲染管线异步化 + tooltip 重做
+
+    - **捏合缩放回归稳定方案**: QPinchGesture(启动崩溃)和动画引擎(破坏基础缩放)均移除
+      恢复 v1.3.15 验证过的 phase 检测 + 累加器, 响应阈值 120→60 (2x 跟手)
+    - **渲染管线五项优化**:
+      1) Pass 1 仅缩放可见页 (3页), 不再遍历全部 label (500p: 5ms→<1ms)
+      2) PAGE_DEBOUNCE_MS 150→80ms, scroll stop 响应更快
+      3) _render_visible_range_async 逐页 yield 事件循环, 0ms UI 阻塞
+      4) 键盘翻页 next/prev/go_to_page 立即触发高清渲染
+      5) _do_debounce_calibration 无条件触发渲染 (zoom 脏数据自动刷新)
+    - **自定义 tooltip 重做**: QLabel(11px) 跟随光标, 0.5s 显示/5s 消失
+      移除 Qt 系统大弹窗: _store_tooltips() 抓取文字→setToolTip("") 清空
+      缩放按钮文案: 1%→5%
+    - **项目环境**: requirements.txt 添加 pyinstaller, 创建项目 .venv (Python 3.14)
+    - BUGFIX: 滚动停止后长时间等待高清渲染 — 异步化 + debounce 80ms
+    - BUGFIX: 键盘翻页后无高清渲染 — nav 末尾加 _schedule_render_visible(0)
+    - BUGFIX: Qt 系统弹窗与自定义弹窗双重显示 — setToolTip("") 清空
+    - BUGFIX: QPinchGesture 导入崩溃 — 移除, 回归 wheelEvent phase 检测
+    - BUGFIX: 动画引擎破坏基础缩放 — 移除, 回归简洁累加器方案
 
