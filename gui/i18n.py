@@ -86,6 +86,8 @@ T = {
     "reader_edit_extract":    {"zh": "📄 提取合并",                                   "en": "📄 Extract"},
     "reader_edit_export":     {"zh": "💾 导出为...",                                  "en": "💾 Export as..."},
     "reader_edit_print":      {"zh": "🖨 打印",                                       "en": "🖨 Print"},
+    "reader_edit_saveas":     {"zh": "💾 另存为",                                     "en": "💾 Save As"},
+    "reader_edit_saveas_tip": {"zh": "保存修改后的 PDF 到新文件",                       "en": "Save edited PDF to a new file"},
     "reader_edit_undo":       {"zh": "↩ 撤销",                                       "en": "↩ Undo"},
     "reader_edit_redo":       {"zh": "↪ 重做",                                       "en": "↪ Redo"},
     "reader_edit_sel_tip":    {"zh": "退出排序模式，返回选择模式",                    "en": "Exit sort mode, return to selection"},

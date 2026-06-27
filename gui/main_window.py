@@ -201,6 +201,8 @@ class MainWindow(QMainWindow):
         self.reader.btn_edit_export.setToolTip(tr("reader_edit_export_tip"))
         self.reader.btn_edit_print.setText(tr("reader_edit_print"))
         self.reader.btn_edit_print.setToolTip(tr("reader_edit_print_tip"))
+        self.reader.btn_edit_saveas.setText(tr("reader_edit_saveas"))
+        self.reader.btn_edit_saveas.setToolTip(tr("reader_edit_saveas_tip"))
         self.reader.btn_edit_undo.setText(tr("reader_edit_undo"))
         self.reader.btn_edit_undo.setToolTip(tr("reader_edit_undo_tip"))
         self.reader.btn_edit_redo.setText(tr("reader_edit_redo"))
@@ -407,6 +409,13 @@ class MainWindow(QMainWindow):
             self.file_list.add_files(paths)
 
     def closeEvent(self, event: QCloseEvent):
+        # Check if reader has unsaved edits before closing
+        if self.reader.has_unsaved_edits:
+            result = self.reader._prompt_save_changes()
+            if result == "cancel":
+                event.ignore(); return
+            if result == "save_as":
+                self.reader._save_edited_copy()
         self._settings.setValue("window_geometry",
                                 bytes(self.saveGeometry()).hex())
         if self._worker and self._worker.isRunning():

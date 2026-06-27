@@ -91,6 +91,7 @@ class PdfReaderWidget(QWidget):
         self._drag_active = False
         self._drag_target = None
         self._saved_scroll_zoom = None  # zoom before entering Grid
+        self._unsaved_edits = False     # track whether edit ops have been performed
 
         # ── Custom compact tooltip (small, at cursor, not system QToolTip) ──
         self._tooltip_texts = {}
@@ -179,6 +180,9 @@ class PdfReaderWidget(QWidget):
         self.btn_edit_print.setToolTip("调系统打印对话框打印选中页面")
         etb.addWidget(self.btn_edit_print)
         etb.addStretch()
+        self.btn_edit_saveas = QPushButton("💾 Save As"); self.btn_edit_saveas.clicked.connect(self._save_edited_copy)
+        self.btn_edit_saveas.setToolTip("保存修改后的 PDF 到新文件")
+        etb.addWidget(self.btn_edit_saveas)
         self.btn_edit_undo = QPushButton("↩ Undo"); self.btn_edit_undo.clicked.connect(self._edit_undo)
         self.btn_edit_undo.setToolTip("撤销上一次操作 (Ctrl+Z)")
         etb.addWidget(self.btn_edit_undo)
@@ -189,7 +193,8 @@ class PdfReaderWidget(QWidget):
         # Attach hover tracking for tooltips
         for btn in [self.btn_edit_sel, self.btn_edit_sort, self.btn_edit_rot,
                      self.btn_edit_del, self.btn_edit_extract, self.btn_edit_export,
-                     self.btn_edit_print, self.btn_edit_undo, self.btn_edit_redo]:
+                     self.btn_edit_print, self.btn_edit_saveas, self.btn_edit_undo,
+                     self.btn_edit_redo]:
             self._hover_on(btn)
 
         self.page_container = QWidget()
@@ -226,6 +231,7 @@ class PdfReaderWidget(QWidget):
         tb.addSpacing(16)
         self.btn_edit = QPushButton("✎ Edit"); self.btn_edit.setCheckable(True)
         self.btn_edit.clicked.connect(self._toggle_edit_mode)
+        self.btn_edit.hide()  # only visible in Grid mode
         self._hover_on(self.btn_edit)
         tb.addWidget(self.btn_edit)
         tb.addStretch()
@@ -304,7 +310,8 @@ class PdfReaderWidget(QWidget):
             # Edit toolbar buttons
             self.btn_edit_sel, self.btn_edit_sort, self.btn_edit_rot,
             self.btn_edit_del, self.btn_edit_extract, self.btn_edit_export,
-            self.btn_edit_print, self.btn_edit_undo, self.btn_edit_redo,
+            self.btn_edit_print, self.btn_edit_saveas, self.btn_edit_undo,
+            self.btn_edit_redo,
         ]
         self._store_tooltips()
 
@@ -378,7 +385,9 @@ class PdfReaderWidget(QWidget):
         if mode == ViewMode.GRID and self._view_mode == ViewMode.SCROLL:
             # Save Scroll zoom before entering Grid
             self._saved_scroll_zoom = self._zoom_mode
+            self.btn_edit.show()
         if mode == ViewMode.SCROLL and self._view_mode == ViewMode.GRID:
+            self.btn_edit.hide()   # Edit button only in Grid mode
             self._hide_page_numbers()
             # Restore Scroll zoom from before Grid
             if self._saved_scroll_zoom is not None:
@@ -404,10 +413,49 @@ class PdfReaderWidget(QWidget):
                 self._scroll_to_page_top()
 
     def _on_close(self):
-        """Close button handler — only acts when document is loaded."""
+        """Close button handler — warns if unsaved edits exist."""
         if self.doc:
+            if self._unsaved_edits:
+                result = self._prompt_save_changes()
+                if result == "cancel": return
+                if result == "save_as":
+                    self._save_edited_copy()
             self.close_document()
             self.close_requested.emit()
+
+    def _prompt_save_changes(self) -> str:
+        """Show save-before-close dialog. Returns 'save_as', 'discard', or 'cancel'."""
+        msg = QMessageBox(self)
+        msg.setWindowTitle("未保存的修改")
+        msg.setText("你对这个 PDF 进行了编辑。\n是否保存修改后再关闭？")
+        msg.setIcon(QMessageBox.Icon.Warning)
+        btn_save = msg.addButton("另存为...", QMessageBox.ButtonRole.AcceptRole)
+        btn_discard = msg.addButton("不保存", QMessageBox.ButtonRole.DestructiveRole)
+        btn_cancel = msg.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+        msg.setDefaultButton(btn_cancel)
+        msg.exec()
+        clicked = msg.clickedButton()
+        if clicked == btn_save: return "save_as"
+        if clicked == btn_discard: return "discard"
+        return "cancel"
+
+    def _save_edited_copy(self):
+        """Save the edited document to a new file."""
+        path, _ = QFileDialog.getSaveFileName(self, "另存为", "edited.pdf", "PDF (*.pdf)")
+        if path:
+            self._page_editor.save(Path(path))
+            self._unsaved_edits = False
+
+    def closeEvent(self, event):
+        """Window close — check unsaved edits before closing."""
+        if self.doc and self._unsaved_edits:
+            result = self._prompt_save_changes()
+            if result == "cancel":
+                event.ignore()
+                return
+            if result == "save_as":
+                self._save_edited_copy()
+        event.accept()
 
     # ═══════════ Open / Close ═══════════
 
@@ -905,7 +953,12 @@ class PdfReaderWidget(QWidget):
         self.edit_toolbar.show()
         self._layout_labels()
 
-    def _leave_edit_mode(self):
+    def _leave_edit_mode(self, skip_prompt=False):
+        if not skip_prompt and self._unsaved_edits:
+            result = self._prompt_save_changes()
+            if result == "cancel": return
+            if result == "save_as":
+                self._save_edited_copy()
         self._edit_mode = False; self.btn_edit.setChecked(False)
         self.btn_edit.setText("✎ Edit")
         self._selected_pages.clear(); self._drag_source = None
@@ -940,27 +993,25 @@ class PdfReaderWidget(QWidget):
         return -1
 
     def _grid_mouse_press(self, e):
-        """Container-level mouse press: selection or drag start."""
+        """Container-level mouse press: selection or drag sort.
+        Drag only activates when Sort button is checked and page is selected."""
         if not self._edit_mode: return
         pos = e.position().toPoint()
         self._rubber_origin = pos
         self._drag_active = False
         pi = self._grid_page_at_pos(pos)
-        if pi >= 0 and pi in self._selected_pages:
-            # Clicked a selected page — prepare for drag
+        can_drag = self.btn_edit_sort.isChecked() and pi >= 0 and pi in self._selected_pages
+        if can_drag:
             self._drag_active = True
             self._drag_source = pi
             self._drag_origin = pos
-            # Float the selected pages visually
             self._layout_labels()
         elif pi >= 0:
-            # Clicked unselected page — select it
             self._selected_pages = {pi}
             self._drag_active = False
             self._update_edit_buttons()
             self._layout_labels()
         else:
-            # Clicked blank area — start rectangle select
             self._drag_active = False
 
     def _grid_mouse_move(self, e):
@@ -1002,6 +1053,7 @@ class PdfReaderWidget(QWidget):
             if target >= 0 and self._page_editor:
                 source_list = sorted(self._selected_pages)
                 self._page_editor.move_pages(source_list, target)
+                self._unsaved_edits = True
                 self._selected_pages.clear()
                 self._rebuild_labels_from_editor()
                 self._layout_labels()
@@ -1053,17 +1105,23 @@ class PdfReaderWidget(QWidget):
     # ── Edit mode toggles ──
 
     def _edit_select_mode(self):
-        """Exit drag-sort mode, return to normal selection."""
+        """Exit drag-sort mode: Sort→unchecked, drag off. Use this to select pages normally."""
         self._drag_sort_mode = False
         self.btn_edit_sort.setChecked(False)
         self._drag_active = False; self._drag_target = None
 
     def _edit_sort_mode(self):
-        """Enter drag-sort mode."""
-        if not self._selected_pages: return
-        self._drag_sort_mode = True
-        self.btn_edit_sort.setChecked(True)
-        self._drag_active = False; self._drag_target = None
+        """Toggle drag-sort mode. When checked, click+drag selected pages to reorder them.
+        When unchecked, clicking selects pages without dragging."""
+        if self.btn_edit_sort.isChecked():
+            # User wants to enter sort mode
+            if not self._selected_pages: return
+            self._drag_sort_mode = True
+            self._drag_active = False; self._drag_target = None
+        else:
+            # User wants to exit sort mode
+            self._drag_sort_mode = False
+            self._drag_active = False; self._drag_target = None
 
     # ── Edit operations ──
 
@@ -1085,12 +1143,15 @@ class PdfReaderWidget(QWidget):
         if not self._page_editor or not self._selected_pages: return
         self._page_editor.rotate_pages(list(self._selected_pages), 90)
         self.doc = self._page_editor._doc
-        # Re-render thumbnails for rotated pages (rotation changed page aspect ratio)
+        self._unsaved_edits = True
+        # Invalidate ALL cached renderings for rotated pages — both thumbnails
+        # and 100% base renders. Rotation changes the page's visual output,
+        # so every cache entry for these pages is stale.
         vw, vh = self._viewport_size()
         for pi in self._selected_pages:
-            if pi < len(self._labels):
-                cache_key = (pi, f"thumb_{vw}_{vh}")
-                PdfReaderWidget._cache_pop(cache_key)  # invalidate old thumbnail
+            for key in list(PdfReaderWidget._cache.keys()):
+                if key[0] == pi:
+                    PdfReaderWidget._cache_pop(key)
         self._layout_labels(); self._update_edit_buttons()
 
     def _edit_delete(self):
@@ -1101,6 +1162,7 @@ class PdfReaderWidget(QWidget):
         if reply != QMessageBox.StandardButton.Yes: return
         self._page_editor.delete_pages(list(self._selected_pages))
         self.doc = self._page_editor._doc  # sync shared doc
+        self._unsaved_edits = True
         self._selected_pages.clear()
         self._rebuild_labels_from_editor()
         self._layout_labels(); self._update_edit_buttons()
@@ -1589,6 +1651,8 @@ class PdfReaderWidget(QWidget):
     # ═══════════ Public ═══════════
 
     def has_document(self) -> bool: return self.doc is not None
+    @property
+    def has_unsaved_edits(self) -> bool: return self._unsaved_edits
     def current_path(self) -> Optional[Path]: return self._path
     @property
     def opened_from_file_list(self) -> bool:
