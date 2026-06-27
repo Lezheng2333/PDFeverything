@@ -236,12 +236,12 @@ T = {
 
     # ── About dialog ──
     "about_title":            {"zh": "关于 PDFeverything",                           "en": "About PDFeverything"},
-    "about_text":             {"zh": "PDFeverything v1.3.15\n\n"
+    "about_text":             {"zh": "PDFeverything v1.3.16\n\n"
                                       "一站式 PDF 处理桌面应用\n"
                                       "支持合并、拆分、格式转换、混合文件合并、PDF 阅读器等\n\n"
                                       "技术栈: Python + PyQt6 + PyMuPDF\n"
                                       "© 2026",
-                               "en": "PDFeverything v1.3.15\n\n"
+                               "en": "PDFeverything v1.3.16\n\n"
                                      "All-in-one PDF processing desktop app\n"
                                      "Merge, split, convert, mix files, built-in PDF reader and more\n\n"
                                      "Tech: Python + PyQt6 + PyMuPDF\n"

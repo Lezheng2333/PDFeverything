@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Optional
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QImage, QPixmap, QKeyEvent, QWheelEvent, QIntValidator
+from PyQt6.QtGui import QImage, QPixmap, QKeyEvent, QWheelEvent, QIntValidator, QPinchGesture
 from PyQt6.QtWidgets import (
     QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea,
     QVBoxLayout, QWidget, QToolTip,
@@ -48,7 +48,6 @@ class PdfReaderWidget(QWidget):
         self._fw_ratio = self._fh_ratio = 1.0
         self._labels: list[QLabel] = []
         self._page_heights: list[int] = []
-        self._pinch_acc = 0
         self._btn_open_source = 'dialog'
 
         self._resize_timer = QTimer(self); self._resize_timer.setSingleShot(True)
@@ -218,6 +217,8 @@ class PdfReaderWidget(QWidget):
 
         root.addWidget(self.toolbar)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus); self.setMouseTracking(True)
+        # Native trackpad pinch-to-zoom via macOS gesture recognition
+        self.grabGesture(Qt.GestureType.PinchGesture)
 
     def _hover_on(self, widget):
         widget._oe = widget.enterEvent; widget._ol = widget.leaveEvent
@@ -565,8 +566,8 @@ class PdfReaderWidget(QWidget):
             self._page_heights = []; y = mg
             for pi, label in enumerate(self._labels):
                 pix = label.pixmap()
-                # Only render missing pixmaps when explicitly asked (initial load).
-                # otherwise use existing pixmap dimensions (set by pass 1 zoom).
+                # Initial load: render everything. Otherwise, keep existing pixmap
+                # (already set by Pass 1 or prior render) and just reflow layout.
                 if render_missing and (pix is None or pix.isNull()):
                     if self.doc and pi < self._total_pages:
                         pix = self._get_or_render(pi, vw, vh)
@@ -577,7 +578,17 @@ class PdfReaderWidget(QWidget):
                 if pix and not pix.isNull():
                     w, h = self._logical_size(pix)
                 else:
-                    w, h = 600, 800
+                    # Compute expected dimensions from PDF page size × current zoom
+                    # instead of hardcoded 600×800 — prevents Y-offset cascade
+                    # when pages are not yet rendered at current zoom level.
+                    if self.doc and pi < self._total_pages:
+                        pw = self.doc[pi].rect.width
+                        ph = self.doc[pi].rect.height
+                        pct = self._current_zoom_pct()
+                        z = pct / 100.0
+                        w, h = int(pw * z), int(ph * z)
+                    else:
+                        w, h = 600, 800
                 label.setStyleSheet("QLabel{background:white;}")
                 label.setCursor(Qt.CursorShape.ArrowCursor)
                 x = max(0, (vw - w) // 2)
@@ -890,45 +901,58 @@ class PdfReaderWidget(QWidget):
         elif e.key() == Qt.Key.Key_End: self.last_page()
         else: super().keyPressEvent(e)
 
-    # ═══════════ Touchpad pinch ═══════════
+    # ═══════════ Native gesture + wheel pinch-to-zoom ═══════════
+
+    def event(self, e):
+        """Catch native trackpad pinch gestures (QPinchGesture) for smooth zoom."""
+        if e.type() == Qt.Gesture:
+            pinch = e.gesture(Qt.GestureType.PinchGesture)
+            if pinch:
+                return self._handle_pinch_gesture(pinch, e)
+        return super().event(e)
+
+    def _handle_pinch_gesture(self, pinch: QPinchGesture, e):
+        """Process native macOS trackpad pinch-to-zoom via QPinchGesture.
+        scaleFactor: relative scale since last event (~0.95–1.05 per frame).
+        This is how Acrobat/WPS/Preview do it — native gesture, no fragile
+        angleDelta phase heuristics."""
+        if not self.doc or self._view_mode != ViewMode.SCROLL:
+            return False
+        try:
+            sf = pinch.scaleFactor()
+            # scaleFactor=1.0 means no change. 1.03 = user pinched OUT slightly.
+            # Convert to zoom delta: each 0.01 in scaleFactor ≈ 2.5% zoom change.
+            # This gives a smooth, proportional feel matching macOS Preview.
+            if sf != 1.0:
+                # Proportional zoom delta: the further from 1.0, the larger the step
+                delta_pct = int((sf - 1.0) * 250)  # 0.01 → 2.5%, 0.05 → 12.5%
+                if abs(delta_pct) >= 1:
+                    self._set_zoom_pct(self._current_zoom_pct() + delta_pct,
+                                       skip_deferred=True)
+            # On pinch finished, trigger sharp render
+            state = pinch.state()
+            if state == Qt.GestureState.GestureFinished:
+                self._pending_zoom_pct = self._current_zoom_pct()
+                QTimer.singleShot(40, self._sharp_render)
+            return True
+        except Exception:
+            return False
 
     def wheelEvent(self, e):
+        """Ctrl+wheel zoom fallback. Native pinch handled by event()/QPinchGesture."""
         if not self.doc or self._view_mode != ViewMode.SCROLL:
             super().wheelEvent(e); return
-        try:
+        # Only handle Ctrl+wheel for manual zoom — native pinch goes through event()
+        if e.modifiers() & Qt.KeyboardModifier.ControlModifier:
             ad = e.angleDelta().y() if e.angleDelta() else 0
-            pd = e.pixelDelta().y() if e.pixelDelta() else 0
-            pinch = bool(e.modifiers() & Qt.KeyboardModifier.ControlModifier)
-            # macOS native pinch: phase=2 (ScrollUpdate) with no pixelDelta
-            # (only angleDelta). Overscroll rubber-banding has BOTH non-zero.
-            if not pinch:
-                try:
-                    ph = e.phase()
-                    pinch = (int(ph) >= 1 and pd == 0)
-                except (AttributeError, TypeError):
-                    pass
-            # Windows / fallback: Ctrl+wheel, or extreme angle/pixel ratio
-            if not pinch and pd != 0 and ad != 0:
-                if abs(ad) > abs(pd) * 5:
-                    pinch = True
-            if pinch:
-                self._pinch_acc += ad
-                threshold = 120
-                if abs(self._pinch_acc) >= threshold:
-                    ticks = int(abs(self._pinch_acc) // threshold)
-                    ticks = ticks if self._pinch_acc > 0 else -ticks
-                    self._pinch_acc %= threshold
-                    self._set_zoom_pct(self._current_zoom_pct() + ticks * 5,
-                                       skip_deferred=True)
-                try:
-                    if e.phase() and int(e.phase()) == 3:
-                        self._pending_zoom_pct = self._current_zoom_pct()
-                        QTimer.singleShot(40, self._sharp_render)
-                except (AttributeError, TypeError): pass
-            else:
-                super().wheelEvent(e)
-        except Exception:
-            super().wheelEvent(e)
+            if abs(ad) >= 120:
+                delta = 5 if ad > 0 else -5
+                self._set_zoom_pct(self._current_zoom_pct() + delta,
+                                   skip_deferred=True)
+                self._pending_zoom_pct = self._current_zoom_pct()
+                QTimer.singleShot(40, self._sharp_render)
+            return
+        super().wheelEvent(e)
 
     def resizeEvent(self, e):
         super().resizeEvent(e)

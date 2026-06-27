@@ -387,3 +387,42 @@ Ver 1.3.0 | 2026-06-26 — PDF 阅读器
       — 乘以 dpr² 得到真实物理内存占用量
 
 
+  Ver 1.3.16 | 布局修复 + 原生触控板捏合缩放
+
+    - **Scroll 布局重叠修复**: _layout_labels 不再使用硬编码 600x800 默认尺寸
+      . 对于尚未渲染的页面, 从 PDF 页面尺寸 x 当前缩放比例计算预期尺寸
+      . w,h = int(pw*z), int(ph*z) 确保 Y 位置计算精确
+      . 修复了懒预渲染期间未渲染页面尺寸不匹配导致的级联偏移和重叠
+    - **原生 QPinchGesture 捏合缩放**:
+      . grabGesture(PinchGesture) + event() override 取代 wheelEvent 相位探测
+      . _handle_pinch_gesture() 直接读取 macOS 原生 scaleFactor
+      . 缩放公式: delta_pct = (scaleFactor - 1.0) * 250
+      . 手势结束 (GestureFinished) 时触发 40ms 高清渲染
+      . 与 Preview/Acrobat/WPS 相同的实现方式
+    - **Ctrl+滚轮回退**: wheelEvent 仅处理 Ctrl+wheel, 不再探测捏合
+    - **代码清理**: 移除 e.phase()/pixelDelta/angleDelta 探测, 移除 _pinch_acc
+    - BUGFIX: 500 页 PDF 中未预渲染页面在缩放后位置偏移/重叠
+    - BUGFIX: 触控板捏合缩放不响应 / 滚动时误触发缩放
+
+
+
+    - **SSAA 超采样完全移除**：不再渲染到 4× 再 Bilinear 缩小
+      · MuPDF 内置子像素抗锯齿在任何分辨率下都产生矢量级画质
+      · SSAA → downscale 实际上用一个不必要的 Bilinear 滤镜软化了 MuPDF 的输出
+      · Acrobat/WPS 的做法：直接在目标分辨率渲染矢量 PDF 内容
+    - **精确分辨率渲染**：mat = fitz.Matrix(zoom * dpr, zoom * dpr)
+      · Retina 100%：直接渲染 1190×1684 物理像素（≈144 有效 DPI）
+      · 标准屏 100%：直接渲染 595×842 物理像素（MuPDF AA 保证质量）
+      · 无 oversampling、无 downscale、无 Bilinear 损失
+    - **MuPDF AA 级别最大化**：_configure_mupdf_aa() 在打开 PDF 时调用
+      · fitz.Tools.set_aa_level(8) — 8 位子像素边缘平滑
+      · fitz.Tools.set_text_aa_level(8) + set_graphics_aa_level(8)
+    - **缓存内存追踪修正**：_cache_put 现在正确计算 HiDPI 物理内存
+      · Qt6 中 pix.width() 返回逻辑像素，* dpr² 得到物理像素内存
+      · 淘汰时也使用 devicePixelRatio() 校正释放量
+    - **捏合缩放加速**：手势结束后 180ms → 40ms 触发高清渲染
+    - BUGFIX: HiDPI 缓存内存低估 — dpr=2 时 pix.width()×pix.height()
+      只返回逻辑像素（= 物理/4），导致 400MB 限制实际允许 1.6GB
+      — 乘以 dpr² 得到真实物理内存占用量
+
+
