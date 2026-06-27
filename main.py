@@ -23,6 +23,8 @@ CLI_COMMANDS = {
     "to-images", "from-images", "compress", "watermark",
     "encrypt", "decrypt", "rotate", "info",
     "to-word", "to-ppt", "to-excel",
+    "delete-pages", "rotate-pages", "move-pages",
+    "extract-pages", "page-undo", "page-redo", "page-history",
 }
 
 HELP_TEXT = """PDFeverything — One-stop PDF processing tool

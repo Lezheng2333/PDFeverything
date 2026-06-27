@@ -6,11 +6,11 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QImage, QPixmap, QKeyEvent, QWheelEvent, QIntValidator
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QPoint, QMimeData, QEvent
+from PyQt6.QtGui import QImage, QPixmap, QKeyEvent, QWheelEvent, QIntValidator, QDrag, QPainter, QPen, QColor, QFont
 from PyQt6.QtWidgets import (
     QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea,
-    QVBoxLayout, QWidget,
+    QVBoxLayout, QWidget, QApplication, QMessageBox, QFileDialog,
 )
 
 
@@ -78,6 +78,12 @@ class PdfReaderWidget(QWidget):
 
         # ── Pinch zoom accumulator ──
         self._pinch_acc = 0
+        # ── Grid edit mode ──
+        self._edit_mode = False
+        self._page_editor = None     # PdfPageEditor (lazy init on edit)
+        self._selected_pages: set[int] = set()
+        self._drag_source = None     # page index being dragged
+        self._drag_start_pos = None  # QPoint of drag start
 
         # ── Custom compact tooltip (small, at cursor, not system QToolTip) ──
         self._tooltip_texts = {}
@@ -130,9 +136,36 @@ class PdfReaderWidget(QWidget):
             self._on_scrollbar_changed)
         self.scroll_area.setAcceptDrops(True)
 
+        # Edit toolbar (hidden by default, shown in edit mode)
+        self.edit_toolbar = QWidget(); self.edit_toolbar.setObjectName("edit_toolbar")
+        self.edit_toolbar.setStyleSheet(
+            "QWidget#edit_toolbar{background:#252525;border-top:1px solid #3a3a3a;border-bottom:1px solid #3a3a3a}"
+            "QPushButton{color:#ccc;background:#333;border:1px solid #555;border-radius:4px;padding:5px 10px;font-size:12px}"
+            "QPushButton:hover{background:#444}"
+            "QPushButton:disabled{color:#555;background:#2a2a2a}")
+        etb = QHBoxLayout(self.edit_toolbar); etb.setContentsMargins(8,4,8,4); etb.setSpacing(6)
+        self.btn_edit_sel = QPushButton("☝ Select"); etb.addWidget(self.btn_edit_sel)
+        etb.addSpacing(8)
+        self.btn_edit_rot = QPushButton("↻ Rotate 90°"); self.btn_edit_rot.clicked.connect(self._edit_rotate)
+        etb.addWidget(self.btn_edit_rot)
+        self.btn_edit_del = QPushButton("✕ Delete"); self.btn_edit_del.clicked.connect(self._edit_delete)
+        etb.addWidget(self.btn_edit_del)
+        etb.addSpacing(8)
+        self.btn_edit_extract = QPushButton("📄 Extract"); self.btn_edit_extract.clicked.connect(self._edit_extract)
+        etb.addWidget(self.btn_edit_extract)
+        self.btn_edit_export = QPushButton("💾 Export"); self.btn_edit_export.clicked.connect(self._edit_export)
+        etb.addWidget(self.btn_edit_export)
+        etb.addStretch()
+        self.btn_edit_undo = QPushButton("↩ Undo"); self.btn_edit_undo.clicked.connect(self._edit_undo)
+        etb.addWidget(self.btn_edit_undo)
+        self.btn_edit_redo = QPushButton("↪ Redo"); self.btn_edit_redo.clicked.connect(self._edit_redo)
+        etb.addWidget(self.btn_edit_redo)
+        self.edit_toolbar.hide()
+
         self.page_container = QWidget()
         self.page_container.setStyleSheet("background:transparent;")
         self.scroll_area.setWidget(self.page_container)
+        root.addWidget(self.edit_toolbar)
         root.addWidget(self.scroll_area, 1)
 
         # toolbar
@@ -160,6 +193,11 @@ class PdfReaderWidget(QWidget):
         self._hover_on(self.btn_grid)
 
         tb.addWidget(self.btn_scroll); tb.addWidget(self.btn_grid)
+        tb.addSpacing(16)
+        self.btn_edit = QPushButton("✎ Edit"); self.btn_edit.setCheckable(True)
+        self.btn_edit.clicked.connect(self._toggle_edit_mode)
+        self._hover_on(self.btn_edit)
+        tb.addWidget(self.btn_edit)
         tb.addStretch()
 
         self.btn_prev = QPushButton("◀"); self.btn_prev.setFixedSize(34,34)
@@ -230,7 +268,7 @@ class PdfReaderWidget(QWidget):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus); self.setMouseTracking(True)
         # Collect all toolbar widgets for tooltip management
         self._toolbar_buttons = [
-            self.btn_scroll, self.btn_grid, self.btn_prev, self.btn_next,
+            self.btn_scroll, self.btn_grid, self.btn_edit, self.btn_prev, self.btn_next,
             self.btn_zoom_out, self.btn_zoom_in, self.zoom_edit, self.btn_fit_width,
             self.btn_fit_height, self.btn_close,
         ]
@@ -662,32 +700,226 @@ class PdfReaderWidget(QWidget):
 
         elif self._view_mode == ViewMode.GRID:
             self._page_heights = []
-            COLS = 3; gutter = 20; side_margin = 20
-            usable = vw - 2*side_margin - (COLS-1)*gutter
-            thumb_w = max(120, usable // COLS); thumb_h = int(thumb_w * 1.414)
-            grid_w = COLS*thumb_w + (COLS-1)*gutter; left = (vw - grid_w) // 2
+            COLS = 3; gutter_h = 20; gutter_v = 30; side_margin = 20
+            usable = vw - 2*side_margin - (COLS-1)*gutter_h
+            cell_w = max(140, usable // COLS)
+            cell_h = int(cell_w * 1.414)  # A4 ratio
+            page_label_h = 16  # space for page number below thumbnail
+
+            # Pre-compute page dimensions for adaptive fill
+            page_dims = []
+            for pi in range(self._total_pages):
+                if self.doc and pi < len(self.doc):
+                    pw = self.doc[pi].rect.width; ph = self.doc[pi].rect.height
+                else:
+                    pw, ph = 595, 842
+                scale_w = cell_w / pw; scale_h = (cell_h - page_label_h) / ph
+                scale = min(scale_w, scale_h)  # adaptive fill
+                dw = int(pw * scale); dh = int(ph * scale)
+                ox = max(0, (cell_w - dw) // 2)
+                oy = max(0, (cell_h - page_label_h - dh) // 2)
+                page_dims.append((dw, dh, ox, oy))
+
+            grid_w = COLS*cell_w + (COLS-1)*gutter_h
+            left = (vw - grid_w) // 2
 
             for pi, label in enumerate(self._labels):
-                pix = self._get_or_render(pi, thumb_w, thumb_h, force_fit=True)
-                if pix: label.setPixmap(pix); lw, lh = self._logical_size(pix); label.setFixedSize(lw, lh)
-                label.setStyleSheet("QLabel{background:white;border:1px solid #555;}")
+                dw, dh, ox, oy = page_dims[pi]
+                pix = self._get_or_render(pi, cell_w, cell_h, force_fit=True)
+                if pix:
+                    label.setPixmap(pix)
+                    label.setFixedSize(dw, dh)
+                # Selection highlight
+                if self._edit_mode and pi in self._selected_pages:
+                    label.setStyleSheet(
+                        "QLabel{background:white;border:2px solid #007aff;border-radius:4px;}")
+                else:
+                    label.setStyleSheet("QLabel{background:white;border:1px solid #555;}")
                 label.setCursor(Qt.CursorShape.PointingHandCursor)
                 col, row = pi % COLS, pi // COLS
-                label.move(left + col*(thumb_w + gutter), mg + row*(thumb_h + gutter))
+                cell_x = left + col*(cell_w + gutter_h)
+                cell_y = mg + row*(cell_h + gutter_v)
+                label.move(cell_x + ox, cell_y + oy)
                 label.show()
+                # Page number label
+                page_num = getattr(label, '_page_num_label', None)
+                if page_num is None:
+                    page_num = QLabel(str(pi + 1), self.page_container)
+                    page_num.setStyleSheet("QLabel{color:#666;font-size:10px;background:transparent;}")
+                    page_num.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                    label._page_num_label = page_num
+                page_num.setFixedWidth(cell_w)
+                page_num.move(cell_x, cell_y + cell_h - page_label_h + 2)
+                page_num.show()
+                # Store click handler for edit mode
+                if not hasattr(label, '_grid_click_set'):
+                    label._grid_click_set = True
+                    orig_press = label.mousePressEvent
+                    def make_press(pi=pi):
+                        def handler(e):
+                            if self._edit_mode:
+                                self._on_grid_click(pi, e)
+                            elif orig_press:
+                                orig_press(e)
+                        return handler
+                    label.mousePressEvent = make_press()
+                # Double-click to scroll-view
                 page_idx = pi
                 label.mouseDoubleClickEvent = lambda ev, p=page_idx: self._on_grid_dbl_click(p)
 
             rows = (self._total_pages + COLS - 1) // COLS
-            self.page_container.setFixedSize(vw, 2*mg + rows*thumb_h + (rows-1)*gutter)
+            self.page_container.setFixedSize(vw, 2*mg + rows*cell_h + (rows-1)*gutter_v)
 
     def _on_grid_dbl_click(self, page_idx: int):
         if self._view_mode != ViewMode.GRID: return
+        if self._edit_mode:
+            return  # no jump in edit mode
         self._current_page = page_idx
         self._view_mode = ViewMode.SCROLL
         self.btn_scroll.setChecked(True); self.btn_grid.setChecked(False)
         self._apply_fit_mode("fit_height", self._default_zoom_pct)
         self._scroll_to_page_top(); self._update_nav_ui()
+
+    # ═══════════ Grid Edit Mode ═══════════
+
+    def _toggle_edit_mode(self):
+        if not self.doc or self._view_mode != ViewMode.GRID:
+            self.btn_edit.setChecked(False); return
+        if self._edit_mode:
+            self._leave_edit_mode()
+        else:
+            self._enter_edit_mode()
+
+    def _enter_edit_mode(self):
+        self._edit_mode = True; self.btn_edit.setChecked(True)
+        self.btn_edit.setText("✎ Editing")
+        self._selected_pages.clear()
+        # Lazy init page editor
+        if self._page_editor is None and self._path:
+            from core.page_editor import PdfPageEditor
+            self._page_editor = PdfPageEditor(self._path)
+            self._page_editor.on_change(lambda e: self._layout_labels())
+        self._update_edit_buttons()
+        self.edit_toolbar.show()
+        self._layout_labels()
+
+    def _leave_edit_mode(self):
+        self._edit_mode = False; self.btn_edit.setChecked(False)
+        self.btn_edit.setText("✎ Edit")
+        self._selected_pages.clear(); self._drag_source = None
+        self.edit_toolbar.hide()
+        self._layout_labels()
+
+    def _on_grid_click(self, pi: int, e):
+        """Handle click in Grid edit mode for selection."""
+        if not self._edit_mode: return
+        mods = QApplication.keyboardModifiers()
+        ctrl = bool(mods & Qt.KeyboardModifier.ControlModifier)
+        shift = bool(mods & Qt.KeyboardModifier.ShiftModifier)
+
+        if ctrl:
+            if pi in self._selected_pages:
+                self._selected_pages.discard(pi)
+            else:
+                self._selected_pages.add(pi)
+        elif shift and self._selected_pages:
+            # Range select
+            start = min(self._selected_pages)
+            end = pi
+            if end < start: start, end = end, start
+            self._selected_pages = set(range(start, end + 1))
+        else:
+            # Toggle single
+            if pi in self._selected_pages and len(self._selected_pages) == 1:
+                self._selected_pages.clear()
+            else:
+                self._selected_pages = {pi}
+        self._update_edit_buttons()
+        self._layout_labels()
+
+    def _update_edit_buttons(self):
+        has_sel = len(self._selected_pages) > 0
+        self.btn_edit_rot.setEnabled(has_sel)
+        self.btn_edit_del.setEnabled(has_sel)
+        self.btn_edit_extract.setEnabled(has_sel)
+        self.btn_edit_export.setEnabled(has_sel)
+        if self._page_editor:
+            self.btn_edit_undo.setEnabled(self._page_editor.can_undo())
+            self.btn_edit_redo.setEnabled(self._page_editor.can_redo())
+
+    # ── Edit operations ──
+
+    def _edit_rotate(self):
+        if not self._page_editor or not self._selected_pages: return
+        self._page_editor.rotate_pages(list(self._selected_pages), 90)
+        self._layout_labels(); self._update_edit_buttons()
+
+    def _edit_delete(self):
+        if not self._page_editor or not self._selected_pages: return
+        reply = QMessageBox.question(self, "删除页面",
+            f"确定删除 {len(self._selected_pages)} 页吗？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if reply != QMessageBox.StandardButton.Yes: return
+        self._page_editor.delete_pages(list(self._selected_pages))
+        self._selected_pages.clear()
+        self._rebuild_labels_from_editor()
+        self._layout_labels(); self._update_edit_buttons()
+        self._update_nav_ui()
+
+    def _edit_extract(self):
+        if not self._page_editor or not self._selected_pages: return
+        path, _ = QFileDialog.getSaveFileName(self, "提取页面", "extracted.pdf",
+                                              "PDF (*.pdf)")
+        if not path: return
+        self._page_editor.extract_pages(list(self._selected_pages), Path(path))
+        QMessageBox.information(self, "完成", f"已提取到 {path}")
+
+    def _edit_export(self):
+        if not self._page_editor or not self._selected_pages: return
+        path, _ = QFileDialog.getSaveFileName(self, "导出所选页面", "exported.pdf",
+                                              "PDF (*.pdf)")
+        if not path: return
+        self._page_editor.extract_pages(list(self._selected_pages), Path(path))
+        QMessageBox.information(self, "完成", f"已导出到 {path}")
+
+    def _edit_undo(self):
+        if self._page_editor:
+            self._page_editor.undo()
+            self._rebuild_labels_from_editor()
+            self._layout_labels(); self._update_edit_buttons()
+            self._update_nav_ui()
+
+    def _edit_redo(self):
+        if self._page_editor:
+            self._page_editor.redo()
+            self._rebuild_labels_from_editor()
+            self._layout_labels(); self._update_edit_buttons()
+            self._update_nav_ui()
+
+    def _rebuild_labels_from_editor(self):
+        """Sync labels with editor state after page deletion/reorder."""
+        if not self._page_editor: return
+        new_count = self._page_editor.page_count
+        # Destroy old labels and rebuild
+        self._destroy_labels()
+        self._total_pages = new_count
+        self._build_labels()
+        # Render thumbnails for new layout
+        vw, vh = self._viewport_size()
+        old_zm = self._zoom_mode
+        self._zoom_mode = 1.0
+        for pi in range(new_count):
+            self._get_or_render(pi, vw, vh)
+        self._zoom_mode = old_zm
+
+    def _edit_select_all(self):
+        if not self._edit_mode: return
+        self._selected_pages = set(range(self._total_pages))
+        self._layout_labels(); self._update_edit_buttons()
+
+    def _edit_clear_selection(self):
+        self._selected_pages.clear()
+        self._layout_labels(); self._update_edit_buttons()
 
     # ═══════════ Pre-render ═══════════
 
@@ -963,6 +1195,22 @@ class PdfReaderWidget(QWidget):
     # ═══════════ Keyboard ═══════════
 
     def keyPressEvent(self, e):
+        mods = e.modifiers()
+        ctrl = bool(mods & Qt.KeyboardModifier.ControlModifier) or \
+               bool(mods & Qt.KeyboardModifier.MetaModifier)
+
+        # Edit mode shortcuts
+        if self._edit_mode and self._view_mode == ViewMode.GRID:
+            if e.key() == Qt.Key.Key_A and ctrl:
+                self._edit_select_all(); return
+            if e.key() == Qt.Key.Key_Escape:
+                self._edit_clear_selection(); return
+            if e.key() == Qt.Key.Key_Z and ctrl and bool(mods & Qt.KeyboardModifier.ShiftModifier):
+                self._edit_redo(); return
+            if e.key() == Qt.Key.Key_Z and ctrl:
+                self._edit_undo(); return
+
+        # Normal navigation
         if e.key() == Qt.Key.Key_Left: self.prev_page()
         elif e.key() == Qt.Key.Key_Right: self.next_page()
         elif e.key() == Qt.Key.Key_Home: self.first_page()

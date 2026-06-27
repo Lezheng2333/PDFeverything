@@ -387,8 +387,6 @@ Ver 1.3.0 | 2026-06-26 — PDF 阅读器
       — 乘以 dpr² 得到真实物理内存占用量
 
 
-
-
   Ver 1.3.16 | 布局修复 + QPinchGesture 捏合缩放
 
     - **Scroll 布局重叠修复**: _layout_labels 从 PDF页面尺寸x当前缩放计算预期尺寸

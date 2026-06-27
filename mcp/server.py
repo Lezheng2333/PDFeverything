@@ -371,7 +371,113 @@ TOOLS = [
             "required": ["input", "output"]
         }
     },
+    {
+        "name": "pdf_delete_pages",
+        "description": "Delete specific pages from a PDF by page number (1-based). Supports comma-separated, ranges (1-5), or 'all'.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "input": {"type": "string", "description": "Absolute path to the input PDF file"},
+                "output": {"type": "string", "description": "Absolute path for the output PDF file"},
+                "pages": {"type": "string", "description": "Page numbers to delete (1-based): 1,3,5 or 1-5 or all"}
+            },
+            "required": ["input", "output", "pages"]
+        }
+    },
+    {
+        "name": "pdf_rotate_pages",
+        "description": "Rotate specific pages in a PDF by 90, 180, or 270 degrees (1-based page numbers).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "input": {"type": "string", "description": "Absolute path to the input PDF file"},
+                "output": {"type": "string", "description": "Absolute path for the output PDF file"},
+                "pages": {"type": "string", "description": "Page numbers: 1,3,5 or 1-5 or all"},
+                "degrees": {"type": "integer", "enum": [90, 180, 270]}
+            },
+            "required": ["input", "output", "pages", "degrees"]
+        }
+    },
+    {
+        "name": "pdf_move_pages",
+        "description": "Reorder pages by moving source pages to before a target position (1-based).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "input": {"type": "string", "description": "Absolute path to the input PDF file"},
+                "output": {"type": "string", "description": "Absolute path for the output PDF file"},
+                "source": {"type": "string", "description": "Source page numbers: 1,2"},
+                "target": {"type": "integer", "description": "Target position (1-based, insert before this page)"}
+            },
+            "required": ["input", "output", "source", "target"]
+        }
+    },
+    {
+        "name": "pdf_extract_pages",
+        "description": "Extract specific pages from a PDF into a new standalone PDF file.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "input": {"type": "string", "description": "Absolute path to the input PDF file"},
+                "output": {"type": "string", "description": "Absolute path for the extracted PDF file"},
+                "pages": {"type": "string", "description": "Page numbers to extract (1-based): 1,3,5 or 1-5 or all"}
+            },
+            "required": ["input", "output", "pages"]
+        }
+    },
+    {
+        "name": "pdf_undo",
+        "description": "Undo the last page editing operation (delete, rotate, move) on a PDF.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "input": {"type": "string", "description": "Absolute path to the input PDF file"},
+                "output": {"type": "string", "description": "Absolute path for the output PDF file"}
+            },
+            "required": ["input", "output"]
+        }
+    },
+    {
+        "name": "pdf_redo",
+        "description": "Redo the last undone page editing operation on a PDF.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "input": {"type": "string", "description": "Absolute path to the input PDF file"},
+                "output": {"type": "string", "description": "Absolute path for the output PDF file"}
+            },
+            "required": ["input", "output"]
+        }
+    },
+    {
+        "name": "pdf_history",
+        "description": "Show the operation history for a PDF editing session.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "input": {"type": "string", "description": "Absolute path to the input PDF file"}
+            },
+            "required": ["input"]
+        }
+    },
 ]
+
+
+# ── Helpers ─────────────────────────────────────────
+
+def _parse_page_list(pages_str: str, total: int) -> list[int]:
+    """Parse page range string to 0-based ordinal indices."""
+    if pages_str.lower() == "all":
+        return list(range(total))
+    result = []
+    for part in pages_str.split(","):
+        part = part.strip()
+        if "-" in part:
+            a, b = part.split("-", 1)
+            result.extend(range(int(a) - 1, int(b)))
+        else:
+            result.append(int(part) - 1)
+    return sorted(set(r for r in result if 0 <= r < total))
 
 
 # ── Command handlers — delegate to core.PdfOperator ────────
@@ -519,6 +625,68 @@ def _run_tool(name: str, args: dict) -> str:
             paths = [Path(p) for p in args["input_files"]]
             result = merge_mixed_files(paths, Path(args["output"]))
             return json.dumps(result, ensure_ascii=False)
+
+        elif name == "pdf_delete_pages":
+            from core.page_editor import PdfPageEditor as PE
+            editor = PE(Path(args["input"]))
+            total = editor.page_count
+            pages = _parse_page_list(args["pages"], total)
+            editor.delete_pages(pages)
+            editor.save(Path(args["output"])); editor.close()
+            return json.dumps({"success": True, "deleted": len(pages), "remaining": total - len(pages)})
+
+        elif name == "pdf_rotate_pages":
+            from core.page_editor import PdfPageEditor as PE
+            editor = PE(Path(args["input"]))
+            total = editor.page_count
+            pages = _parse_page_list(args["pages"], total)
+            editor.rotate_pages(pages, args["degrees"])
+            editor.save(Path(args["output"])); editor.close()
+            return json.dumps({"success": True, "rotated": len(pages), "degrees": args["degrees"]})
+
+        elif name == "pdf_move_pages":
+            from core.page_editor import PdfPageEditor as PE
+            editor = PE(Path(args["input"]))
+            total = editor.page_count
+            source = _parse_page_list(args["source"], total)
+            target = args["target"] - 1  # 1-based to 0-based
+            editor.move_pages(source, target)
+            editor.save(Path(args["output"])); editor.close()
+            return json.dumps({"success": True, "moved": len(source), "to": args["target"]})
+
+        elif name == "pdf_extract_pages":
+            from core.page_editor import PdfPageEditor as PE
+            editor = PE(Path(args["input"]))
+            total = editor.page_count
+            pages = _parse_page_list(args["pages"], total)
+            editor.extract_pages(pages, Path(args["output"]))
+            editor.close()
+            return json.dumps({"success": True, "extracted": len(pages)})
+
+        elif name == "pdf_undo":
+            from core.page_editor import PdfPageEditor as PE
+            editor = PE(Path(args["input"]))
+            desc = editor.undo()
+            if desc:
+                editor.save(Path(args["output"]))
+            editor.close()
+            return json.dumps({"success": desc is not None, "undo": desc or "nothing to undo"})
+
+        elif name == "pdf_redo":
+            from core.page_editor import PdfPageEditor as PE
+            editor = PE(Path(args["input"]))
+            desc = editor.redo()
+            if desc:
+                editor.save(Path(args["output"]))
+            editor.close()
+            return json.dumps({"success": desc is not None, "redo": desc or "nothing to redo"})
+
+        elif name == "pdf_history":
+            from core.page_editor import PdfPageEditor as PE
+            editor = PE(Path(args["input"]))
+            history = editor.undo_stack_desc
+            editor.close()
+            return json.dumps({"success": True, "history": history})
 
         else:
             return json.dumps({"success": False, "error": f"Unknown tool: {name}"})

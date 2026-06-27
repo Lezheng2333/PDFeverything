@@ -119,6 +119,47 @@ def main():
     p_te.add_argument("-i", "--input", required=True, help="输入 PDF 文件")
     p_te.add_argument("-o", "--output", required=True, help="输出 .xlsx 文件")
 
+    # --- page editing ---
+    p_del = sub.add_parser("delete-pages", help="删除指定页面")
+    p_del.add_argument("-i", "--input", required=True)
+    p_del.add_argument("-o", "--output", required=True)
+    p_del.add_argument("--pages", required=True, help="1,3,5 或 1-5 或 all")
+    p_del.add_argument("--json", action="store_true", help="JSON 输出")
+
+    p_rotp = sub.add_parser("rotate-pages", help="旋转指定页面")
+    p_rotp.add_argument("-i", "--input", required=True)
+    p_rotp.add_argument("-o", "--output", required=True)
+    p_rotp.add_argument("--pages", required=True, help="1,3,5 或 1-5 或 all")
+    p_rotp.add_argument("--degrees", type=int, required=True, choices=[90,180,270])
+    p_rotp.add_argument("--json", action="store_true")
+
+    p_mov = sub.add_parser("move-pages", help="移动页面到目标位置")
+    p_mov.add_argument("-i", "--input", required=True)
+    p_mov.add_argument("-o", "--output", required=True)
+    p_mov.add_argument("--source", required=True, help="1,2")
+    p_mov.add_argument("--target", type=int, required=True, help="目标位置 (1-based)")
+    p_mov.add_argument("--json", action="store_true")
+
+    p_ext = sub.add_parser("extract-pages", help="提取所选页面到新PDF")
+    p_ext.add_argument("-i", "--input", required=True)
+    p_ext.add_argument("-o", "--output", required=True)
+    p_ext.add_argument("--pages", required=True, help="1,3,5 或 1-5 或 all")
+    p_ext.add_argument("--json", action="store_true")
+
+    p_undo = sub.add_parser("page-undo", help="撤销上次页面编辑")
+    p_undo.add_argument("-i", "--input", required=True)
+    p_undo.add_argument("-o", "--output", required=True)
+    p_undo.add_argument("--json", action="store_true")
+
+    p_redo = sub.add_parser("page-redo", help="重做上次撤销")
+    p_redo.add_argument("-i", "--input", required=True)
+    p_redo.add_argument("-o", "--output", required=True)
+    p_redo.add_argument("--json", action="store_true")
+
+    p_hist = sub.add_parser("page-history", help="查看操作历史")
+    p_hist.add_argument("-i", "--input", required=True)
+    p_hist.add_argument("--json", action="store_true")
+
     args = parser.parse_args()
 
     if not args.command:
@@ -198,6 +239,91 @@ def main():
         elif args.command == "to-excel":
             sheets = PdfOperator.to_excel(Path(args.input), Path(args.output))
             print(f"✅ 已提取 {sheets} 个工作表 → {args.output}")
+
+        elif args.command in ("delete-pages", "rotate-pages", "move-pages",
+                              "extract-pages", "page-undo", "page-redo", "page-history"):
+            from core.page_editor import PdfPageEditor
+
+            def _parse_pages(pages_str: str, total: int) -> list[int]:
+                """Parse page range string to 0-based ordinal list."""
+                if pages_str.lower() == "all":
+                    return list(range(total))
+                result = []
+                for part in pages_str.split(","):
+                    part = part.strip()
+                    if "-" in part:
+                        a, b = part.split("-", 1)
+                        result.extend(range(int(a) - 1, int(b)))
+                    else:
+                        result.append(int(part) - 1)
+                return sorted(set(r for r in result if 0 <= r < total))
+
+            def _json_output(success: bool, op: str, msg: str, data=None, error=None, code=None):
+                import json
+                out = {"success": success, "operation": op, "message": msg}
+                if data: out["data"] = data
+                if error: out.update({"error": error, "code": code})
+                print(json.dumps(out, ensure_ascii=False))
+
+            input_path = Path(args.input)
+            output_path = Path(args.output) if hasattr(args, 'output') and args.output else None
+            editor = PdfPageEditor(input_path)
+
+            if args.command == "page-history":
+                history = editor.undo_stack_desc
+                if getattr(args, "json", False):
+                    import json
+                    print(json.dumps({"success": True, "operation": "history",
+                                      "history": history, "count": len(history)},
+                                     ensure_ascii=False))
+                else:
+                    for i, h in enumerate(reversed(history), 1):
+                        print(f"  {i}. {h}")
+                    if not history:
+                        print("  (空)")
+                editor.close()
+                return
+
+            total = editor.page_count
+
+            if args.command == "delete-pages":
+                pages = _parse_pages(args.pages, total)
+                editor.delete_pages(pages)
+                msg = f"已删除 {len(pages)} 页"
+            elif args.command == "rotate-pages":
+                pages = _parse_pages(args.pages, total)
+                editor.rotate_pages(pages, args.degrees)
+                msg = f"已旋转 {len(pages)} 页 ({args.degrees}°)"
+            elif args.command == "move-pages":
+                source = _parse_pages(args.source, total)
+                target = args.target - 1
+                editor.move_pages(source, target)
+                msg = f"已移动 {len(source)} 页到位置 {args.target}"
+            elif args.command == "extract-pages":
+                pages = _parse_pages(args.pages, total)
+                editor.extract_pages(pages, output_path)
+                editor.close()
+                msg = f"已提取 {len(pages)} 页 → {output_path}"
+                if getattr(args, "json", False):
+                    _json_output(True, args.command, msg, {"extracted": len(pages)})
+                else:
+                    print(f"✅ {msg}")
+                return
+            elif args.command == "page-undo":
+                desc = editor.undo()
+                msg = f"撤销: {desc}" if desc else "无可撤销操作"
+            elif args.command == "page-redo":
+                desc = editor.redo()
+                msg = f"重做: {desc}" if desc else "无可重做操作"
+
+            if output_path and args.command != "extract-pages":
+                editor.save(output_path)
+            editor.close()
+
+            if getattr(args, "json", False):
+                _json_output(True, args.command, msg)
+            else:
+                print(f"✅ {msg}")
 
     except Exception as e:
         sys.exit(f"❌ 错误: {e}")
