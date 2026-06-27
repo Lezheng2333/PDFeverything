@@ -63,7 +63,7 @@ class PdfReaderWidget(QWidget):
         self._scroll_debounce.timeout.connect(self._do_debounce_calibration)
 
         self._hover_timer = QTimer(self); self._hover_timer.setSingleShot(True)
-        self._hover_timer.setInterval(3000)
+        self._hover_timer.setInterval(500)
         self._hover_timer.timeout.connect(self._show_tooltip)
 
         self._zoom_popup_timer = QTimer(self); self._zoom_popup_timer.setSingleShot(True)
@@ -78,6 +78,13 @@ class PdfReaderWidget(QWidget):
 
         # ── Pinch zoom accumulator ──
         self._pinch_acc = 0
+
+        # ── Custom compact tooltip (small, at cursor, not system QToolTip) ──
+        self._tooltip = QLabel(self)
+        self._tooltip.setStyleSheet(
+            "QLabel{color:#ddd;background:#2a2a2a;border:1px solid #555;"
+            "border-radius:3px;padding:2px 7px;font-size:11px;}")
+        self._tooltip.hide()
 
         self._welcome = None
         self._welcome_drop = "Drop PDF here to read"
@@ -224,10 +231,11 @@ class PdfReaderWidget(QWidget):
     def _hover_on(self, widget):
         widget._oe = widget.enterEvent; widget._ol = widget.leaveEvent
         def enter_event(e):
-            self._hover_widget = widget; self._hover_timer.start(3000)
+            self._hover_widget = widget; self._hover_timer.start(500)
+            self._hover_pos = e.globalPosition().toPoint()
             if widget._oe: widget._oe(e)
         def leave_event(e):
-            self._hover_timer.stop(); QToolTip.hideText()
+            self._hover_timer.stop(); self._tooltip.hide()
             if widget._ol: widget._ol(e)
         widget.enterEvent = enter_event; widget.leaveEvent = leave_event
         if hasattr(widget, 'mouseMoveEvent'):
@@ -235,7 +243,7 @@ class PdfReaderWidget(QWidget):
             def move_event(e):
                 if getattr(self, '_hover_widget', None) is widget:
                     self._hover_pos = e.globalPosition().toPoint()
-                    self._hover_timer.start(3000)
+                    self._hover_timer.start(500)
                 if widget._om: widget._om(e)
             widget.mouseMoveEvent = move_event
 
@@ -244,10 +252,17 @@ class PdfReaderWidget(QWidget):
         if w and hasattr(self, '_hover_pos'):
             t = w.toolTip()
             if t:
-                # Position tooltip above the button, using its top edge
-                pos = w.mapToGlobal(w.rect().topLeft())
-                pos.setY(pos.y() - 6)
-                QToolTip.showText(pos, t, self)
+                p = self.mapFromGlobal(self._hover_pos)
+                self._tooltip.setText(t); self._tooltip.adjustSize()
+                x = p.x() + 12  # right of cursor
+                y = p.y() - self._tooltip.height() - 8  # above cursor
+                if x + self._tooltip.width() > self.width():
+                    x = p.x() - self._tooltip.width() - 12
+                if y < 0: y = p.y() + 16
+                self._tooltip.move(x, y)
+                self._tooltip.show(); self._tooltip.raise_()
+                # Auto-hide after 2s
+                QTimer.singleShot(2000, self._tooltip.hide)
 
     # ═══════════ Mode ═══════════
 
