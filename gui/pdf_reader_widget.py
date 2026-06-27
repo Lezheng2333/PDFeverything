@@ -539,22 +539,28 @@ class PdfReaderWidget(QWidget):
             self._scroll_debounce.start()
 
     def _do_throttle_page(self):
-        """Rough page estimate via division — fast, <1μs, updates UI immediately."""
+        """Throttle: only update when the estimated page has changed significantly
+        (jumped >1 page away). This prevents flicker from small ±1 page oscillations
+        where the rough-division estimate briefly disagrees with the bisect ground truth.
+
+        For small movements (±1 page), the debounce timer is the sole authority."""
         try:
-            if not self.doc or not self._page_heights or not self._total_pages:
-                return
+            if not self.doc or not self._page_heights or not self._total_pages: return
+            if not hasattr(self, '_throttle_last'):
+                self._throttle_last = self._current_page
             sb = self.scroll_area.verticalScrollBar()
             if not sb: return
-            scroll_y = sb.value()
             total_h = self.page_container.height()
             if total_h <= 0: return
             avg_h = total_h / self._total_pages
-            rough = max(0, min(self._total_pages - 1, int(scroll_y / avg_h)))
-            if rough != self._current_page:
+            rough = max(0, min(self._total_pages - 1, int(sb.value() / avg_h)))
+            # Only propagate if the jump is significant (>1 page difference).
+            # This avoids racing with the debounce bisect for ±1 flicker.
+            if abs(rough - self._throttle_last) > 1:
                 self._current_page = rough
                 self._update_nav_ui()
-        except Exception:
-            pass
+            self._throttle_last = rough
+        except Exception: pass
 
     def _do_debounce_calibration(self):
         """Precise calibration via bisect on _page_heights — O(log n)."""
