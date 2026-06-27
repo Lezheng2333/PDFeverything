@@ -6,11 +6,11 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QEvent
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QImage, QPixmap, QKeyEvent, QWheelEvent, QIntValidator
 from PyQt6.QtWidgets import (
     QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea,
-    QVBoxLayout, QWidget, QToolTip, QPinchGesture,
+    QVBoxLayout, QWidget, QToolTip,
 )
 
 
@@ -75,6 +75,14 @@ class PdfReaderWidget(QWidget):
             "font-weight:bold;border-radius:10px;padding:8px 16px;}")
         self._zoom_popup.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._zoom_popup.hide()
+
+        # ── Pinch zoom smooth animation ──
+        self._pinch_timer = QTimer(self); self._pinch_timer.setInterval(16)
+        self._pinch_timer.timeout.connect(self._pinch_animate)
+        self._pinch_base_pct = 100        # zoom pct at pinch start
+        self._pinch_angle_sum = 0         # total angleDelta since pinch began
+        self._pinch_active = False        # are we in a pinch gesture?
+        self._pinch_display_pct = 100     # currently displayed zoom (interpolated)
 
         self._welcome = None
         self._welcome_drop = "Drop PDF here to read"
@@ -217,8 +225,6 @@ class PdfReaderWidget(QWidget):
 
         root.addWidget(self.toolbar)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus); self.setMouseTracking(True)
-        # Native trackpad pinch-to-zoom via macOS gesture recognition
-        self.grabGesture(Qt.GestureType.PinchGesture)
 
     def _hover_on(self, widget):
         widget._oe = widget.enterEvent; widget._ol = widget.leaveEvent
@@ -911,60 +917,129 @@ class PdfReaderWidget(QWidget):
         elif e.key() == Qt.Key.Key_End: self.last_page()
         else: super().keyPressEvent(e)
 
-    # ═══════════ Native gesture + wheel pinch-to-zoom ═══════════
+    # ═══════════ Smooth pinch-to-zoom (phone-photo-album grade) ═══════════
+    #
+    # Architecture: macOS / modern touchpad sends QWheelEvent with .phase()
+    # during pinch gestures:
+    #   ScrollBegin (1)  → lock pinch base zoom, start accumulating angleDelta
+    #   ScrollUpdate (2) → accumulate, compute exponential target zoom, animate
+    #   ScrollEnd (3)    → stop pinch session, trigger sharp render
+    #   ScrollMomentum (4) → inertia from lifted fingers, smooth-decay zoom
+    #
+    # Zoom formula: target = base * 2^(angleSum / ZOOM_DOUBLES_AT)
+    #   ZOOM_DOUBLES_AT = 960 angle units → 2× zoom.
+    #   Typical medium pinch accumulates ~200 units ≈ 15% zoom.
+    #   Typical full-spread pinch accumulates ~600 units ≈ 55% zoom.
+    #
+    # Animation: 16ms timer interpolates display_zoom toward target_zoom
+    #   with 35% catch-up per frame (90% settled in ~80ms). This low-pass
+    #   filter produces the gentle "liquid" zoom feel of phone photo albums.
+    # ═════════════════════════════════════════════════════════════════════
 
-    def event(self, e):
-        """Catch native trackpad pinch gestures (QPinchGesture) for smooth zoom."""
-        try:
-            if e.type() == QEvent.Type.Gesture:
-                pinch = e.gesture(Qt.GestureType.PinchGesture)
-                if pinch:
-                    return self._handle_pinch_gesture(pinch, e)
-        except Exception:
-            pass
-        return super().event(e)
+    ZOOM_DOUBLES_AT = 960  # angleDelta units to double zoom
+    PINCH_ANIM_SPEED = 0.35  # interpolation fraction per 16ms frame
 
-    def _handle_pinch_gesture(self, pinch: QPinchGesture, e):
-        """Process native macOS trackpad pinch-to-zoom via QPinchGesture.
-        scaleFactor: relative scale since last event (~0.95–1.05 per frame).
-        This is how Acrobat/WPS/Preview do it — native gesture, no fragile
-        angleDelta phase heuristics."""
-        if not self.doc or self._view_mode != ViewMode.SCROLL:
-            return False
-        try:
-            sf = pinch.scaleFactor()
-            # scaleFactor=1.0 means no change. 1.03 = user pinched OUT slightly.
-            # Convert to zoom delta: each 0.01 in scaleFactor ≈ 2.5% zoom change.
-            # This gives a smooth, proportional feel matching macOS Preview.
-            if sf != 1.0:
-                # Proportional zoom delta: the further from 1.0, the larger the step
-                delta_pct = int((sf - 1.0) * 250)  # 0.01 → 2.5%, 0.05 → 12.5%
-                if abs(delta_pct) >= 1:
-                    self._set_zoom_pct(self._current_zoom_pct() + delta_pct,
-                                       skip_deferred=True)
-            # On pinch finished, trigger sharp render
-            state = pinch.state()
-            if state == Qt.GestureState.GestureFinished:
-                self._pending_zoom_pct = self._current_zoom_pct()
-                QTimer.singleShot(40, self._sharp_render)
-            return True
-        except Exception:
-            return False
+    def _pinch_animate(self):
+        """16ms animation tick — interpolate display toward target zoom."""
+        if not self.doc or not self._labels: return
+        target = self._pinch_target_pct
+        current = self._pinch_display_pct
+        if abs(target - current) < 0.3:
+            # Settled — stop the animation timer to save CPU
+            if self._pinch_display_pct != round(self._pinch_display_pct):
+                self._set_zoom_pct(int(round(self._pinch_display_pct)),
+                                   skip_deferred=True)
+            self._pinch_timer.stop()
+            return
+        # Interpolate: move 35% toward target each frame (exponential ease-out)
+        new_pct = current + (target - current) * self.PINCH_ANIM_SPEED
+        self._pinch_display_pct = new_pct
+        self._set_zoom_pct(int(round(new_pct)), skip_deferred=True)
+        self._show_zoom_popup(int(round(new_pct)))
+
+    def _start_pinch(self):
+        """Begin a pinch session — lock base zoom, start animation loop."""
+        self._pinch_base_pct = self._current_zoom_pct()
+        self._pinch_angle_sum = 0
+        self._pinch_target_pct = self._pinch_base_pct
+        self._pinch_display_pct = float(self._pinch_base_pct)
+        self._pinch_active = True
+        if not self._pinch_timer.isActive():
+            self._pinch_timer.start()
+
+    def _update_pinch(self, angle_y: int):
+        """Accumulate pinch angle and compute new exponential target zoom."""
+        self._pinch_angle_sum += angle_y
+        # Exponential zoom: same finger spread → same proportional change
+        # at any zoom level. 960 units doubles zoom (2×).
+        factor = 2.0 ** (self._pinch_angle_sum / self.ZOOM_DOUBLES_AT)
+        self._pinch_target_pct = max(25, min(300,
+            self._pinch_base_pct * factor))
+
+    def _end_pinch(self):
+        """End pinch session — finalize to integer zoom, trigger sharp render."""
+        self._pinch_active = False
+        # Jump to frame-aligned target (snap animation)
+        final = int(round(self._pinch_target_pct))
+        self._pinch_display_pct = float(final)
+        self._set_zoom_pct(final, skip_deferred=False)
+        self._pinch_timer.stop()
 
     def wheelEvent(self, e):
-        """Ctrl+wheel zoom fallback. Native pinch handled by event()/QPinchGesture."""
+        """Handle trackpad pinch-to-zoom + Ctrl+wheel fallback.
+        macOS sends QWheelEvent with .phase() during native pinch gestures.
+        pixelDelta==0 + phase>=1 + angleDelta present = pinch gesture."""
         if not self.doc or self._view_mode != ViewMode.SCROLL:
             super().wheelEvent(e); return
-        # Only handle Ctrl+wheel for manual zoom — native pinch goes through event()
-        if e.modifiers() & Qt.KeyboardModifier.ControlModifier:
-            ad = e.angleDelta().y() if e.angleDelta() else 0
+
+        ad = e.angleDelta().y() if e.angleDelta() else 0
+        pd = e.pixelDelta().y() if e.pixelDelta() else 0
+        ctrl = bool(e.modifiers() & Qt.KeyboardModifier.ControlModifier)
+
+        # ── Ctrl+wheel: manual discrete zoom (fallback for non-trackpad) ──
+        if ctrl:
             if abs(ad) >= 120:
                 delta = 5 if ad > 0 else -5
-                self._set_zoom_pct(self._current_zoom_pct() + delta,
-                                   skip_deferred=True)
-                self._pending_zoom_pct = self._current_zoom_pct()
-                QTimer.singleShot(40, self._sharp_render)
+                self._set_zoom_pct(self._current_zoom_pct() + delta)
             return
+
+        # ── Detect native pinch via phase ──
+        try:
+            phase = int(e.phase())
+        except (AttributeError, TypeError, ValueError):
+            phase = -1
+
+        # Native pinch: ScrollUpdate (phase=2) with angleDelta but no pixelDelta.
+        # Overscroll rubber-band has both non-zero → ignore those.
+        is_pinch = (phase >= 1 and pd == 0 and ad != 0)
+
+        if is_pinch:
+            if phase == 1:  # ScrollBegin
+                self._start_pinch()
+            elif phase == 2 and self._pinch_active:  # ScrollUpdate
+                self._update_pinch(ad)
+            elif phase in (3, 4):  # ScrollEnd / ScrollMomentum
+                # During momentum we still get angleDelta → apply gently
+                if phase == 4 and self._pinch_active and ad != 0:
+                    self._update_pinch(ad * 0.3)  # dampened momentum
+                if self._pinch_active:
+                    self._end_pinch()
+            return
+
+        # ── Fallback: extreme angleDelta/pixelDelta ratio (non-phase OS) ──
+        if not is_pinch and pd != 0 and ad != 0:
+            if abs(ad) > abs(pd) * 5:
+                if not self._pinch_active:
+                    self._start_pinch()
+                self._update_pinch(ad * 0.15)  # per-frame, gentler multiplier
+                # Trigger end after a short idle
+                self._pinch_end_timer = QTimer(self); self._pinch_end_timer.setSingleShot(True)
+                self._pinch_end_timer.setInterval(150)
+                self._pinch_end_timer.timeout.connect(lambda: (
+                    self._end_pinch() if self._pinch_active else None))
+                self._pinch_end_timer.start()
+                return
+
         super().wheelEvent(e)
 
     def resizeEvent(self, e):
