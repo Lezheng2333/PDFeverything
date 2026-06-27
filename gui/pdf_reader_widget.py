@@ -1114,12 +1114,13 @@ class PdfReaderWidget(QWidget):
         """Toggle drag-sort mode. When checked, click+drag selected pages to reorder them.
         When unchecked, clicking selects pages without dragging."""
         if self.btn_edit_sort.isChecked():
-            # User wants to enter sort mode
-            if not self._selected_pages: return
+            if not self._selected_pages:
+                self.btn_edit_sort.setChecked(False)
+                QMessageBox.information(self, "排序模式", "请先选中要排序的页面（Shift键多选），再点击排序按钮。")
+                return
             self._drag_sort_mode = True
             self._drag_active = False; self._drag_target = None
         else:
-            # User wants to exit sort mode
             self._drag_sort_mode = False
             self._drag_active = False; self._drag_target = None
 
