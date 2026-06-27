@@ -149,7 +149,7 @@ class PdfReaderWidget(QWidget):
         tb.addWidget(self.btn_scroll); tb.addWidget(self.btn_grid)
         tb.addStretch()
 
-        self.btn_prev = QPushButton("◀"); self.btn_prev.setFixedSize(30,30)
+        self.btn_prev = QPushButton("◀"); self.btn_prev.setFixedSize(34,34)
         self.btn_prev.clicked.connect(self.prev_page)
         self._hover_on(self.btn_prev)
 
@@ -158,14 +158,14 @@ class PdfReaderWidget(QWidget):
         self.page_label.setFixedWidth(70)
         self.page_label.setStyleSheet("QLabel{color:#bbb}")
 
-        self.btn_next = QPushButton("▶"); self.btn_next.setFixedSize(30,30)
+        self.btn_next = QPushButton("▶"); self.btn_next.setFixedSize(34,34)
         self.btn_next.clicked.connect(self.next_page)
         self._hover_on(self.btn_next)
 
         tb.addWidget(self.btn_prev); tb.addWidget(self.page_label); tb.addWidget(self.btn_next)
         tb.addStretch()
 
-        self.btn_zoom_out = QPushButton("−"); self.btn_zoom_out.setFixedSize(30,30)
+        self.btn_zoom_out = QPushButton("−"); self.btn_zoom_out.setFixedSize(34,34)
         self.btn_zoom_out.clicked.connect(lambda: self._adjust_zoom(-5))
         self._hover_on(self.btn_zoom_out)
 
@@ -177,7 +177,7 @@ class PdfReaderWidget(QWidget):
         self.zoom_edit.returnPressed.connect(self._on_zoom_edit)
         self.zoom_edit.editingFinished.connect(self._on_zoom_edit)
 
-        self.btn_zoom_in = QPushButton("+"); self.btn_zoom_in.setFixedSize(30,30)
+        self.btn_zoom_in = QPushButton("+"); self.btn_zoom_in.setFixedSize(34,34)
         self.btn_zoom_in.clicked.connect(lambda: self._adjust_zoom(+5))
         self._hover_on(self.btn_zoom_in)
 
