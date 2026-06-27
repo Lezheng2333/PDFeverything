@@ -359,6 +359,7 @@ class PdfReaderWidget(QWidget):
 
         self._show_zoom_popup(pct)
         self._layout_labels()
+        self._scroll_to_page_top()  # preserve scroll position after zoom
 
         if not skip_deferred:
             self._pending_zoom_pct = pct
@@ -377,9 +378,9 @@ class PdfReaderWidget(QWidget):
             self._pending_zoom_pct = None
 
     def _visible_page_range(self):
-        """Return (start, end) of pages to render — current page ± 2, clamped."""
-        s = max(0, self._current_page - 2)
-        e = min(self._total_pages, self._current_page + 3)
+        """Return (start, end) of pages to render — current page ± 1, clamped."""
+        s = max(0, self._current_page - 1)
+        e = min(self._total_pages, self._current_page + 2)
         return s, e
 
     def _pre_render_100_all(self):
@@ -481,6 +482,8 @@ class PdfReaderWidget(QWidget):
         self._layout_labels()
         self._show_zoom_popup(pct)
         self._pending_zoom_pct = pct
+        # Preserve scroll position: after zoom change, snap to current_page
+        self._scroll_to_page_top()
         QTimer.singleShot(40, self._sharp_render)
 
     # ═══════════ Labels ═══════════
