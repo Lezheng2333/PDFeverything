@@ -19,8 +19,15 @@ class ViewMode(Enum):
     GRID = "grid"
 
 
-RENDER_SCALE = 2; RESIZE_DEBOUNCE = 350; BATCH = 30
-MAX_CACHE_MB = 250; CACHE_TARGET_MB = 180
+# Rendering philosophy: MuPDF's built-in sub-pixel anti-aliasing produces
+# vector-quality output at ANY resolution. We render at exact zoom × devicePixelRatio
+# with NO oversampling and NO downscaling — just like Acrobat/WPS which render
+# vector PDF content directly to the framebuffer at native resolution.
+# The SSAA→downscale approach is counterproductive: it adds an unnecessary bilinear
+# filter pass that softens MuPDF's already-perfect anti-aliased output.
+RESIZE_DEBOUNCE = 350
+MAX_CACHE_MB = 400; CACHE_TARGET_MB = 280
+PRE_RENDER_EAGER = 5  # render first N pages eagerly, rest lazily
 PAGE_THROTTLE_MS = 30  # rough page update
 PAGE_DEBOUNCE_MS = 150  # precise bisect calibration
 
@@ -268,6 +275,9 @@ class PdfReaderWidget(QWidget):
         if self.doc.is_encrypted:
             if not self.doc.authenticate(""):
                 self.doc.close(); self.doc = None; self._show_welcome(); return
+        # Configure MuPDF for maximum text rendering quality.
+        # fz_set_aa_level(8) gives highest sub-pixel anti-aliasing (8 bits).
+        self._configure_mupdf_aa()
         self._path = path
         self._total_pages = len(self.doc); self._current_page = 0
         self._zoom_mode = 1.0              # default: 100%
@@ -311,6 +321,7 @@ class PdfReaderWidget(QWidget):
     def _cancel_deferred_renders(self):
         """Cancel all pending timers to prevent stale callbacks."""
         self._pending_zoom_pct = None
+        self._lazy_pre_render_index = 999999  # stops _lazy_pre_render loop
         self._resize_timer.stop()
         self._scroll_throttle.stop()
         self._scroll_debounce.stop()
@@ -341,7 +352,10 @@ class PdfReaderWidget(QWidget):
         self.btn_fit_height.setChecked(False)
         self.zoom_edit.setText(str(pct))
 
-        # Pass 1: scale each page's 100% base pixmap to target zoom
+        # Pass 1: scale each page's 100% base pixmap to target zoom.
+        # Use LOGICAL size: the 100% base may have devicePixelRatio set (HiDPI),
+        # and QPixmap.scaled() returns a pixmap with dpr=1.0 — so targets must
+        # be in logical pixels or the label appears 2× oversized.
         target_factor = pct / 100.0
         from PyQt6.QtCore import Qt as QtCore
         for pi, label in enumerate(self._labels):
@@ -349,7 +363,7 @@ class PdfReaderWidget(QWidget):
                 base_key = (pi, "z:1.000")
                 base = PdfReaderWidget._cache_get(base_key)
                 if base is None or base.isNull(): continue
-                bw, bh = base.size().width(), base.size().height()
+                bw, bh = self._logical_size(base)
                 tw, th = max(1, int(bw * target_factor)), max(1, int(bh * target_factor))
                 label.setPixmap(base.scaled(tw, th,
                     QtCore.AspectRatioMode.IgnoreAspectRatio,
@@ -383,24 +397,65 @@ class PdfReaderWidget(QWidget):
         e = min(self._total_pages, self._current_page + 2)
         return s, e
 
+    def _configure_mupdf_aa(self):
+        """Set MuPDF anti-aliasing to maximum quality (8 bits).
+        This gives the best sub-pixel text rendering — equivalent to Acrobat/WPS.
+        fz_set_aa_level() controls glyph edge smoothing; 8 = highest quality."""
+        try:
+            import fitz
+            if hasattr(fitz.Tools, 'set_aa_level'):
+                fitz.Tools.set_aa_level(8)
+            # Also try the text-specific AA level if available
+            if hasattr(fitz.Tools, 'set_text_aa_level'):
+                fitz.Tools.set_text_aa_level(8)
+            if hasattr(fitz.Tools, 'set_graphics_aa_level'):
+                fitz.Tools.set_graphics_aa_level(8)
+        except Exception:
+            pass  # best-effort; MuPDF's default AA (8 bits) is already good
+
     def _pre_render_100_all(self):
-        """Render every page at 100% zoom — space-for-time on first load.
+        """Render first few pages at 100% eagerly, queue the rest lazily.
         Creates a high-quality base that all future zooms can scale from."""
         if not self.doc or not self._labels: return
         vw, vh = self._viewport_size()
-        # Bypass _zoom_key — render at hard-coded 1.0 (100%) ratio via viewport
-        for pi in range(self._total_pages):
+        # Preserve original zoom_key: use "z:1.000" manually
+        orig_key = self._zoom_key(vw, vh)
+        self._zoom_mode = 1.0  # ensure _zoom_key returns "z:1.000"
+        for pi in range(min(PRE_RENDER_EAGER, self._total_pages)):
             self._get_or_render(pi, vw, vh)
+        self._zoom_mode = orig_key if isinstance(orig_key, float) else (
+            1.0 if orig_key.startswith("z:") else orig_key)
+        # Queue remaining pages one-by-one with low-priority timers
+        if self._total_pages > PRE_RENDER_EAGER:
+            self._lazy_pre_render_index = PRE_RENDER_EAGER
+            QTimer.singleShot(50, self._lazy_pre_render)
+
+    def _lazy_pre_render(self):
+        """Render one more page at 100%, then queue next."""
+        if not self.doc or not self._labels: return
+        vw, vh = self._viewport_size()
+        pi = getattr(self, '_lazy_pre_render_index', 0)
+        if pi >= self._total_pages: return
+        old = self._zoom_mode
+        self._zoom_mode = 1.0
+        self._get_or_render(pi, vw, vh)
+        self._zoom_mode = old
+        self._lazy_pre_render_index = pi + 1
+        if self._lazy_pre_render_index < self._total_pages:
+            QTimer.singleShot(10, self._lazy_pre_render)
 
     def _render_visible_range(self):
-        """Render only pages near the current position (view-driven, ~5 pages)."""
+        """Render pages near the current position at native HiDPI resolution (~3 pages).
+        Uses cache when available, renders fresh for misses."""
         if not self.doc or not self._labels:
             return
         vw, vh = self._viewport_size()
         zk = self._zoom_key(vw, vh)
         s, e = self._visible_page_range()
-        for pi in range(s, e):
-            if pi >= len(self._labels):
+        # Render current page first (it's the priority), then neighbors
+        order = [self._current_page] + [p for p in range(s, e) if p != self._current_page]
+        for pi in order:
+            if pi < 0 or pi >= len(self._labels):
                 continue
             try:
                 key = (pi, zk)
@@ -409,7 +464,8 @@ class PdfReaderWidget(QWidget):
                     pix = self._get_or_render(pi, vw, vh)
                 if pix:
                     self._labels[pi].setPixmap(pix)
-                    self._labels[pi].setFixedSize(pix.size())
+                    lw, lh = self._logical_size(pix)
+                    self._labels[pi].setFixedSize(lw, lh)
             except Exception:
                 pass
 
@@ -463,7 +519,8 @@ class PdfReaderWidget(QWidget):
         self.btn_fit_height.setChecked(mode == "fit_height")
         self.zoom_edit.setText(str(pct))
 
-        # Pass 1: instant — scale visible labels only
+        # Pass 1: instant — scale from 100% base using LOGICAL size
+        # (base may have HiDPI devicePixelRatio set; scaled result has dpr=1.0)
         target_factor = pct / 100.0
         from PyQt6.QtCore import Qt as QtCore
         for pi, label in enumerate(self._labels):
@@ -471,7 +528,7 @@ class PdfReaderWidget(QWidget):
                 base_key = (pi, "z:1.000")
                 base = PdfReaderWidget._cache_get(base_key)
                 if base is None or base.isNull(): continue
-                bw, bh = base.size().width(), base.size().height()
+                bw, bh = self._logical_size(base)
                 tw, th = max(1, int(bw * target_factor)), max(1, int(bh * target_factor))
                 label.setPixmap(base.scaled(tw, th,
                     QtCore.AspectRatioMode.IgnoreAspectRatio,
@@ -515,9 +572,10 @@ class PdfReaderWidget(QWidget):
                         pix = self._get_or_render(pi, vw, vh)
                         if pix:
                             label.setPixmap(pix)
-                            label.setFixedSize(pix.size())
+                            lw, lh = self._logical_size(pix)
+                            label.setFixedSize(lw, lh)
                 if pix and not pix.isNull():
-                    h, w = pix.height(), pix.width()
+                    w, h = self._logical_size(pix)
                 else:
                     w, h = 600, 800
                 label.setStyleSheet("QLabel{background:white;}")
@@ -536,7 +594,7 @@ class PdfReaderWidget(QWidget):
 
             for pi, label in enumerate(self._labels):
                 pix = self._get_or_render(pi, thumb_w, thumb_h, force_fit=True)
-                if pix: label.setPixmap(pix); label.setFixedSize(pix.size())
+                if pix: label.setPixmap(pix); lw, lh = self._logical_size(pix); label.setFixedSize(lw, lh)
                 label.setStyleSheet("QLabel{background:white;border:1px solid #555;}")
                 label.setCursor(Qt.CursorShape.PointingHandCursor)
                 col, row = pi % COLS, pi // COLS
@@ -625,7 +683,10 @@ class PdfReaderWidget(QWidget):
         return f"z:{self._zoom_mode:.3f}"
 
     @staticmethod
-    def _render_page(doc, pi, zk, vw, vh, force_fit=False):
+    def _render_page(doc, pi, zk, vw, vh, force_fit=False, dpr=1.0):
+        """Render a page at exact target resolution — MuPDF's built-in
+        sub-pixel anti-aliasing handles quality at all zoom levels.
+        No oversampling, no downscaling — pure vector-to-pixel rendering."""
         import fitz
         page = doc[pi]; pw, ph = page.rect.width, page.rect.height
         if zk == "fw": zoom = vw / pw
@@ -633,30 +694,56 @@ class PdfReaderWidget(QWidget):
         elif zk.startswith("z:"): zoom = float(zk[2:])
         elif force_fit: zoom = min(vw/pw, vh/ph)
         else: zoom = vw / pw
-        mat = fitz.Matrix(zoom * RENDER_SCALE, zoom * RENDER_SCALE)
+        # Render at exact physical-pixel resolution.
+        # MuPDF anti-aliases text with sub-pixel precision at whatever
+        # resolution we request — no oversampling needed.
+        mat = fitz.Matrix(zoom * dpr, zoom * dpr)
         pix = page.get_pixmap(matrix=mat)
         qimg = QImage(pix.samples, pix.width, pix.height,
                       pix.stride, QImage.Format.Format_RGB888)
-        tw = max(1, pix.width // RENDER_SCALE)
-        th = max(1, pix.height // RENDER_SCALE)
-        from PyQt6.QtCore import Qt as QtCore
-        return QPixmap.fromImage(qimg).scaled(
-            tw, th,
-            QtCore.AspectRatioMode.IgnoreAspectRatio,
-            QtCore.TransformationMode.SmoothTransformation)
+        pixmap = QPixmap.fromImage(qimg)
+        if dpr != 1.0:
+            pixmap.setDevicePixelRatio(dpr)
+        return pixmap
 
     def _viewport_size(self):
         vp = self.scroll_area.viewport()
-        return (max(800, vp.width() - 4), max(600, vp.height() - 4))
+        w, h = max(800, vp.width() - 4), max(600, vp.height() - 4)
+        return w, h
+
+    def _device_pixel_ratio(self) -> float:
+        """Get the device pixel ratio for native-resolution rendering on HiDPI."""
+        try:
+            vp = self.scroll_area.viewport()
+            if vp:
+                return vp.devicePixelRatio()
+        except Exception:
+            pass
+        return 1.0
+
+    @staticmethod
+    def _logical_size(pix: QPixmap) -> tuple:
+        """Return (width, height) in logical pixels for a pixmap."""
+        r = pix.devicePixelRatio()
+        if r != 1.0:
+            sz = pix.deviceIndependentSize()
+            return int(sz.width()), int(sz.height())
+        return pix.width(), pix.height()
 
     @classmethod
     def _cache_put(cls, key, pix: QPixmap):
-        """LRU insert with memory-aware eviction. 100% base + fit modes are immortal."""
+        """LRU insert with memory-aware eviction. 100% base + fit modes are immortal.
+        Memory tracking accounts for devicePixelRatio: Qt6 returns logical-pixel
+        dimensions from pix.width()/height(), but RAM is consumed by physical pixels."""
         if key in cls._cache:
             cls._cache.move_to_end(key)
             cls._cache[key] = pix
             return
+        # Physical pixel memory: logical_px × dpr × logical_px × dpr × 4 bytes
         mem = pix.width() * pix.height() * 4
+        r = pix.devicePixelRatio()
+        if r != 1.0:
+            mem = int(mem * r * r)
         cls._cache_memory_bytes += mem
         cls._cache[key] = pix
         while cls._cache_memory_bytes > MAX_CACHE_MB * 1024 * 1024 and len(cls._cache) > 1:
@@ -666,7 +753,11 @@ class PdfReaderWidget(QWidget):
             if zk in ("fh", "fw", "z:1.000"):
                 break
             ow, oh = oldest_pix.width(), oldest_pix.height()
-            cls._cache_memory_bytes -= ow * oh * 4
+            orr = oldest_pix.devicePixelRatio()
+            oldest_mem = ow * oh * 4
+            if orr != 1.0:
+                oldest_mem = int(oldest_mem * orr * orr)
+            cls._cache_memory_bytes -= oldest_mem
             cls._cache.popitem(last=False)
 
     @classmethod
@@ -681,12 +772,13 @@ class PdfReaderWidget(QWidget):
         cls._cache.clear()
         cls._cache_memory_bytes = 0
 
-    def _get_or_render(self, pi, vw, vh=99999, force_fit=False):
+    def _get_or_render(self, pi, vw, vh=99999, force_fit=False, render_hq=False):
         key = (pi, self._zoom_key(vw, vh))
         cached = PdfReaderWidget._cache_get(key)
-        if cached is not None:
+        if cached is not None and not render_hq:
             return cached
-        pix = PdfReaderWidget._render_page(self.doc, pi, key[1], vw, vh, force_fit)
+        dpr = self._device_pixel_ratio()
+        pix = PdfReaderWidget._render_page(self.doc, pi, key[1], vw, vh, force_fit, dpr=dpr)
         PdfReaderWidget._cache_put(key, pix)
         return pix
 
@@ -831,7 +923,7 @@ class PdfReaderWidget(QWidget):
                 try:
                     if e.phase() and int(e.phase()) == 3:
                         self._pending_zoom_pct = self._current_zoom_pct()
-                        QTimer.singleShot(180, self._sharp_render)
+                        QTimer.singleShot(40, self._sharp_render)
                 except (AttributeError, TypeError): pass
             else:
                 super().wheelEvent(e)

@@ -136,7 +136,7 @@ def main():
         print(HELP_TEXT)
         return
     if len(sys.argv) > 1 and sys.argv[1] in ("-v", "--version"):
-        print("PDFeverything v1.3.12")
+        print("PDFeverything v1.3.15")
         return
     if len(sys.argv) > 1 and sys.argv[1] == "--mcp":
         launch_mcp()

@@ -297,6 +297,7 @@ Ver 1.3.0 | 2026-06-26 — PDF 阅读器
       → 用户滚动时，停下的位置立即渲染可见页
       → 从未见过的页面在滚动停止时才首次渲染
 
+
   Ver 1.3.12 | 图标重绘 — 液态玻璃艺术风格 + Dock 修复 + UI 微调
     - **图标重绘** (1024×1024 px)：
       · 硬对角蒙版 + TR/BL 圆角处高斯渐变过渡（r=12px）
@@ -315,3 +316,74 @@ Ver 1.3.0 | 2026-06-26 — PDF 阅读器
     - BUGFIX: 混合竖版/横版 PDF 左对齐 — 每页独立居中对齐
     - BUGFIX: Tooltip 暗色不可见 — 全局白字深黑紧凑样式
     - BUGFIX: 缩放基数错误导致反向缩放 — new/old ratio 替换 _fw_ratio
+
+    
+  Ver 1.3.13 | Immortal 100% base + 默认 100% 缩放 + 滚动保持 + 3 页懒渲染
+
+    - **默认 100% 缩放**：打开 PDF 不再自动 Fit Height，始终从 100% 开始
+      · `_zoom_mode = 1.0`（非 "fit_height"），Fit W/Fit H 按钮初始未选中
+      · `zoom_edit` 显示 "100" 而非自适应高度百分比
+    - **Immortal 100% 缓存基础**：
+      · `_pre_render_100_all()` — 打开 PDF 时全量预渲染所有页面到 100% 缩放
+      · 缓存键 `(pi, "z:1.000")` 永不过期——`_cache_put` 中跳过 immortal key 淘汰
+      · 所有缩放操作的 Pass 1 (<5ms) 直接从 100% base QPixmap 做缩放，消除累积误差
+      · `target_factor = pct / 100.0` 线性计算目标尺寸，不再依赖上次渲染比例
+    - **缩放/Fit 模式切换后保持滚动位置**：
+      · `_set_zoom_pct` + `_apply_fit_mode` 末尾统一调 `_scroll_to_page_top()`
+      · 防止页面尺寸变化后 scrollbar 绝对值对应到不同页面
+    - **懒渲染 ±2→±1**：`_visible_page_range` 从 5 页（当前±2）缩小到 3 页（当前±1）
+      · 只渲染当前页+前后各 1 页，Pass 2 内存和渲染压力更小
+    - BUGFIX: Fit Width→Fit Height→Fit Width 切换时滚动位置跳变
+      — `_apply_fit_mode` 末尾加入 `_scroll_to_page_top()`
+    - BUGFIX: 缩放后 `_layout_labels` 覆盖 Pass 1 缩放结果
+      — 仅在 `render_missing=True`（初次加载）时调用渲染，缩放路径传 False
+    - BUGFIX: 空 reader 滚动触发崩溃 — 增加 `if not self.doc` guard
+
+
+  Ver 1.3.14 | WPS 级画质提升 — 4× SSAA + HiDPI 原生分辨率 + 懒预渲染
+
+    - **RENDER_SCALE 2→4**：超采样抗锯齿从 2× 提升至 4×（标准屏）/ 8×（Retina）
+      · 渲染分辨率翻倍 → 缩放到逻辑尺寸 → 文字锐利度显著提升
+    - **HiDPI 原生支持**：
+      · `_render_page` 新增 `dpr` 参数，`fitz.Matrix` 乘以 `devicePixelRatio()`
+      · QPixmap 设置 `setDevicePixelRatio(dpr)`，Qt 自动做 1:1 像素映射
+      · Retina 屏：595×842 逻辑 px → 1190×1684 物理像素（4 倍像素，无模糊）
+      · 标准屏：像素不变，SSAA 从 2× 翻到 4×
+    - **`_logical_size()` 辅助方法**：统一处理物理像素→逻辑像素转换
+      · 所有 `label.setFixedSize(pix.size())` 替换为 `_logical_size(pix)`
+      · Pass 1 缩放从 100% base 出发时使用逻辑尺寸计算目标
+    - **懒预渲染**：`_pre_render_100_all` 不再阻塞 UI
+      · 仅立即渲染前 5 页（`PRE_RENDER_EAGER=5`），其余由 `_lazy_pre_render` 排队
+      · QTimer.singleShot(50ms) → 每页间隔 10ms，后台异步填充 100% base 缓存
+      · `_cancel_deferred_renders` 终止懒渲染循环
+    - **缓存内存上限**：250MB → 400MB，适应 HiDPI 下 4 倍物理像素增长
+    - **含入方式优化**：`pix.width // RENDER_SCALE` → `int(round(pix.width / RENDER_SCALE))`
+    - BUGFIX: HiDPI pixmap 设置到 label 后显示 2 倍过大
+      — 所有 label 尺寸计算统一使用 `_logical_size()` 取逻辑像素
+    - BUGFIX: Pass 1 缩放使用 `base.size()` 取物理像素 → 计算结果 2 倍逻辑尺寸
+      — 改为 `_logical_size(base)`，缩放后 label 尺寸正确
+    - BUGFIX: pre-render 全部页面导致大 PDF 打开缓慢
+      — 改为懒加载：先渲染 5 页，其余后台排队
+
+  Ver 1.3.15 | 矢量级画质重写 — 精确分辨率渲染 + MuPDF 原生 AA + 捏合加速
+
+    - **SSAA 超采样完全移除**：不再渲染到 4× 再 Bilinear 缩小
+      · MuPDF 内置子像素抗锯齿在任何分辨率下都产生矢量级画质
+      · SSAA → downscale 实际上用一个不必要的 Bilinear 滤镜软化了 MuPDF 的输出
+      · Acrobat/WPS 的做法：直接在目标分辨率渲染矢量 PDF 内容
+    - **精确分辨率渲染**：mat = fitz.Matrix(zoom * dpr, zoom * dpr)
+      · Retina 100%：直接渲染 1190×1684 物理像素（≈144 有效 DPI）
+      · 标准屏 100%：直接渲染 595×842 物理像素（MuPDF AA 保证质量）
+      · 无 oversampling、无 downscale、无 Bilinear 损失
+    - **MuPDF AA 级别最大化**：_configure_mupdf_aa() 在打开 PDF 时调用
+      · fitz.Tools.set_aa_level(8) — 8 位子像素边缘平滑
+      · fitz.Tools.set_text_aa_level(8) + set_graphics_aa_level(8)
+    - **缓存内存追踪修正**：_cache_put 现在正确计算 HiDPI 物理内存
+      · Qt6 中 pix.width() 返回逻辑像素，* dpr² 得到物理像素内存
+      · 淘汰时也使用 devicePixelRatio() 校正释放量
+    - **捏合缩放加速**：手势结束后 180ms → 40ms 触发高清渲染
+    - BUGFIX: HiDPI 缓存内存低估 — dpr=2 时 pix.width()×pix.height()
+      只返回逻辑像素（= 物理/4），导致 400MB 限制实际允许 1.6GB
+      — 乘以 dpr² 得到真实物理内存占用量
+
+

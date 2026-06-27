@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/Lezheng2333/PDFeverything/releases"><img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-blue?style=flat-square" /></a>
-  <a href="https://github.com/Lezheng2333/PDFeverything/releases/latest"><img src="https://img.shields.io/badge/version-v1.3.12-007aff?style=flat-square" /></a>
+  <a href="https://github.com/Lezheng2333/PDFeverything/releases/latest"><img src="https://img.shields.io/badge/version-v1.3.15-007aff?style=flat-square" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" /></a>
 </p>
 
@@ -31,11 +31,12 @@ Drag everything in — any combination of PDFs, Word documents, PowerPoint decks
 
 > 🔗 [**Latest Release →**](https://github.com/Lezheng2333/PDFeverything/releases/latest)
 
-## 🆕 What's New in v1.3.12
+## 🆕 What's New in v1.3.15
 
-- 🌐 **English UI** — toggle between Chinese and English in Settings > Language
-- 🪟 **Windows Office COM** — native Word/PPT/Excel conversion on Windows (no fallback renderer needed!)
-- 🤖 **AI Agent CLI mode** — `PDFeverything.exe merge -i a.pdf b.pdf -o out.pdf` from any terminal
+- 📖 **Built-in PDF Reader** — Scroll & Grid modes, two-pass zoom, trackpad pinch-to-zoom
+- 🎨 **Vector-grade rendering** — exact-resolution rendering, MuPDF native 8-bit sub-pixel AA (matching Acrobat/WPS)
+- 🖥️ **Full HiDPI/Retina** — renders at native physical-pixel resolution, 1:1 pixel mapping, zero blur
+- ⚡ **Instant zoom** — Pass 1 <5ms pixel scale + Pass 2 40ms sharp render at exact zoom×dpr
 
 ---
 
@@ -308,11 +309,12 @@ MIT — do whatever you want with it. [LICENSE](resources/LICENSE.txt)
 | 🔄 **旋转** | 旋转页面 90° / 180° / 270° |
 | ℹ️ **信息** | 查看页数、元数据、加密状态 |
 
-### 🆕 v1.3.12 新功能
+### 🆕 v1.3.15 新功能
 
-- 🌐 **英文界面** — 设置 → 语言 切换中英文
-- 🪟 **Windows Office 集成** — 调用本机 Word/PPT/Excel 高保真转换
-- 🤖 **AI 调用的命令行模式** — `PDFeverything.exe merge -i a.pdf b.pdf -o out.pdf`
+- 📖 **内置 PDF 阅读器** — 连续滚动 & 网格缩略图双模式，两阶段缩放，触控板捏合缩放
+- 🎨 **矢量级渲染画质** — 精确分辨率渲染，MuPDF 原生 8 位子像素抗锯齿（媲美 Acrobat/WPS）
+- 🖥️ **全 HiDPI/Retina 支持** — 原生物理像素渲染，1:1 像素映射，零模糊
+- ⚡ **跟手缩放** — Pass 1 <5ms 瞬时反馈 + Pass 2 40ms 精确分辨率渲染
 
 ### 🖥️ 界面预览
 

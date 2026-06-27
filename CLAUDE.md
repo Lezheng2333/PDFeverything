@@ -37,21 +37,35 @@
 
 ## 当前开发状态
 
-### 最新版本：v1.2.2
+### 最新版本：v1.3.15
+- 📖 **PDF 阅读器**：两模式（Scroll 连续滚动 / Grid 3 列缩略图）
+  - **矢量级画质**：精确分辨率渲染（无 SSAA/无 downscale），MuPDF 原生子像素 AA，8 位 AA 最大化
+  - **HiDPI 原生**：`devicePixelRatio` 驱动渲染矩阵 + `setDevicePixelRatio` 1:1 像素映射
+  - Immortal 100% base：全部缩放从 100% 渲染基础出发，零累积误差
+  - 两阶段缩放：Pass 1 瞬时像素拉伸 (<5ms) + Pass 2 精确分辨率渲染 (40ms)
+  - LRU OrderedDict 缓存，400MB 物理内存硬限制（dpr² 校正），驻留特权保护 base + fit modes
+  - 双 Timer 页码追踪：throttle 30ms 粗略 + debounce 150ms bisect 精确校准
+  - 懒渲染 ±1 页（3 页）；懒预渲染首 5 页 + 10ms 间隔后台排队
+  - 触控板捏合缩放（40ms 高清响应）、拖放打开、欢迎页、✕ 关闭
+  - 默认 100% 缩放打开，缩放/Fit 模式切换后保持滚动位置
 - GUI 中英文双语切换（Settings → Language）
 - 16 个 PDF 操作（CLI + GUI + MCP 三通道）
-- 批量处理：所有操作支持多文件批量（上限 200，>20 确认）
-- MCP 服务器内置：AI Agent 通过 --mcp 标志直接调用
-- macOS + Windows 双平台 onefile/onedir 发布
+- macOS + Windows 双平台 onedir/onefile 发布
+- 液态玻璃艺术风格 1024px 应用图标
 
 ### 开发路线
 ```
 ✅ CLI原型 ✅ Core重构 ✅ PyQt6 GUI ✅ macOS/Windows发布
 ✅ i18n双语 ✅ Windows COM ✅ MCP服务器 ✅ PDF反向转换
-✅ 批量处理 ✅ 鲁棒性加固 → 更多AI集成 → 云端部署
+✅ 批量处理 ✅ 鲁棒性加固 ✅ PDF阅读器 ✅ LRU缓存
+✅ Immortal 100% base ✅ 矢量级画质(精确解析度+MuPDF原生AA) => 持续优化
 ```
 
 ### 已知脆弱点（修改前必须理解上下文）
+- **Reader 缓存键**：`z:1.000` 是 immortal base 键，`_cache_put` 中必须跳过淘汰；修改 `_zoom_key` 格式会影响所有缓存命中
+- **Reader 缩放流水线**：Pass 1 必须从 100% base 出发（`base_key = (pi, "z:1.000")`），不能从 label.pixmap 出发；Pass 2 `_sharp_render` 依赖 `_pending_zoom_pct is not None` 守卫
+- **_layout_labels render_missing**：缩放路径必须传 `render_missing=False`，只有 `open_pdf` 传 True；传错会导致 Pass 1 缩放结果被 100% 覆盖
+- **_scroll_to_page_top()**：`_set_zoom_pct`、`_apply_fit_mode` 末尾必须调用，否则缩放后滚动位置丢失
 - **i18n 接线**：新增按钮/菜单项必须在 `_retranslate_ui()` 中同步添加翻译调用，漏了会导致切语言后按钮变空白
 - **MCP 工具计数**：新增/删除工具必须在 README EN+CN 的两处计数（AI 能看到的 N 个工具 / discover all N PDF tools）同步更新
 - **CLI_COMMANDS 集合**：`main.py` 中的 `CLI_COMMANDS` set 决定是否跳过 GUI 启动，新增命令漏加会导致双击 exe 出黑框
@@ -76,6 +90,7 @@ PDFeverything/
 │   ├── file_list_widget.py  # FileListWidget — 拖拽列表 + 工具栏 + 保护层
 │   ├── workers.py           # BaseWorker(QThread) — 60min 超时 + 优雅取消
 │   ├── dialogs.py           # 7 个操作对话框（加密/解密/水印/旋转/压缩/拆分/信息）
+│   ├── pdf_reader_widget.py  # PdfReaderWidget — PDF 阅读器（LRU 缓存 + 两阶段缩放）
 │   └── i18n.py              # tr() — 170+ 键位中英文翻译表
 ├── mcp/
 │   ├── __init__.py

@@ -49,7 +49,7 @@ Add to `.claude/settings.json` in your project:
 }
 ```
 
-## 🔧 Available Tools (13 tools)
+## 🔧 Available Tools (16 tools)
 
 The AI agent will see these tools automatically:
 
@@ -62,6 +62,9 @@ The AI agent will see these tools automatically:
 | `pdf_extract_images` | Extract embedded images from a PDF |
 | `pdf_to_images` | Convert PDF pages to PNG images |
 | `images_to_pdf` | Combine images into a PDF |
+| `pdf_to_word` | Convert PDF to Word (.docx) |
+| `pdf_to_ppt` | Convert PDF to PowerPoint (.pptx) |
+| `pdf_to_excel` | Extract PDF tables to Excel (.xlsx) |
 | `pdf_compress` | Reduce PDF file size |
 | `pdf_watermark` | Add text watermark to every page |
 | `pdf_encrypt` | Set password on a PDF |
@@ -91,7 +94,7 @@ AI Agent                          PDFeverything MCP Server
    │                                       │
    │── {"method":"tools/list"} ──────────► │
    │                                       │
-   │◄─ {"result":{"tools":[...13 tools]}} │
+   │◄─ {"result":{"tools":[...16 tools]}} │
    │                                       │
    │── {"method":"tools/call",            │
    │     "params":{"name":"pdf_info",      │
@@ -101,4 +104,4 @@ AI Agent                          PDFeverything MCP Server
    │     "{'pages':5,'title':'Report'}"}]}}
 ```
 
-No setup required — the agent calls `pdfeverything --mcp`, the server starts, and all 13 tools appear in its toolbox automatically.
+No setup required — the agent calls `pdfeverything --mcp`, the server starts, and all 16 tools appear in its toolbox automatically.
