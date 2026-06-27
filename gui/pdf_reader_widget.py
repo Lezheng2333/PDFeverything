@@ -6,11 +6,11 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QImage, QPixmap, QKeyEvent, QWheelEvent, QIntValidator, QPinchGesture
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QEvent
+from PyQt6.QtGui import QImage, QPixmap, QKeyEvent, QWheelEvent, QIntValidator
 from PyQt6.QtWidgets import (
     QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea,
-    QVBoxLayout, QWidget, QToolTip,
+    QVBoxLayout, QWidget, QToolTip, QPinchGesture,
 )
 
 
@@ -905,10 +905,13 @@ class PdfReaderWidget(QWidget):
 
     def event(self, e):
         """Catch native trackpad pinch gestures (QPinchGesture) for smooth zoom."""
-        if e.type() == Qt.Gesture:
-            pinch = e.gesture(Qt.GestureType.PinchGesture)
-            if pinch:
-                return self._handle_pinch_gesture(pinch, e)
+        try:
+            if e.type() == QEvent.Type.Gesture:
+                pinch = e.gesture(Qt.GestureType.PinchGesture)
+                if pinch:
+                    return self._handle_pinch_gesture(pinch, e)
+        except Exception:
+            pass
         return super().event(e)
 
     def _handle_pinch_gesture(self, pinch: QPinchGesture, e):
