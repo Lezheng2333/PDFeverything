@@ -239,9 +239,9 @@ class PdfReaderWidget(QWidget):
         if w and hasattr(self, '_hover_pos'):
             t = w.toolTip()
             if t:
-                pos = self._hover_pos
-                # Offset above cursor by ~40px
-                pos.setY(pos.y() - 40)
+                # Position tooltip above the button, using its top edge
+                pos = w.mapToGlobal(w.rect().topLeft())
+                pos.setY(pos.y() - 6)
                 QToolTip.showText(pos, t, self)
 
     # ═══════════ Mode ═══════════
@@ -328,9 +328,9 @@ class PdfReaderWidget(QWidget):
         return max(50, min(300, int(self._zoom_mode * 100)))
 
     def _set_zoom_pct(self, pct: int, skip_deferred: bool = False):
-        """Two-pass zoom with correct relative scaling.
-        Pass 1 (instant): QPixmap.scaled() using new/old ratio — <1ms visual feedback.
-        Pass 2 (deferred): 180ms → PyMuPDF re-render for sharp quality."""
+        """Two-pass zoom.
+        Pass 1 (instant, <5ms): scale only VISIBLE labels, no re-render, no layout.
+        Pass 2 (deferred): render ALL pages at new zoom, then layout."""
         pct = max(50, min(300, int(round(pct))))
         if not self.doc or not self._labels:
             self._zoom_mode = pct / 100.0
@@ -338,23 +338,29 @@ class PdfReaderWidget(QWidget):
             return
 
         old_pct = self._current_zoom_pct()
-        new_factor = pct / 100.0
-        old_factor = old_pct / 100.0
-
-        # Update state BEFORE rendering so _zoom_key sees new zoom
-        self._zoom_mode = new_factor
+        self._zoom_mode = pct / 100.0
         self.btn_fit_width.setChecked(False)
         self.btn_fit_height.setChecked(False)
         self.zoom_edit.setText(str(pct))
 
-        # Pass 1: instant smooth pixel scaling using correct relative ratio
-        scale = new_factor / old_factor if old_factor > 0 else 1.0
+        # Pass 1: instant — scale only currently visible labels (<5ms)
+        new_factor = self._zoom_mode
+        if isinstance(self._zoom_mode, str):
+            new_factor = (self._fw_ratio if self._zoom_mode == "fit_width"
+                          else self._fh_ratio / self._default_zoom_pct)
+        old_val = old_pct / 100.0
+        new_val = pct / 100.0
+        scale = new_val / old_val if old_val > 0 else 1.0
         if abs(scale - 1.0) > 0.001:
             from PyQt6.QtCore import Qt as QtCore
+            # Only scale labels that HAVE a pixmap (already rendered). Skip null ones.
             for label in self._labels:
+                if not label.isVisible():
+                    continue
                 try:
                     pix = label.pixmap()
-                    if pix is None or pix.isNull(): continue
+                    if pix is None or pix.isNull():
+                        continue
                     pw, ph = pix.size().width(), pix.size().height()
                     tw, th = max(1, int(pw * scale)), max(1, int(ph * scale))
                     label.setPixmap(pix.scaled(tw, th,
@@ -363,37 +369,36 @@ class PdfReaderWidget(QWidget):
                     label.setFixedSize(tw, th)
                 except Exception:
                     pass
-            self._layout_labels()
 
         self._show_zoom_popup(pct)
 
-        # Pass 2: deferred sharp render (skip for pinch / already cached)
+        # Pass 2: deferred — render all pages at target zoom, then layout.
         if not skip_deferred:
-            vw, vh = self._viewport_size()
-            zk = self._zoom_key(vw, vh)
-            if (0, zk) not in PdfReaderWidget._cache:
-                self._pending_zoom_pct = pct
-                QTimer.singleShot(180, self._sharp_render)
+            self._pending_zoom_pct = pct
+            QTimer.singleShot(40, self._sharp_render)
 
     def _sharp_render(self):
-        """Deferred real rendering: only re-render cache-missed pages at current zoom."""
+        """Deferred real rendering: render ALL pages at target zoom, then layout."""
         if not self.doc or not self._labels or self._pending_zoom_pct is None:
             return
         try:
-            pct = self._pending_zoom_pct; self._zoom_mode = pct / 100.0
+            pct = self._pending_zoom_pct
             vw, vh = self._viewport_size()
-            zk = self._zoom_key(vw, vh); any_miss = False
+            zk = self._zoom_key(vw, vh)
             for pi, label in enumerate(self._labels):
                 try:
                     key = (pi, zk)
                     pix = PdfReaderWidget._cache_get(key)
                     if pix is None:
                         pix = self._get_or_render(pi, vw, vh)
-                        any_miss = True
-                    if pix: label.setPixmap(pix); label.setFixedSize(pix.size())
-                except Exception: pass
-            if any_miss: self._layout_labels()
-        except Exception: pass
+                    if pix:
+                        label.setPixmap(pix)
+                        label.setFixedSize(pix.size())
+                except Exception:
+                    pass
+            self._layout_labels()
+        except Exception:
+            pass
         finally:
             self._pending_zoom_pct = None
 
@@ -433,7 +438,7 @@ class PdfReaderWidget(QWidget):
         self._apply_fit_mode("fit_height", self._default_zoom_pct)
 
     def _apply_fit_mode(self, mode: str, pct: int):
-        """Fit W/H: same two-pass zoom as _set_zoom_pct."""
+        """Fit W/H: instant visible-only scaling, deferred real render."""
         if not self.doc or not self._labels:
             self._zoom_mode = mode
             self.btn_fit_width.setChecked(mode == "fit_width")
@@ -442,19 +447,17 @@ class PdfReaderWidget(QWidget):
             return
 
         old_pct = self._current_zoom_pct()
-        old_factor = old_pct / 100.0
-        new_factor = pct / 100.0
-
         self._zoom_mode = mode
         self.btn_fit_width.setChecked(mode == "fit_width")
         self.btn_fit_height.setChecked(mode == "fit_height")
         self.zoom_edit.setText(str(pct))
 
-        # Pass 1: instant relative scaling
-        scale = new_factor / old_factor if old_factor > 0 else 1.0
+        # Pass 1: instant — scale visible labels only
+        scale = (pct / 100.0) / (old_pct / 100.0) if old_pct > 0 else 1.0
         if abs(scale - 1.0) > 0.001:
             from PyQt6.QtCore import Qt as QtCore
             for label in self._labels:
+                if not label.isVisible(): continue
                 try:
                     pix = label.pixmap()
                     if pix is None or pix.isNull(): continue
@@ -464,13 +467,11 @@ class PdfReaderWidget(QWidget):
                         QtCore.AspectRatioMode.IgnoreAspectRatio,
                         QtCore.TransformationMode.SmoothTransformation))
                     label.setFixedSize(tw, th)
-                except Exception:
-                    pass
-            self._layout_labels()
+                except Exception: pass
 
         self._show_zoom_popup(pct)
         self._pending_zoom_pct = pct
-        QTimer.singleShot(180, self._sharp_render)
+        QTimer.singleShot(40, self._sharp_render)
 
     # ═══════════ Labels ═══════════
 
@@ -494,13 +495,22 @@ class PdfReaderWidget(QWidget):
             self._page_heights = []; y = mg
             for pi, label in enumerate(self._labels):
                 pix = label.pixmap()
-                if not pix or pix.isNull():
-                    pix = self._get_or_render(pi, vw, vh)
-                    if pix: label.setPixmap(pix); label.setFixedSize(pix.size())
-                h = pix.height() if pix else 800; w = pix.width() if pix else 600
+                if pix is not None and not pix.isNull():
+                    h, w = pix.height(), pix.width()
+                else:
+                    # Estimate from PDF dimensions if pixmap not yet rendered
+                    if self.doc and pi < self._total_pages:
+                        pr = self.doc[pi].rect
+                        zoom = (self._fw_ratio if self._zoom_mode == "fit_width"
+                                else self._fh_ratio if self._zoom_mode == "fit_height"
+                                else self._zoom_mode if isinstance(self._zoom_mode, float)
+                                else self._fh_ratio)
+                        w = int(pr.width * zoom)
+                        h = int(pr.height * zoom)
+                    else:
+                        w, h = 600, 800
                 label.setStyleSheet("QLabel{background:white;}")
                 label.setCursor(Qt.CursorShape.ArrowCursor)
-                # Center each page individually regardless of orientation
                 x = max(0, (vw - w) // 2)
                 label.move(x, y); label.show()
                 self._page_heights.append(y); y += h + sp
@@ -727,38 +737,13 @@ class PdfReaderWidget(QWidget):
             return
         page = self.doc[0]; pw, ph = page.rect.width, page.rect.height
         vw, vh = self._viewport_size()
-        old_fw, old_fh = self._fw_ratio, self._fh_ratio
         self._fw_ratio = vw / pw if pw > 0 else 1.0
         self._fh_ratio = vh / ph if ph > 0 else 1.0
         self._default_zoom_pct = max(50, min(300, int(self._fh_ratio * 100)))
-
-        # Compute relative scale from old viewport to new viewport
         cur_pct = self._current_zoom_pct()
-        new_factor = cur_pct / 100.0
-        old_factor = old_fh if self._zoom_mode == "fit_height" else (
-            old_fw if self._zoom_mode == "fit_width" else self._zoom_mode if isinstance(self._zoom_mode, float) else old_fh)
-        old_factor_val = old_factor if isinstance(old_factor, (int, float)) else old_fh
-        scale = new_factor / old_factor_val if old_factor_val > 0 else 1.0
-
-        if abs(scale - 1.0) > 0.001:
-            from PyQt6.QtCore import Qt as QtCore
-            for label in self._labels:
-                try:
-                    pix = label.pixmap()
-                    if pix is None or pix.isNull(): continue
-                    pw_i, ph_i = pix.size().width(), pix.size().height()
-                    tw, th = max(1, int(pw_i * scale)), max(1, int(ph_i * scale))
-                    label.setPixmap(pix.scaled(tw, th,
-                        QtCore.AspectRatioMode.IgnoreAspectRatio,
-                        QtCore.TransformationMode.SmoothTransformation))
-                    label.setFixedSize(tw, th)
-                except Exception:
-                    pass
-            self._layout_labels()
-
         self.zoom_edit.setText(str(cur_pct))
         self._pending_zoom_pct = cur_pct
-        QTimer.singleShot(180, self._sharp_render)
+        QTimer.singleShot(40, self._sharp_render)
 
     def _update_nav_ui(self):
         if self._total_pages == 0:
