@@ -259,7 +259,7 @@ class MainWindow(QMainWindow):
             f"QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{{height:0}}")
 
         right = QWidget()
-        right.setStyleSheet("background:transparent;")
+        right.setStyleSheet(f"background:{_dc('#2c2c2c','#f5f5f5')};")
         right_layout = QVBoxLayout(right)
         right_layout.setContentsMargins(10, 0, 0, 20)
 
@@ -324,7 +324,7 @@ class MainWindow(QMainWindow):
         right_layout.addWidget(self.tools_group)
 
         self.office_status_label = QLabel(tr("office_checking"))
-        self.office_status_label.setStyleSheet("color: #666;")
+        self.office_status_label.setStyleSheet(f"color: {_dc('#999','#777')};")
         right_layout.addWidget(self.office_status_label)
         right_layout.addStretch()
 
@@ -396,7 +396,7 @@ class MainWindow(QMainWindow):
         status_layout.addWidget(self.progress_bar)
         hlayout = QHBoxLayout()
         self.status_label = QLabel(tr("status_ready"))
-        self.status_label.setStyleSheet("color: #666;")
+        self.status_label.setStyleSheet(f"color: {_dc('#999','#777')};")
         hlayout.addWidget(self.status_label)
         hlayout.addStretch()
         self.btn_cancel = QPushButton(tr("btn_cancel"))

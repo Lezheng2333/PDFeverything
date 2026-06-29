@@ -142,17 +142,17 @@ _THEME = {
     },
     "light": {
         "bg": "#f5f5f5", "bg_alt": "#ffffff", "border": "#d0d0d0",
-        "btn": "#e8e8e8", "btn_hover": "#d5d5d5", "btn_border": "#c0c0c0",
-        "btn_disabled": "#aaa", "btn_disabled_bg": "#e0e0e0",
+        "btn": "#ffffff", "btn_hover": "#e8e8e8", "btn_border": "#a0a0a0",
+        "btn_disabled": "#ccc", "btn_disabled_bg": "#f0f0f0",
         "text": "#333", "text_dim": "#666", "text_subtle": "#888",
-        "input_bg": "#ffffff", "input_border": "#c0c0c0",
-        "scroll_bg": "#f0f0f0", "scroll_handle": "#c0c0c0",
-        "tooltip_bg": "#f0f0f0", "tooltip_border": "#c0c0c0", "tooltip_text": "#333",
+        "input_bg": "#ffffff", "input_border": "#a0a0a0",
+        "scroll_bg": "#f0f0f0", "scroll_handle": "#bfbfbf",
+        "tooltip_bg": "#ffffff", "tooltip_border": "#bfbfbf", "tooltip_text": "#333",
         "toolbar_bg": "#f0f0f0", "toolbar_border": "#d0d0d0",
-        "edit_toolbar_bg": "#f0f0f0", "edit_toolbar_border": "#d0d0d0",
-        "filename_bg": "#e8e8e8", "filename_border": "#c0c0c0",
-        "filename_top": "#c0c0c0", "filename_left": "#c0c0c0",
-        "label_border": "#c0c0c0",
+        "edit_toolbar_bg": "#e8e8e8", "edit_toolbar_border": "#d0d0d0",
+        "filename_bg": "#e8e8e8", "filename_border": "#bfbfbf",
+        "filename_top": "#dfdfdf", "filename_left": "#dfdfdf",
+        "label_border": "#bfbfbf",
         "white_page_bg": "white",
     }
 }
@@ -169,19 +169,18 @@ def launch_gui(open_files=None):
     t = _THEME["dark" if _DARK_MODE else "light"]
 
     # Set Fusion palette for native-looking light/dark widgets
-    if _DARK_MODE:
-        pal = QPalette()
-        pal.setColor(QPalette.ColorRole.Window, QColor(t["bg"]))
-        pal.setColor(QPalette.ColorRole.WindowText, QColor(t["text"]))
-        pal.setColor(QPalette.ColorRole.Base, QColor(t["input_bg"]))
-        pal.setColor(QPalette.ColorRole.AlternateBase, QColor(t["bg_alt"]))
-        pal.setColor(QPalette.ColorRole.ToolTipBase, QColor(t["tooltip_bg"]))
-        pal.setColor(QPalette.ColorRole.ToolTipText, QColor(t["tooltip_text"]))
-        pal.setColor(QPalette.ColorRole.Text, QColor(t["text"]))
-        pal.setColor(QPalette.ColorRole.Button, QColor(t["btn"]))
-        pal.setColor(QPalette.ColorRole.ButtonText, QColor(t["text"]))
-        pal.setColor(QPalette.ColorRole.BrightText, QColor("#fff"))
-        app.setPalette(pal)
+    pal = QPalette()
+    pal.setColor(QPalette.ColorRole.Window, QColor(t["bg"]))
+    pal.setColor(QPalette.ColorRole.WindowText, QColor(t["text"]))
+    pal.setColor(QPalette.ColorRole.Base, QColor(t["input_bg"]))
+    pal.setColor(QPalette.ColorRole.AlternateBase, QColor(t["bg_alt"]))
+    pal.setColor(QPalette.ColorRole.ToolTipBase, QColor(t["tooltip_bg"]))
+    pal.setColor(QPalette.ColorRole.ToolTipText, QColor(t["tooltip_text"]))
+    pal.setColor(QPalette.ColorRole.Text, QColor(t["text"]))
+    pal.setColor(QPalette.ColorRole.Button, QColor(t["btn"]))
+    pal.setColor(QPalette.ColorRole.ButtonText, QColor(t["text"]))
+    pal.setColor(QPalette.ColorRole.BrightText, QColor("#fff"))
+    app.setPalette(pal)
 
     app.setStyleSheet(
         f"QToolTip {{"
