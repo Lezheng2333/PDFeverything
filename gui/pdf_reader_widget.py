@@ -14,10 +14,10 @@ from PyQt6.QtWidgets import (
 )
 
 
+_DARK = False  # set by main.launch_gui before any widgets are created
+
 def _dc(dark, light):
-    """Pick dark or light color based on system theme (imported from main)."""
-    import main
-    return dark if main._DARK_MODE else light
+    return dark if _DARK else light
 
 
 class ViewMode(Enum):

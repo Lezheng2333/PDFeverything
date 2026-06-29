@@ -195,6 +195,9 @@ def launch_gui(open_files=None):
         app.setWindowIcon(QIcon(icon_path))
     app.setOrganizationName("PDFeverything")
     app.setApplicationName("PDFeverything")
+    # Inject theme flag before widget imports (avoids circular import)
+    import gui.pdf_reader_widget as _rw
+    _rw._DARK = _DARK_MODE
     from gui.main_window import MainWindow
     w = MainWindow()
     if open_files:

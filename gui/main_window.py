@@ -49,7 +49,8 @@ from .workers import BaseWorker
 
 
 def _dc(dark, light):
-    import main; return dark if main._DARK_MODE else light
+    from . import pdf_reader_widget as _rw
+    return dark if _rw._DARK else light
 
 
 class MainWindow(QMainWindow):
