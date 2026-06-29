@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-  <sub><a href="#-中文介绍">🇨🇳 中文版 ↓</a></sub>
+  <sub><a href="#chinese">🇨🇳 中文版 ↓</a></sub>
 </p>
 
 ---
@@ -280,6 +280,7 @@ MIT — do whatever you want with it. [LICENSE](resources/LICENSE.txt)
 
 ---
 
+<a id="chinese"></a>
 <h2 align="center">🇨🇳 中文介绍</h2>
 
 <p align="center">
