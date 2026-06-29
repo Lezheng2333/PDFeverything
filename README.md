@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/Lezheng2333/PDFeverything/releases"><img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-blue?style=flat-square" /></a>
-  <a href="https://github.com/Lezheng2333/PDFeverything/releases/latest"><img src="https://img.shields.io/badge/version-v1.4.1-007aff?style=flat-square" /></a>
+  <a href="https://github.com/Lezheng2333/PDFeverything/releases/latest"><img src="https://img.shields.io/badge/version-v1.4.2-007aff?style=flat-square" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" /></a>
 </p>
 
@@ -31,14 +31,11 @@ Drag everything in — any combination of PDFs, Word documents, PowerPoint decks
 
 > 🔗 [**Latest Release →**](https://github.com/Lezheng2333/PDFeverything/releases/latest)
 
-## 🆕 What's New in v1.4.1
+## 🆕 What's New in v1.4.2
 
-- 🖼️ **Grid View Editor** — adaptive-fill thumbnails, click/box-select pages, drag-sort, delete/rotate/extract
-- 💾 **Save-before-close** — warns when exiting with unsaved edits, discard reverts to original document
-- ↩️ **Snapshot undo/redo** — full PDF snapshot per edit, reliable undo/redo stack (Ctrl+Z/Ctrl+Shift+Z)
-- 📄 **Export as...** — export selected pages as PDF / JPG / Word / PowerPoint
-- 🎨 **One-panel UI** — PDF Tools tab merged into Merge & Convert, edit toolbar, all hover tooltips
-- 🔌 **MCP 23 tools** — 7 new page-editing tools for AI agents
+- 🌗 **System theme auto-adapt** — macOS follows Dark/Light automatically; Windows stays Light
+- 🎨 **Unified palette** — toolbar, edit toolbar, scrollbar, labels, welcome button all adapt
+- 🪟 **Windows build ready** — pywin32 dependency, 12 new hiddenimports for onefile .exe
 
 ---
 
@@ -341,14 +338,11 @@ MIT — do whatever you want with it. [LICENSE](resources/LICENSE.txt)
 | 🔄 **旋转** | 旋转页面 90° / 180° / 270° |
 | ℹ️ **信息** | 查看页数、元数据、加密状态 |
 
-### 🆕 v1.4.1 新功能
+### 🆕 v1.4.2 新功能
 
-- 🖼️ **网格视图编辑器** — 自适应填充缩略图、单击/框选页面、拖拽排序、删除/旋转/提取
-- 💾 **保存提示** — 关闭时检测未保存修改，不保存则还原原始文档
-- ↩️ **快照撤销/重做** — 每次编辑拍 PDF 快照，可靠撤销重做栈 (Ctrl+Z/Ctrl+Shift+Z)
-- 📄 **导出为...** — 选中页面导出为 PDF / JPG 图片 / Word / PowerPoint
-- 🎨 **单面板 UI** — PDF 工具合并入合并与转换，编辑工具栏 10 按钮+全部悬浮提示
-- 🔌 **MCP 23 工具** — 新增 7 个页面编辑工具供 AI Agent 调用
+- 🌗 **系统主题自适应** — macOS 自动跟随暗色/亮色模式；Windows 保持亮色
+- 🎨 **统一调色板** — 工具栏、编辑栏、滚动条、标签、欢迎按钮全量适配
+- 🪟 **Windows 编译就绪** — pywin32 依赖 + 12 个 hiddenimports，单文件 .exe 可直接构建
 
 ### 🖥️ 界面预览
 

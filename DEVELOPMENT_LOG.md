@@ -499,3 +499,20 @@ Ver 1.4.0 | 2026-06-27
     - BUGFIX: 编辑栏无悬浮弹窗 — 9个编辑按钮未调用 _hover_on 注册鼠标跟踪
     - BUGFIX: 缩放弹窗 tooltip 重复 — Qt 系统 ToolTip 与自定义 QLabel 同时弹出, _store_tooltips 清空 setToolTip
 
+
+  Ver 1.4.2 | macOS 系统主题自适应 + Windows 编译就绪
+    - macOS 自动跟随系统主题(暗色/亮色): _detect_dark_mode 读取 AppleInterfaceStyle
+    - Windows 强制亮色主题: sys.platform==win32 返回 False
+    - QPalette 全局配色: 暗色/亮色双套色板(Window/Base/Button/Text)
+    - 阅读器工具栏/编辑工具栏/滚动条/文件标签/欢迎按钮/状态栏全量适配
+    - _dc(dark,light) 辅助函数: 43 处调用覆盖所有硬编码颜色(无遗漏)
+    - 亮色主题按钮: bg=白色+深度边框(#a0a0a0)保证可见, 暗色保持原样
+    - 不涉及渲染管线/缓存/缩放逻辑
+    - BUGFIX: 循环导入崩溃 — gui/pdf_reader_widget._dc()中import main导致启动失败
+      → 改为模块属性 _DARK 由 main.launch_gui 在创建 widget 前注入
+    - BUGFIX: 亮色主题按钮隐形 — bg=#e8e8e8与页面背景#f5f5f5无色差
+    - BUGFIX: 欢迎屏幕 Load file 按钮不跟随亮色 — 暗色值硬编码
+    - BUGFIX: main_window 右侧面板+status_label 暗色硬编码
+    - Windows 构建就绪: build_windows.spec 新增12个 hiddenimports
+      (core.page_editor/gui全部模块), build_windows.py 补 pywin32 依赖
+

@@ -37,7 +37,7 @@
 
 ## 当前开发状态
 
-### 最新版本：v1.4.1
+### 最新版本：v1.4.2
 - 📖 **PDF 阅读器**：两模式（Scroll 连续滚动 / Grid 3 列缩略图）
   - **矢量级画质**：精确分辨率渲染（无 SSAA/无 downscale），MuPDF 原生子像素 AA，8 位 AA 最大化
   - **HiDPI 原生**：`devicePixelRatio` 驱动渲染矩阵 + `setDevicePixelRatio` 1:1 像素映射
