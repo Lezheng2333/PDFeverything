@@ -48,6 +48,10 @@ from .pdf_reader_widget import PdfReaderWidget
 from .workers import BaseWorker
 
 
+def _dc(dark, light):
+    import main; return dark if main._DARK_MODE else light
+
+
 class MainWindow(QMainWindow):
     """PDFeverything main window."""
 
@@ -247,11 +251,12 @@ class MainWindow(QMainWindow):
         # Right panel wrapped in scroll area — tools scroll when window is too short
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        s_bg = _dc("#2c2c2c", "#f5f5f5"); sb_bg = _dc("#1e1e1e", "#e8e8e8"); sh = _dc("#555", "#bbb")
         scroll.setStyleSheet(
-            "QScrollArea{background:#2c2c2c;border:none;}"
-            "QScrollBar:vertical{background:#1e1e1e;width:8px;margin:0}"
-            "QScrollBar::handle:vertical{background:#555;border-radius:3px;min-height:20px}"
-            "QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0}")
+            f"QScrollArea{{background:{s_bg};border:none;}}"
+            f"QScrollBar:vertical{{background:{sb_bg};width:8px;margin:0}}"
+            f"QScrollBar::handle:vertical{{background:{sh};border-radius:3px;min-height:20px}}"
+            f"QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{{height:0}}")
 
         right = QWidget()
         right.setStyleSheet("background:transparent;")

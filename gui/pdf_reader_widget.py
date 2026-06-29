@@ -14,6 +14,12 @@ from PyQt6.QtWidgets import (
 )
 
 
+def _dc(dark, light):
+    """Pick dark or light color based on system theme (imported from main)."""
+    import main
+    return dark if main._DARK_MODE else light
+
+
 class ViewMode(Enum):
     SCROLL = "scroll"
     GRID = "grid"
@@ -131,31 +137,36 @@ class PdfReaderWidget(QWidget):
     # ═══════════ UI ═══════════
 
     def _init_ui(self):
-        self.setStyleSheet("background-color:#2c2c2c;")
+        bg = _dc("#2c2c2c", "#f5f5f5")
+        self.setStyleSheet(f"background-color:{bg};")
         root = QVBoxLayout(self); root.setContentsMargins(0,0,0,0); root.setSpacing(0)
 
         self.scroll_area = QScrollArea()
         self.scroll_area.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         self.scroll_area.setWidgetResizable(False)
+        s_bg = _dc("#2c2c2c", "#f5f5f5"); sb_bg = _dc("#1e1e1e", "#e8e8e8"); sh = _dc("#555", "#bbb")
         self.scroll_area.setStyleSheet(
-            "QScrollArea{background:#2c2c2c;border:none;}"
-            "QScrollBar:vertical{background:#1e1e1e;width:10px;margin:0}"
-            "QScrollBar::handle:vertical{background:#555;border-radius:4px;min-height:30px}"
-            "QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0}"
-            "QScrollBar:horizontal{background:#1e1e1e;height:10px;margin:0}"
-            "QScrollBar::handle:horizontal{background:#555;border-radius:4px;min-width:30px}"
-            "QScrollBar::add-line:horizontal,QScrollBar::sub-line:horizontal{width:0}")
+            f"QScrollArea{{background:{s_bg};border:none;}}"
+            f"QScrollBar:vertical{{background:{sb_bg};width:10px;margin:0}}"
+            f"QScrollBar::handle:vertical{{background:{sh};border-radius:4px;min-height:30px}}"
+            f"QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{{height:0}}"
+            f"QScrollBar:horizontal{{background:{sb_bg};height:10px;margin:0}}"
+            f"QScrollBar::handle:horizontal{{background:{sh};border-radius:4px;min-width:30px}}"
+            f"QScrollBar::add-line:horizontal,QScrollBar::sub-line:horizontal{{width:0}}")
         self.scroll_area.verticalScrollBar().valueChanged.connect(
             self._on_scrollbar_changed)
         self.scroll_area.setAcceptDrops(True)
 
         # Edit toolbar (hidden by default, shown in edit mode)
         self.edit_toolbar = QWidget(); self.edit_toolbar.setObjectName("edit_toolbar")
+        etb_bg = _dc("#252525", "#f0f0f0"); etb_brd = _dc("#3a3a3a", "#d0d0d0")
+        etb_txt = _dc("#ccc", "#333"); etb_btn = _dc("#333", "#e8e8e8"); etb_btn_bdr = _dc("#555", "#bbb")
+        etb_btn_hov = _dc("#444", "#ddd"); etb_dis_txt = _dc("#555", "#bbb"); etb_dis_bg = _dc("#2a2a2a", "#eee")
         self.edit_toolbar.setStyleSheet(
-            "QWidget#edit_toolbar{background:#252525;border-top:1px solid #3a3a3a;border-bottom:1px solid #3a3a3a}"
-            "QPushButton{color:#ccc;background:#333;border:1px solid #555;border-radius:4px;padding:5px 10px;font-size:12px}"
-            "QPushButton:hover{background:#444}"
-            "QPushButton:disabled{color:#555;background:#2a2a2a}")
+            f"QWidget#edit_toolbar{{background:{etb_bg};border-top:1px solid {etb_brd};border-bottom:1px solid {etb_brd}}}"
+            f"QPushButton{{color:{etb_txt};background:{etb_btn};border:1px solid {etb_btn_bdr};border-radius:4px;padding:5px 10px;font-size:12px}}"
+            f"QPushButton:hover{{background:{etb_btn_hov}}}"
+            f"QPushButton:disabled{{color:{etb_dis_txt};background:{etb_dis_bg}}}")
         etb = QHBoxLayout(self.edit_toolbar); etb.setContentsMargins(8,4,8,4); etb.setSpacing(6)
         self.btn_edit_sel = QPushButton("☝ Select"); self.btn_edit_sel.clicked.connect(self._edit_select_mode)
         self.btn_edit_sel.setToolTip("退出排序模式，返回选择模式")
@@ -208,16 +219,21 @@ class PdfReaderWidget(QWidget):
 
         # toolbar
         self.toolbar = QWidget(); self.toolbar.setObjectName("reader_toolbar")
+        tbg = _dc("#1e1e1e", "#f0f0f0"); tbrd = _dc("#3a3a3a", "#d0d0d0")
+        tct = _dc("#ccc", "#333"); tbtn = _dc("#333", "#e8e8e8"); tbdr = _dc("#555", "#bbb")
+        tbhv = _dc("#444", "#ddd"); tdst = _dc("#555", "#bbb"); tdbg = _dc("#2a2a2a", "#eee")
+        itxt = _dc("#fff", "#333"); ibg = _dc("#2a2a2a", "#fff"); ibrd = _dc("#555", "#bbb")
+        lt = _dc("#999", "#666"); bct = _dc("#ccc", "#333"); bcthv = _dc("#fff", "#fff")
         self.toolbar.setStyleSheet(
-            "QWidget#reader_toolbar{background:#1e1e1e;border-top:1px solid #3a3a3a}"
-            "QPushButton{color:#ccc;background:#333;border:1px solid #555;border-radius:4px;padding:5px 12px;font-size:13px}"
-            "QPushButton:hover{background:#444}"
-            "QPushButton:checked{background:#007aff;color:#fff;border-color:#007aff}"
-            "QPushButton:disabled{color:#555;background:#2a2a2a}"
-            "QLineEdit{color:#fff;background:#2a2a2a;border:1px solid #555;border-radius:4px;padding:4px 6px;font-size:13px}"
-            "QLabel{color:#999;font-size:13px}"
-            "#btn_close{color:#ccc;background:transparent;border:none;font-size:16px;padding:2px 6px}"
-            "#btn_close:hover{color:#fff;background:#c33;border-radius:4px}")
+            f"QWidget#reader_toolbar{{background:{tbg};border-top:1px solid {tbrd}}}"
+            f"QPushButton{{color:{tct};background:{tbtn};border:1px solid {tbdr};border-radius:4px;padding:5px 12px;font-size:13px}}"
+            f"QPushButton:hover{{background:{tbhv}}}"
+            f"QPushButton:checked{{background:#007aff;color:#fff;border-color:#007aff}}"
+            f"QPushButton:disabled{{color:{tdst};background:{tdbg}}}"
+            f"QLineEdit{{color:{itxt};background:{ibg};border:1px solid {ibrd};border-radius:4px;padding:4px 6px;font-size:13px}}"
+            f"QLabel{{color:{lt};font-size:13px}}"
+            f"#btn_close{{color:{bct};background:transparent;border:none;font-size:16px;padding:2px 6px}}"
+            f"#btn_close:hover{{color:{bcthv};background:#c33;border-radius:4px}}")
         tb = QHBoxLayout(self.toolbar); tb.setContentsMargins(8,6,8,6); tb.setSpacing(8)
 
         self.btn_scroll = QPushButton("Scroll")
@@ -246,7 +262,8 @@ class PdfReaderWidget(QWidget):
         self.page_label = QLabel("0 / 0")
         self.page_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.page_label.setFixedWidth(70)
-        self.page_label.setStyleSheet("QLabel{color:#bbb}")
+        pl = _dc("#bbb", "#555")
+        self.page_label.setStyleSheet(f"QLabel{{color:{pl}}}")
 
         self.btn_next = QPushButton("▶"); self.btn_next.setFixedSize(34,34)
         self.btn_next.clicked.connect(self.next_page)
@@ -290,10 +307,12 @@ class PdfReaderWidget(QWidget):
         tb.addWidget(self.btn_fit_width); tb.addWidget(self.btn_fit_height); tb.addStretch()
 
         self.label_filename = QLabel("")
+        fn_c = _dc("#888", "#777"); fn_bg = _dc("#1a1a1a", "#e8e8e8"); fn_b = _dc("#333", "#ccc")
+        fn_bt = _dc("#222", "#ddd"); fn_bl = _dc("#222", "#ddd")
         self.label_filename.setStyleSheet(
-            "QLabel{color:#888;background:#1a1a1a;border:1px solid #333;"
-            "border-radius:6px;padding:4px 10px;font-size:12px;"
-            "border-top:1px solid #222;border-left:1px solid #222;}")
+            f"QLabel{{color:{fn_c};background:{fn_bg};border:1px solid {fn_b};"
+            f"border-radius:6px;padding:4px 10px;font-size:12px;"
+            f"border-top:1px solid {fn_bt};border-left:1px solid {fn_bl};}}")
         self.label_filename.hide()  # hidden until a document is loaded
         tb.addWidget(self.label_filename)
 

@@ -70,6 +70,7 @@ Subsequent runs in the same session are instant.
 
 
 PROJECT_DIR = Path(__file__).parent.resolve()
+_DARK_MODE = False  # set by launch_gui before any GUI widgets are created
 
 
 def launch_mcp():
@@ -110,15 +111,84 @@ def _app_icon_path():
     return ""
 
 
+def _detect_dark_mode():
+    """Check system appearance: macOS follows system (Dark/Light), Windows always Light."""
+    import sys, subprocess
+    if sys.platform == "darwin":
+        try:
+            r = subprocess.run(["defaults", "read", "-g", "AppleInterfaceStyle"],
+                              capture_output=True, text=True, timeout=5)
+            return r.stdout.strip() == "Dark"
+        except Exception:
+            return False
+    return False  # Windows always Light
+
+
+_THEME = {
+    "dark": {
+        "bg": "#2c2c2c", "bg_alt": "#1e1e1e", "border": "#3a3a3a",
+        "btn": "#333", "btn_hover": "#444", "btn_border": "#555",
+        "btn_disabled": "#555", "btn_disabled_bg": "#2a2a2a",
+        "text": "#ccc", "text_dim": "#999", "text_subtle": "#888",
+        "input_bg": "#2a2a2a", "input_border": "#555",
+        "scroll_bg": "#1e1e1e", "scroll_handle": "#555",
+        "tooltip_bg": "#2a2a2a", "tooltip_border": "#555", "tooltip_text": "#ddd",
+        "toolbar_bg": "#1e1e1e", "toolbar_border": "#3a3a3a",
+        "edit_toolbar_bg": "#252525", "edit_toolbar_border": "#3a3a3a",
+        "filename_bg": "#1a1a1a", "filename_border": "#333",
+        "filename_top": "#222", "filename_left": "#222",
+        "label_border": "#555",
+        "white_page_bg": "white",
+    },
+    "light": {
+        "bg": "#f5f5f5", "bg_alt": "#ffffff", "border": "#d0d0d0",
+        "btn": "#e8e8e8", "btn_hover": "#d5d5d5", "btn_border": "#c0c0c0",
+        "btn_disabled": "#aaa", "btn_disabled_bg": "#e0e0e0",
+        "text": "#333", "text_dim": "#666", "text_subtle": "#888",
+        "input_bg": "#ffffff", "input_border": "#c0c0c0",
+        "scroll_bg": "#f0f0f0", "scroll_handle": "#c0c0c0",
+        "tooltip_bg": "#f0f0f0", "tooltip_border": "#c0c0c0", "tooltip_text": "#333",
+        "toolbar_bg": "#f0f0f0", "toolbar_border": "#d0d0d0",
+        "edit_toolbar_bg": "#f0f0f0", "edit_toolbar_border": "#d0d0d0",
+        "filename_bg": "#e8e8e8", "filename_border": "#c0c0c0",
+        "filename_top": "#c0c0c0", "filename_left": "#c0c0c0",
+        "label_border": "#c0c0c0",
+        "white_page_bg": "white",
+    }
+}
+
+
 def launch_gui(open_files=None):
     from PyQt6.QtWidgets import QApplication
-    from PyQt6.QtGui import QIcon
+    from PyQt6.QtGui import QIcon, QPalette, QColor
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
+
+    global _DARK_MODE
+    _DARK_MODE = _detect_dark_mode()
+    t = _THEME["dark" if _DARK_MODE else "light"]
+
+    # Set Fusion palette for native-looking light/dark widgets
+    if _DARK_MODE:
+        pal = QPalette()
+        pal.setColor(QPalette.ColorRole.Window, QColor(t["bg"]))
+        pal.setColor(QPalette.ColorRole.WindowText, QColor(t["text"]))
+        pal.setColor(QPalette.ColorRole.Base, QColor(t["input_bg"]))
+        pal.setColor(QPalette.ColorRole.AlternateBase, QColor(t["bg_alt"]))
+        pal.setColor(QPalette.ColorRole.ToolTipBase, QColor(t["tooltip_bg"]))
+        pal.setColor(QPalette.ColorRole.ToolTipText, QColor(t["tooltip_text"]))
+        pal.setColor(QPalette.ColorRole.Text, QColor(t["text"]))
+        pal.setColor(QPalette.ColorRole.Button, QColor(t["btn"]))
+        pal.setColor(QPalette.ColorRole.ButtonText, QColor(t["text"]))
+        pal.setColor(QPalette.ColorRole.BrightText, QColor("#fff"))
+        app.setPalette(pal)
+
     app.setStyleSheet(
-        "QToolTip {"
-        "  color: #fff; background: #1e1e1e; border: 1px solid #444;"
-        "  border-radius: 4px; padding: 3px 7px; font-size: 11px; }")
+        f"QToolTip {{"
+        f"  color: {t['tooltip_text']}; background: {t['tooltip_bg']};"
+        f"  border: 1px solid {t['tooltip_border']};"
+        f"  border-radius: 4px; padding: 3px 7px; font-size: 11px; }}"
+    )
     # Use PNG for Dock icon (respects alpha correctly, no white corners).
     # .icns in bundle handles Finder/About/system-level display.
     icon_path = _app_icon_path()
