@@ -29,6 +29,10 @@ hiddenimports = [
     "openpyxl", "openpyxl.worksheet", "openpyxl.reader",
     "win32com", "win32com.client", "pythoncom",
     "mcp", "mcp.server",
+    "core", "core.page_editor", "core.pdf_ops", "core.utils",
+    "core.converters", "core.merger",
+    "gui", "gui.i18n", "gui.pdf_reader_widget", "gui.main_window",
+    "gui.file_list_widget", "gui.workers", "gui.dialogs",
     "tempfile", "subprocess", "shutil", "uuid",
 ]
 
