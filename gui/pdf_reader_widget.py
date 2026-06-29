@@ -1619,20 +1619,23 @@ class PdfReaderWidget(QWidget):
         if not vp or vp.width() < 100 or vp.height() < 50: return
 
         self._destroy_welcome()
-        # Use the scroll_area's own container: put welcome text inside page_container
+        # welcome card colors following theme
+        cc = _dc("#555", "#666")
+        bc = _dc("#666", "#555"); bbg = _dc("#2a2a2a", "#ffffff"); bb = _dc("#444", "#bbb")
+        bhc = _dc("#999", "#333"); bhb = _dc("#555", "#aaa")
         self.page_container.setFixedSize(vp.width(), vp.height())
         c = QWidget(self.page_container)
         c.setStyleSheet("background:transparent;")
         cl = QVBoxLayout(c); cl.setAlignment(Qt.AlignmentFlag.AlignCenter); cl.setSpacing(12)
         t = QLabel(drop_text); t.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        t.setStyleSheet("QLabel{color:#555;font-size:16px;background:transparent;}")
+        t.setStyleSheet(f"QLabel{{color:{cc};font-size:16px;background:transparent;}}")
         cl.addWidget(t)
         b = QPushButton(load_btn_text); b.setFixedWidth(120)
         b.setCursor(Qt.CursorShape.PointingHandCursor)
         b.setStyleSheet(
-            "QPushButton{color:#666;background:#2a2a2a;border:1px solid #444;"
-            "border-radius:4px;padding:5px 16px;font-size:12px}"
-            "QPushButton:hover{color:#999;background:#333;border-color:#555}")
+            f"QPushButton{{color:{bc};background:{bbg};border:1px solid {bb};"
+            f"border-radius:4px;padding:5px 16px;font-size:12px}}"
+            f"QPushButton:hover{{color:{bhc};background:{_dc('#333','#e8e8e8')};border-color:{bhb}}}")
         b.clicked.connect(lambda: self.open_requested.emit())
         cl.addWidget(b, alignment=Qt.AlignmentFlag.AlignCenter)
         c.adjustSize()
