@@ -14,6 +14,10 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" /></a>
 </p>
 
+<p align="center">
+  <sub><a href="#-中文介绍">🇨🇳 中文版 ↓</a></sub>
+</p>
+
 ---
 
 ## ✨ Why PDFeverything?
