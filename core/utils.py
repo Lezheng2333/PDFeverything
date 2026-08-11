@@ -15,12 +15,17 @@ _temp_files: List[Path] = []
 def _get_workspace_tmp() -> Path:
     """Return a temp directory that Office apps can access without TCC prompts.
 
-    On macOS 26, the system temp (/var/folders/.../T/) is protected by TCC.
-    Microsoft Word launched via AppleScript from a sandboxed app cannot access
-    it. We use a location under the user's home directory instead.
+    On macOS 26, these are ALL protected by TCC and off-limits to Office apps
+    launched via osascript:
+      - system temp (/var/folders/.../T/)
+      - ~/Library/Application Support/
+      - ~/Documents, ~/Desktop, ~/Downloads
+
+    We use ~/PDFeverything/tmp/ — a plain subdirectory of the user's home
+    directory that is NOT TCC-protected.
     """
     if sys.platform == "darwin":
-        base = Path.home() / "Library" / "Application Support" / "PDFeverything" / "tmp"
+        base = Path.home() / "PDFeverything" / "tmp"
         base.mkdir(parents=True, exist_ok=True)
         return base
     return Path(tempfile.gettempdir())

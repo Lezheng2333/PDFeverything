@@ -22,10 +22,11 @@ def _dc(dark, light):
 
 
 def _gui_tmp() -> Path:
-    """Temp directory accessible without macOS 26 TCC prompts."""
+    """Temp directory accessible without macOS 26 TCC prompts.
+    Uses ~/PDFeverything/tmp/ (NOT TCC-protected, unlike ~/Library/...)."""
     import sys
     if sys.platform == "darwin":
-        base = Path.home() / "Library" / "Application Support" / "PDFeverything" / "tmp"
+        base = Path.home() / "PDFeverything" / "tmp"
         base.mkdir(parents=True, exist_ok=True)
         return base
     import tempfile
