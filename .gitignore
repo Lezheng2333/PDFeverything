@@ -27,3 +27,4 @@ venv/
 
 # Claude / AI assistant workspace (local only, never push)
 .claude/
+.omo/

@@ -63,13 +63,31 @@ def _verify_pdf(path: Path) -> bool:
         return path.stat().st_size > 100
 
 
+def _applescript_permission_granted(app_name: str, timeout: int = 8) -> bool:
+    """TCC authorization prompt blocks osascript until answered; a short
+    probe lets us fall back to the pure-Python renderer instead of hanging."""
+    try:
+        r = subprocess.run(
+            ["osascript", "-e", f'tell application "{app_name}" to get name'],
+            capture_output=True, text=True, timeout=timeout,
+        )
+        return r.returncode == 0
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+
+
 def _applescript_convert(app_name: str, script: str, input_path: Path,
-                         output_path: Path, timeout: int = 300) -> bool:
+                         output_path: Path, timeout: int = 90) -> bool:
     """Convert via AppleScript (macOS). macOS 26 compatible with
     improved error handling and automation permission detection.
     Returns True on success."""
     import os
     try:
+        if not _applescript_permission_granted(app_name):
+            print(f"  [AppleScript][{app_name}] automation permission not granted — "
+                  f"using fallback", file=sys.stderr)
+            return False
+
         # Ensure output directory exists (AppleScript may fail silently otherwise)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         # Remove stale output from previous failed attempts
@@ -316,7 +334,7 @@ class WordConverter(BaseConverter):
                 return out
         else:
             if _applescript_convert("Microsoft Word", _WORD_APPLESCRIPT,
-                                    input_path, out, timeout=300):
+                                    input_path, out, timeout=90):
                 if progress_callback:
                     progress_callback(f"Word done (AppleScript): {input_path.name}", 100)
                 return out
@@ -493,7 +511,7 @@ class PowerPointConverter(BaseConverter):
                 return out
         else:
             if _applescript_convert("Microsoft PowerPoint", _PPT_APPLESCRIPT,
-                                    input_path, out, timeout=300):
+                                    input_path, out, timeout=90):
                 if progress_callback:
                     progress_callback(f"PPT done (AppleScript): {input_path.name}", 100)
                 return out
@@ -591,7 +609,7 @@ class ExcelConverter(BaseConverter):
                 return out
         else:
             if _applescript_convert("Microsoft Excel", _EXCEL_APPLESCRIPT,
-                                    input_path, out, timeout=300):
+                                    input_path, out, timeout=90):
                 if progress_callback:
                     progress_callback(f"Excel done (AppleScript): {input_path.name}", 100)
                 return out
