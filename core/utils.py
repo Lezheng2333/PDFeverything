@@ -1,6 +1,7 @@
 """共享工具函数 — 文件分类、临时文件管理、进度回调约定。"""
 
 import os
+import sys
 import tempfile
 import uuid
 from pathlib import Path
@@ -11,16 +12,30 @@ from typing import List, Optional
 _temp_files: List[Path] = []
 
 
+def _get_workspace_tmp() -> Path:
+    """Return a temp directory that Office apps can access without TCC prompts.
+
+    On macOS 26, the system temp (/var/folders/.../T/) is protected by TCC.
+    Microsoft Word launched via AppleScript from a sandboxed app cannot access
+    it. We use a location under the user's home directory instead.
+    """
+    if sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support" / "PDFeverything" / "tmp"
+        base.mkdir(parents=True, exist_ok=True)
+        return base
+    return Path(tempfile.gettempdir())
+
+
 def temp_pdf_path(prefix: str = "pdfeverything") -> Path:
-    """在系统临时目录生成唯一的 PDF 文件路径，并注册为待清理。"""
-    tmp = Path(tempfile.gettempdir()) / f"{prefix}_{uuid.uuid4().hex[:8]}.pdf"
+    """生成唯一的 PDF 临时路径，并注册为待清理。"""
+    tmp = _get_workspace_tmp() / f"{prefix}_{uuid.uuid4().hex[:8]}.pdf"
     _temp_files.append(tmp)
     return tmp
 
 
 def temp_dir(prefix: str = "pdfeverything") -> Path:
     """创建临时工作目录并注册清理。"""
-    d = Path(tempfile.gettempdir()) / f"{prefix}_{uuid.uuid4().hex[:8]}"
+    d = _get_workspace_tmp() / f"{prefix}_{uuid.uuid4().hex[:8]}"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -126,23 +141,42 @@ _office_cache: Optional[dict] = None
 
 
 def _check_office_macos() -> dict:
-    """Detect Office on macOS via AppleScript. macOS 26 compatible with
-    shorter timeouts and graceful permission denial handling."""
+    """Detect Office on macOS. Direct AppleScript probe — no Spotlight/mdfind
+    dependency (Spotlight often not fully indexed on macOS 26 fresh installs)."""
     import subprocess
-    apps = {"word": "Microsoft Word", "powerpoint": "Microsoft PowerPoint",
-            "excel": "Microsoft Excel"}
+    apps = {
+        "word": "Microsoft Word",
+        "powerpoint": "Microsoft PowerPoint",
+        "excel": "Microsoft Excel",
+    }
+    # Known bundle IDs (case-sensitive, macOS uses mixed case)
+    bundle_ids = {
+        "word": "com.microsoft.Word",
+        "powerpoint": "com.microsoft.Powerpoint",
+        "excel": "com.microsoft.Excel",
+    }
     result = {}
     for key, name in apps.items():
+        found = False
+
+        # Quick check: does the .app bundle exist in /Applications?
+        app_path = Path(f"/Applications/{name}.app")
+        if app_path.is_dir():
+            found = True
+        else:
+            # Search common paths (user Applications, etc.)
+            for search_root in [Path.home() / "Applications", Path("/Applications")]:
+                candidate = search_root / f"{name}.app"
+                if candidate.is_dir():
+                    found = True
+                    break
+
+        if not found:
+            result[key] = False
+            continue
+
+        # App exists — now probe via AppleScript (8s timeout)
         try:
-            # First: quick check via Spotlight/Finder if app exists at all
-            finder_check = subprocess.run(
-                ["mdfind", f"kMDItemCFBundleIdentifier == 'com.microsoft.{key}'"],
-                capture_output=True, text=True, timeout=5,
-            )
-            if not finder_check.stdout.strip():
-                result[key] = False
-                continue
-            # Second: try AppleScript with short timeout (macOS 26 may block automation)
             r = subprocess.run(
                 ["osascript", "-e", f'tell application "{name}" to get version'],
                 capture_output=True, text=True, timeout=8,
@@ -150,17 +184,19 @@ def _check_office_macos() -> dict:
             if r.returncode == 0:
                 result[key] = True
             else:
-                # AppleScript failed but app exists — probably permission denied
-                # We still mark as available so user can grant permission later
                 stderr_lower = (r.stderr or "").lower()
-                if "permission" in stderr_lower or "authorization" in stderr_lower or "not allowed" in stderr_lower:
-                    result[key] = True  # app exists, user needs to allow automation
+                # Permission denied / authorization needed — app exists, user must grant access
+                if any(kw in stderr_lower for kw in ("permission", "authorization", "not allowed", "not authorized", "privilege")):
+                    result[key] = True  # app is installed, user needs to enable automation
                 else:
-                    result[key] = False
+                    # Other AppleScript error but app exists — still treat as available
+                    # (sometimes osascript returns non-zero for transient reasons)
+                    result[key] = True
         except subprocess.TimeoutExpired:
-            result[key] = True  # timeout often means app is launching, treat as available
+            # Timeout often means app launched successfully — treat as available
+            result[key] = True
         except Exception:
-            result[key] = False
+            result[key] = found  # fallback: if app bundle exists, say True
     return result
 
 

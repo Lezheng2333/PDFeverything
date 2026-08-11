@@ -16,8 +16,20 @@ from PyQt6.QtWidgets import (
 
 _DARK = False  # set by main.launch_gui before any widgets are created
 
+
 def _dc(dark, light):
     return dark if _DARK else light
+
+
+def _gui_tmp() -> Path:
+    """Temp directory accessible without macOS 26 TCC prompts."""
+    import sys
+    if sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support" / "PDFeverything" / "tmp"
+        base.mkdir(parents=True, exist_ok=True)
+        return base
+    import tempfile
+    return Path(tempfile.gettempdir())
 
 
 class ViewMode(Enum):
@@ -1215,7 +1227,7 @@ class PdfReaderWidget(QWidget):
         if not self._selected_pages or not self._page_editor: return
         try:
             import tempfile
-            tmp = Path(tempfile.gettempdir()) / "pdfeverything_print.pdf"
+            tmp = _gui_tmp() / "pdfeverything_print.pdf"
             self._page_editor.extract_pages(list(self._selected_pages), tmp)
             import subprocess, sys
             if sys.platform == "darwin":
@@ -1296,21 +1308,21 @@ class PdfReaderWidget(QWidget):
             self._page_editor.extract_pages(list(self._selected_pages), Path(path))
         elif fmt == "jpg":
             import tempfile
-            tmp = Path(tempfile.gettempdir()) / "pdfeverything_export_tmp.pdf"
+            tmp = _gui_tmp() / "pdfeverything_export_tmp.pdf"
             if self._page_editor:
                 self._page_editor.extract_pages(list(self._selected_pages), tmp)
                 PdfReaderWidget._export_pages_to_images(tmp, Path(path))
                 tmp.unlink(missing_ok=True)
         elif fmt == "word":
             import tempfile
-            tmp = Path(tempfile.gettempdir()) / "pdfeverything_export_tmp.pdf"
+            tmp = _gui_tmp() / "pdfeverything_export_tmp.pdf"
             self._page_editor.extract_pages(list(self._selected_pages), tmp)
             from core.pdf_ops import PdfOperator
             PdfOperator.to_word(tmp, Path(path))
             tmp.unlink(missing_ok=True)
         elif fmt == "ppt":
             import tempfile
-            tmp = Path(tempfile.gettempdir()) / "pdfeverything_export_tmp.pdf"
+            tmp = _gui_tmp() / "pdfeverything_export_tmp.pdf"
             self._page_editor.extract_pages(list(self._selected_pages), tmp)
             from core.pdf_ops import PdfOperator
             PdfOperator.to_ppt(tmp, Path(path))

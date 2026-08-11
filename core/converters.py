@@ -40,6 +40,14 @@ _EXCEL_APPLESCRIPT = '''tell application "Microsoft Excel"
 end tell'''
 
 
+def _cjk_fontname(text: str, default_font: str) -> str:
+    """Return a CJK-capable font if text contains CJK characters, else default."""
+    for ch in text:
+        if '\u4e00' <= ch <= '\u9fff':
+            return "china-s"
+    return default_font
+
+
 def _verify_pdf(path: Path) -> bool:
     """Check that output PDF has actual content."""
     try:
@@ -266,7 +274,7 @@ class TextConverter(BaseConverter):
                         y = margin + line_height
                     page.insert_text(
                         fitz.Point(margin, y), chunk,
-                        fontsize=9, fontname="Courier", color=(0, 0, 0),
+                        fontsize=9, fontname=_cjk_fontname(chunk, "Courier"), color=(0, 0, 0),
                     )
                     y += line_height
             else:
@@ -275,7 +283,7 @@ class TextConverter(BaseConverter):
                     y = margin + line_height
                 page.insert_text(
                     fitz.Point(margin, y), line,
-                    fontsize=9, fontname="Courier", color=(0, 0, 0),
+                    fontsize=9, fontname=_cjk_fontname(line, "Courier"), color=(0, 0, 0),
                 )
                 y += line_height
 
@@ -347,7 +355,8 @@ class WordConverter(BaseConverter):
             if y + line_height + 2 > rect.height - margin:
                 new_page()
                 x = margin + indent
-            font = "Helvetica-Bold" if bold else "Helvetica"
+            default_font = "Helvetica-Bold" if bold else "Helvetica"
+            font = _cjk_fontname(text, default_font)
             current_page = pdf[-1]
             current_page.insert_text(fitz.Point(x, y), text, fontsize=fontsize, fontname=font)
             y += line_height + 2
@@ -526,7 +535,7 @@ class PowerPointConverter(BaseConverter):
             page.insert_text(
                 fitz.Point(margin, y),
                 f"Slide {slide_idx + 1}: {title}" if title else f"Slide {slide_idx + 1}",
-                fontsize=16, fontname="Helvetica-Bold",
+                fontsize=16, fontname=_cjk_fontname(title or "", "Helvetica-Bold"),
             )
             y += 30
 
@@ -547,7 +556,7 @@ class PowerPointConverter(BaseConverter):
                                 chunk = ln[chunk_start:chunk_start + chars_per_line]
                                 page.insert_text(
                                     fitz.Point(margin, y), chunk,
-                                    fontsize=10, fontname="Helvetica",
+                                    fontsize=10, fontname=_cjk_fontname(chunk, "Helvetica"),
                                 )
                                 y += 14
 
@@ -616,7 +625,7 @@ class ExcelConverter(BaseConverter):
             page.insert_text(
                 fitz.Point(margin, 25),
                 f"工作表: {ws.title}",
-                fontsize=12, fontname="Helvetica-Bold",
+                fontsize=12, fontname=_cjk_fontname(ws.title, "Helvetica-Bold"),
             )
             y = 45
 
@@ -641,7 +650,7 @@ class ExcelConverter(BaseConverter):
                     display = val[:max_chars - 1] + "…" if len(val) > max_chars else val
                     page.insert_text(
                         fitz.Point(x, y), display,
-                        fontsize=8, fontname="Helvetica",
+                        fontsize=8, fontname=_cjk_fontname(display, "Helvetica"),
                     )
                 y += cell_h
                 row_count += 1
