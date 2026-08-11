@@ -505,7 +505,10 @@ class PdfReaderWidget(QWidget):
     # ═══════════ Open / Close ═══════════
 
     def open_pdf(self, path: Path) -> None:
-        import fitz
+        try:
+            import pymupdf as fitz
+        except ImportError:
+            import fitz
         self._cancel_deferred_renders()
         PdfReaderWidget._clear_cache(); self._destroy_labels(); self._destroy_welcome()
         try: self.doc = fitz.open(path)
@@ -660,7 +663,10 @@ class PdfReaderWidget(QWidget):
         This gives the best sub-pixel text rendering — equivalent to Acrobat/WPS.
         fz_set_aa_level() controls glyph edge smoothing; 8 = highest quality."""
         try:
-            import fitz
+            try:
+                import pymupdf as fitz
+            except ImportError:
+                import fitz
             if hasattr(fitz.Tools, 'set_aa_level'):
                 fitz.Tools.set_aa_level(8)
             # Also try the text-specific AA level if available
@@ -1314,7 +1320,10 @@ class PdfReaderWidget(QWidget):
     @staticmethod
     def _export_pages_to_images(pdf_path: Path, output_dir: Path):
         """Export PDF pages as JPG images to a directory."""
-        import fitz
+        try:
+            import pymupdf as fitz
+        except ImportError:
+            import fitz
         doc = fitz.open(pdf_path)
         stem = output_dir.stem
         parent = output_dir.parent
@@ -1446,7 +1455,10 @@ class PdfReaderWidget(QWidget):
         """Render a page at exact target resolution — MuPDF's built-in
         sub-pixel anti-aliasing handles quality at all zoom levels.
         No oversampling, no downscaling — pure vector-to-pixel rendering."""
-        import fitz
+        try:
+            import pymupdf as fitz
+        except ImportError:
+            import fitz
         page = doc[pi]; pw, ph = page.rect.width, page.rect.height
         if zk == "fw": zoom = vw / pw
         elif zk == "fh": zoom = vh / ph

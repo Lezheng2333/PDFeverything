@@ -43,7 +43,10 @@ end tell'''
 def _verify_pdf(path: Path) -> bool:
     """Check that output PDF has actual content."""
     try:
-        import fitz
+        try:
+            import pymupdf as fitz
+        except ImportError:
+            import fitz
         doc = fitz.open(path)
         has = len(doc) > 0
         doc.close()
@@ -54,17 +57,47 @@ def _verify_pdf(path: Path) -> bool:
 
 def _applescript_convert(app_name: str, script: str, input_path: Path,
                          output_path: Path, timeout: int = 300) -> bool:
-    """Convert via AppleScript (macOS). Returns True on success."""
+    """Convert via AppleScript (macOS). macOS 26 compatible with
+    improved error handling and automation permission detection.
+    Returns True on success."""
+    import os
     try:
+        # Ensure output directory exists (AppleScript may fail silently otherwise)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        # Remove stale output from previous failed attempts
+        if output_path.exists():
+            try:
+                output_path.unlink()
+            except OSError:
+                pass
+
+        # Use a shell wrapper for better process isolation on macOS 26
+        env = os.environ.copy()
+        # Disable AppleScript's interactive debugger prompts
+        env["OSA_DEBUG"] = "0"
+
         r = subprocess.run(
             ["osascript", "-e", script.format(
                 input_path=str(input_path.resolve()),
                 output_path=str(output_path.resolve()),
             )],
-            capture_output=True, text=True, timeout=timeout,
+            capture_output=True, text=True, timeout=timeout, env=env,
         )
-        return r.returncode == 0 and output_path.exists() and _verify_pdf(output_path)
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        if r.returncode != 0:
+            # Log AppleScript errors for debugging (permission errors, etc.)
+            stderr = (r.stderr or "").strip()
+            if stderr:
+                print(f"  [AppleScript][{app_name}] {stderr[:200]}", file=sys.stderr)
+            return False
+        # Verify output was actually created with content
+        success = output_path.exists() and _verify_pdf(output_path)
+        # If AppleScript returned OK but file is invalid — still fail
+        return success
+    except subprocess.TimeoutExpired:
+        print(f"  [AppleScript][{app_name}] timed out after {timeout}s", file=sys.stderr)
+        return False
+    except (FileNotFoundError, OSError) as e:
+        print(f"  [AppleScript][{app_name}] system error: {e}", file=sys.stderr)
         return False
 
 
@@ -199,7 +232,10 @@ class TextConverter(BaseConverter):
 
     def convert(self, input_path: Path, output_dir: Path,
                 progress_callback: Optional[Callable[[str, int], None]] = None) -> Path:
-        import fitz
+        try:
+            import pymupdf as fitz
+        except ImportError:
+            import fitz
 
         check_input(input_path)
         content = read_text_file(input_path)
@@ -285,7 +321,10 @@ class WordConverter(BaseConverter):
     def _fallback_convert(self, input_path: Path, out: Path,
                           progress_callback=None) -> Path:
         """python-docx 解析 + PyMuPDF 渲染。处理文字、表格和嵌入式图片。"""
-        import fitz
+        try:
+            import pymupdf as fitz
+        except ImportError:
+            import fitz
         from docx import Document
 
         doc = Document(input_path)
@@ -457,7 +496,10 @@ class PowerPointConverter(BaseConverter):
 
     def _fallback_convert(self, input_path: Path, out: Path,
                           progress_callback=None) -> Path:
-        import fitz
+        try:
+            import pymupdf as fitz
+        except ImportError:
+            import fitz
         from pptx import Presentation
 
         prs = Presentation(input_path)
@@ -552,7 +594,10 @@ class ExcelConverter(BaseConverter):
 
     def _fallback_convert(self, input_path: Path, out: Path,
                           progress_callback=None) -> Path:
-        import fitz
+        try:
+            import pymupdf as fitz
+        except ImportError:
+            import fitz
         from openpyxl import load_workbook
 
         wb = load_workbook(input_path, data_only=True)

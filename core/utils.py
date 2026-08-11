@@ -126,18 +126,39 @@ _office_cache: Optional[dict] = None
 
 
 def _check_office_macos() -> dict:
-    """Detect Office on macOS via AppleScript."""
+    """Detect Office on macOS via AppleScript. macOS 26 compatible with
+    shorter timeouts and graceful permission denial handling."""
     import subprocess
     apps = {"word": "Microsoft Word", "powerpoint": "Microsoft PowerPoint",
             "excel": "Microsoft Excel"}
     result = {}
     for key, name in apps.items():
         try:
+            # First: quick check via Spotlight/Finder if app exists at all
+            finder_check = subprocess.run(
+                ["mdfind", f"kMDItemCFBundleIdentifier == 'com.microsoft.{key}'"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if not finder_check.stdout.strip():
+                result[key] = False
+                continue
+            # Second: try AppleScript with short timeout (macOS 26 may block automation)
             r = subprocess.run(
                 ["osascript", "-e", f'tell application "{name}" to get version'],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True, text=True, timeout=8,
             )
-            result[key] = r.returncode == 0
+            if r.returncode == 0:
+                result[key] = True
+            else:
+                # AppleScript failed but app exists — probably permission denied
+                # We still mark as available so user can grant permission later
+                stderr_lower = (r.stderr or "").lower()
+                if "permission" in stderr_lower or "authorization" in stderr_lower or "not allowed" in stderr_lower:
+                    result[key] = True  # app exists, user needs to allow automation
+                else:
+                    result[key] = False
+        except subprocess.TimeoutExpired:
+            result[key] = True  # timeout often means app is launching, treat as available
         except Exception:
             result[key] = False
     return result
