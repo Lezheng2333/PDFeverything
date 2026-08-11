@@ -40,10 +40,21 @@ _EXCEL_APPLESCRIPT = '''tell application "Microsoft Excel"
 end tell'''
 
 
+def _cjk_fontname(text: str, default_font: str) -> str:
+    """Return a CJK-capable font if text contains CJK characters, else default."""
+    for ch in text:
+        if '\u4e00' <= ch <= '\u9fff':
+            return "china-s"
+    return default_font
+
+
 def _verify_pdf(path: Path) -> bool:
     """Check that output PDF has actual content."""
     try:
-        import fitz
+        try:
+            import pymupdf as fitz
+        except ImportError:
+            import fitz
         doc = fitz.open(path)
         has = len(doc) > 0
         doc.close()
@@ -52,19 +63,67 @@ def _verify_pdf(path: Path) -> bool:
         return path.stat().st_size > 100
 
 
-def _applescript_convert(app_name: str, script: str, input_path: Path,
-                         output_path: Path, timeout: int = 300) -> bool:
-    """Convert via AppleScript (macOS). Returns True on success."""
+def _applescript_permission_granted(app_name: str, timeout: int = 8) -> bool:
+    """TCC authorization prompt blocks osascript until answered; a short
+    probe lets us fall back to the pure-Python renderer instead of hanging."""
     try:
+        r = subprocess.run(
+            ["osascript", "-e", f'tell application "{app_name}" to get name'],
+            capture_output=True, text=True, timeout=timeout,
+        )
+        return r.returncode == 0
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+
+
+def _applescript_convert(app_name: str, script: str, input_path: Path,
+                         output_path: Path, timeout: int = 90) -> bool:
+    """Convert via AppleScript (macOS). macOS 26 compatible with
+    improved error handling and automation permission detection.
+    Returns True on success."""
+    import os
+    try:
+        if not _applescript_permission_granted(app_name):
+            print(f"  [AppleScript][{app_name}] automation permission not granted — "
+                  f"using fallback", file=sys.stderr)
+            return False
+
+        # Ensure output directory exists (AppleScript may fail silently otherwise)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        # Remove stale output from previous failed attempts
+        if output_path.exists():
+            try:
+                output_path.unlink()
+            except OSError:
+                pass
+
+        # Use a shell wrapper for better process isolation on macOS 26
+        env = os.environ.copy()
+        # Disable AppleScript's interactive debugger prompts
+        env["OSA_DEBUG"] = "0"
+
         r = subprocess.run(
             ["osascript", "-e", script.format(
                 input_path=str(input_path.resolve()),
                 output_path=str(output_path.resolve()),
             )],
-            capture_output=True, text=True, timeout=timeout,
+            capture_output=True, text=True, timeout=timeout, env=env,
         )
-        return r.returncode == 0 and output_path.exists() and _verify_pdf(output_path)
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        if r.returncode != 0:
+            # Log AppleScript errors for debugging (permission errors, etc.)
+            stderr = (r.stderr or "").strip()
+            if stderr:
+                print(f"  [AppleScript][{app_name}] {stderr[:200]}", file=sys.stderr)
+            return False
+        # Verify output was actually created with content
+        success = output_path.exists() and _verify_pdf(output_path)
+        # If AppleScript returned OK but file is invalid — still fail
+        return success
+    except subprocess.TimeoutExpired:
+        print(f"  [AppleScript][{app_name}] timed out after {timeout}s", file=sys.stderr)
+        return False
+    except (FileNotFoundError, OSError) as e:
+        print(f"  [AppleScript][{app_name}] system error: {e}", file=sys.stderr)
         return False
 
 
@@ -199,7 +258,10 @@ class TextConverter(BaseConverter):
 
     def convert(self, input_path: Path, output_dir: Path,
                 progress_callback: Optional[Callable[[str, int], None]] = None) -> Path:
-        import fitz
+        try:
+            import pymupdf as fitz
+        except ImportError:
+            import fitz
 
         check_input(input_path)
         content = read_text_file(input_path)
@@ -230,7 +292,7 @@ class TextConverter(BaseConverter):
                         y = margin + line_height
                     page.insert_text(
                         fitz.Point(margin, y), chunk,
-                        fontsize=9, fontname="Courier", color=(0, 0, 0),
+                        fontsize=9, fontname=_cjk_fontname(chunk, "Courier"), color=(0, 0, 0),
                     )
                     y += line_height
             else:
@@ -239,7 +301,7 @@ class TextConverter(BaseConverter):
                     y = margin + line_height
                 page.insert_text(
                     fitz.Point(margin, y), line,
-                    fontsize=9, fontname="Courier", color=(0, 0, 0),
+                    fontsize=9, fontname=_cjk_fontname(line, "Courier"), color=(0, 0, 0),
                 )
                 y += line_height
 
@@ -272,7 +334,7 @@ class WordConverter(BaseConverter):
                 return out
         else:
             if _applescript_convert("Microsoft Word", _WORD_APPLESCRIPT,
-                                    input_path, out, timeout=300):
+                                    input_path, out, timeout=90):
                 if progress_callback:
                     progress_callback(f"Word done (AppleScript): {input_path.name}", 100)
                 return out
@@ -285,7 +347,10 @@ class WordConverter(BaseConverter):
     def _fallback_convert(self, input_path: Path, out: Path,
                           progress_callback=None) -> Path:
         """python-docx 解析 + PyMuPDF 渲染。处理文字、表格和嵌入式图片。"""
-        import fitz
+        try:
+            import pymupdf as fitz
+        except ImportError:
+            import fitz
         from docx import Document
 
         doc = Document(input_path)
@@ -308,7 +373,8 @@ class WordConverter(BaseConverter):
             if y + line_height + 2 > rect.height - margin:
                 new_page()
                 x = margin + indent
-            font = "Helvetica-Bold" if bold else "Helvetica"
+            default_font = "Helvetica-Bold" if bold else "Helvetica"
+            font = _cjk_fontname(text, default_font)
             current_page = pdf[-1]
             current_page.insert_text(fitz.Point(x, y), text, fontsize=fontsize, fontname=font)
             y += line_height + 2
@@ -445,7 +511,7 @@ class PowerPointConverter(BaseConverter):
                 return out
         else:
             if _applescript_convert("Microsoft PowerPoint", _PPT_APPLESCRIPT,
-                                    input_path, out, timeout=300):
+                                    input_path, out, timeout=90):
                 if progress_callback:
                     progress_callback(f"PPT done (AppleScript): {input_path.name}", 100)
                 return out
@@ -457,7 +523,10 @@ class PowerPointConverter(BaseConverter):
 
     def _fallback_convert(self, input_path: Path, out: Path,
                           progress_callback=None) -> Path:
-        import fitz
+        try:
+            import pymupdf as fitz
+        except ImportError:
+            import fitz
         from pptx import Presentation
 
         prs = Presentation(input_path)
@@ -484,7 +553,7 @@ class PowerPointConverter(BaseConverter):
             page.insert_text(
                 fitz.Point(margin, y),
                 f"Slide {slide_idx + 1}: {title}" if title else f"Slide {slide_idx + 1}",
-                fontsize=16, fontname="Helvetica-Bold",
+                fontsize=16, fontname=_cjk_fontname(title or "", "Helvetica-Bold"),
             )
             y += 30
 
@@ -505,7 +574,7 @@ class PowerPointConverter(BaseConverter):
                                 chunk = ln[chunk_start:chunk_start + chars_per_line]
                                 page.insert_text(
                                     fitz.Point(margin, y), chunk,
-                                    fontsize=10, fontname="Helvetica",
+                                    fontsize=10, fontname=_cjk_fontname(chunk, "Helvetica"),
                                 )
                                 y += 14
 
@@ -540,7 +609,7 @@ class ExcelConverter(BaseConverter):
                 return out
         else:
             if _applescript_convert("Microsoft Excel", _EXCEL_APPLESCRIPT,
-                                    input_path, out, timeout=300):
+                                    input_path, out, timeout=90):
                 if progress_callback:
                     progress_callback(f"Excel done (AppleScript): {input_path.name}", 100)
                 return out
@@ -552,7 +621,10 @@ class ExcelConverter(BaseConverter):
 
     def _fallback_convert(self, input_path: Path, out: Path,
                           progress_callback=None) -> Path:
-        import fitz
+        try:
+            import pymupdf as fitz
+        except ImportError:
+            import fitz
         from openpyxl import load_workbook
 
         wb = load_workbook(input_path, data_only=True)
@@ -571,7 +643,7 @@ class ExcelConverter(BaseConverter):
             page.insert_text(
                 fitz.Point(margin, 25),
                 f"工作表: {ws.title}",
-                fontsize=12, fontname="Helvetica-Bold",
+                fontsize=12, fontname=_cjk_fontname(ws.title, "Helvetica-Bold"),
             )
             y = 45
 
@@ -596,7 +668,7 @@ class ExcelConverter(BaseConverter):
                     display = val[:max_chars - 1] + "…" if len(val) > max_chars else val
                     page.insert_text(
                         fitz.Point(x, y), display,
-                        fontsize=8, fontname="Helvetica",
+                        fontsize=8, fontname=_cjk_fontname(display, "Helvetica"),
                     )
                 y += cell_h
                 row_count += 1

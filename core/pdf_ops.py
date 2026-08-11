@@ -45,19 +45,26 @@ class PdfOperator:
         output_path: Path,
         progress_callback: Optional[Callable[[str, int], None]] = None,
     ) -> None:
-        """将多个 PDF 合并为一个。"""
-        from pypdf import PdfWriter
+        """将多个 PDF 合并为一个。使用 PyMuPDF 处理 CJK 字体，
+        避免 pypdf 合并后中文字符丢失的问题。"""
+        try:
+            import pymupdf as fitz
+        except ImportError:
+            import fitz
 
-        writer = PdfWriter()
+        merged = fitz.open()
         total = len(input_paths)
-        for i, p in enumerate(input_paths):
-            check_input(p)
-            writer.append(p)
-            if progress_callback:
-                progress_callback(f"合并中 ({i+1}/{total}): {p.name}", int((i+1)/total*100))
-
-        writer.write(output_path)
-        writer.close()
+        try:
+            for i, p in enumerate(input_paths):
+                check_input(p)
+                doc = fitz.open(p)
+                merged.insert_pdf(doc)
+                doc.close()
+                if progress_callback:
+                    progress_callback(f"合并中 ({i+1}/{total}): {p.name}", int((i+1)/total*100))
+            merged.save(str(output_path), garbage=3, deflate=True)
+        finally:
+            merged.close()
 
     # ── 3. 拆分 ────────────────────────────────────────
 
@@ -156,7 +163,10 @@ class PdfOperator:
         progress_callback: Optional[Callable[[str, int], None]] = None,
     ) -> int:
         """提取 PDF 中嵌入的图片。返回提取数量。"""
-        import fitz  # PyMuPDF
+        try:
+            import pymupdf as fitz  # PyMuPDF
+        except ImportError:
+            import fitz  # PyMuPDF
 
         check_input(input_path)
         out_dir = ensure_output_dir(output_dir)
@@ -186,7 +196,10 @@ class PdfOperator:
         progress_callback: Optional[Callable[[str, int], None]] = None,
     ) -> int:
         """将 PDF 每页转为 PNG 图片。返回页数。"""
-        import fitz
+        try:
+            import pymupdf as fitz
+        except ImportError:
+            import fitz
 
         check_input(input_path)
         out_dir = ensure_output_dir(output_dir)
@@ -211,7 +224,10 @@ class PdfOperator:
         progress_callback: Optional[Callable[[str, int], None]] = None,
     ) -> None:
         """将多张图片合并为一个 PDF。"""
-        import fitz
+        try:
+            import pymupdf as fitz
+        except ImportError:
+            import fitz
         from PIL import Image as PILImage
 
         doc = fitz.open()
@@ -403,7 +419,10 @@ class PdfOperator:
 
         rotation 会被圆整到最近的有效角度 (0/90/180/270)。
         """
-        import fitz
+        try:
+            import pymupdf as fitz
+        except ImportError:
+            import fitz
 
         # PyMuPDF 只支持 0/90/180/270
         valid_angles = [0, 90, 180, 270]
@@ -444,7 +463,10 @@ class PdfOperator:
     ) -> int:
         """Convert PDF to Word (.docx). Preserves text structure and tables.
         Returns number of pages processed."""
-        import fitz
+        try:
+            import pymupdf as fitz
+        except ImportError:
+            import fitz
         from docx import Document
         from docx.shared import Pt, Inches
 
@@ -532,7 +554,10 @@ class PdfOperator:
     ) -> int:
         """Convert PDF to PowerPoint (.pptx). Each PDF page becomes one slide
         with the page rendered as a full-slide image."""
-        import fitz
+        try:
+            import pymupdf as fitz
+        except ImportError:
+            import fitz
         from pptx import Presentation
         from pptx.util import Inches as PptInches
 
@@ -583,7 +608,10 @@ class PdfOperator:
         """Convert PDF tables to Excel (.xlsx). Each table found in the PDF
         becomes a separate worksheet. Falls back to writing extracted text
         if no tables are detected."""
-        import fitz
+        try:
+            import pymupdf as fitz
+        except ImportError:
+            import fitz
         from openpyxl import Workbook
 
         check_input(input_path)

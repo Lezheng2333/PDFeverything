@@ -16,8 +16,21 @@ from PyQt6.QtWidgets import (
 
 _DARK = False  # set by main.launch_gui before any widgets are created
 
+
 def _dc(dark, light):
     return dark if _DARK else light
+
+
+def _gui_tmp() -> Path:
+    """Temp directory accessible without macOS 26 TCC prompts.
+    Uses ~/PDFeverything/tmp/ (NOT TCC-protected, unlike ~/Library/...)."""
+    import sys
+    if sys.platform == "darwin":
+        base = Path.home() / "PDFeverything" / "tmp"
+        base.mkdir(parents=True, exist_ok=True)
+        return base
+    import tempfile
+    return Path(tempfile.gettempdir())
 
 
 class ViewMode(Enum):
@@ -505,7 +518,10 @@ class PdfReaderWidget(QWidget):
     # ═══════════ Open / Close ═══════════
 
     def open_pdf(self, path: Path) -> None:
-        import fitz
+        try:
+            import pymupdf as fitz
+        except ImportError:
+            import fitz
         self._cancel_deferred_renders()
         PdfReaderWidget._clear_cache(); self._destroy_labels(); self._destroy_welcome()
         try: self.doc = fitz.open(path)
@@ -660,7 +676,10 @@ class PdfReaderWidget(QWidget):
         This gives the best sub-pixel text rendering — equivalent to Acrobat/WPS.
         fz_set_aa_level() controls glyph edge smoothing; 8 = highest quality."""
         try:
-            import fitz
+            try:
+                import pymupdf as fitz
+            except ImportError:
+                import fitz
             if hasattr(fitz.Tools, 'set_aa_level'):
                 fitz.Tools.set_aa_level(8)
             # Also try the text-specific AA level if available
@@ -1209,7 +1228,7 @@ class PdfReaderWidget(QWidget):
         if not self._selected_pages or not self._page_editor: return
         try:
             import tempfile
-            tmp = Path(tempfile.gettempdir()) / "pdfeverything_print.pdf"
+            tmp = _gui_tmp() / "pdfeverything_print.pdf"
             self._page_editor.extract_pages(list(self._selected_pages), tmp)
             import subprocess, sys
             if sys.platform == "darwin":
@@ -1290,21 +1309,21 @@ class PdfReaderWidget(QWidget):
             self._page_editor.extract_pages(list(self._selected_pages), Path(path))
         elif fmt == "jpg":
             import tempfile
-            tmp = Path(tempfile.gettempdir()) / "pdfeverything_export_tmp.pdf"
+            tmp = _gui_tmp() / "pdfeverything_export_tmp.pdf"
             if self._page_editor:
                 self._page_editor.extract_pages(list(self._selected_pages), tmp)
                 PdfReaderWidget._export_pages_to_images(tmp, Path(path))
                 tmp.unlink(missing_ok=True)
         elif fmt == "word":
             import tempfile
-            tmp = Path(tempfile.gettempdir()) / "pdfeverything_export_tmp.pdf"
+            tmp = _gui_tmp() / "pdfeverything_export_tmp.pdf"
             self._page_editor.extract_pages(list(self._selected_pages), tmp)
             from core.pdf_ops import PdfOperator
             PdfOperator.to_word(tmp, Path(path))
             tmp.unlink(missing_ok=True)
         elif fmt == "ppt":
             import tempfile
-            tmp = Path(tempfile.gettempdir()) / "pdfeverything_export_tmp.pdf"
+            tmp = _gui_tmp() / "pdfeverything_export_tmp.pdf"
             self._page_editor.extract_pages(list(self._selected_pages), tmp)
             from core.pdf_ops import PdfOperator
             PdfOperator.to_ppt(tmp, Path(path))
@@ -1314,7 +1333,10 @@ class PdfReaderWidget(QWidget):
     @staticmethod
     def _export_pages_to_images(pdf_path: Path, output_dir: Path):
         """Export PDF pages as JPG images to a directory."""
-        import fitz
+        try:
+            import pymupdf as fitz
+        except ImportError:
+            import fitz
         doc = fitz.open(pdf_path)
         stem = output_dir.stem
         parent = output_dir.parent
@@ -1446,7 +1468,10 @@ class PdfReaderWidget(QWidget):
         """Render a page at exact target resolution — MuPDF's built-in
         sub-pixel anti-aliasing handles quality at all zoom levels.
         No oversampling, no downscaling — pure vector-to-pixel rendering."""
-        import fitz
+        try:
+            import pymupdf as fitz
+        except ImportError:
+            import fitz
         page = doc[pi]; pw, ph = page.rect.width, page.rect.height
         if zk == "fw": zoom = vw / pw
         elif zk == "fh": zoom = vh / ph

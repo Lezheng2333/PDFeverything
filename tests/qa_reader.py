@@ -5,7 +5,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt, QTimer
-import fitz
+try:
+    import pymupdf as fitz
+except ImportError:
+    import fitz
 
 app = QApplication(sys.argv)
 from gui.pdf_reader_widget import PdfReaderWidget, ViewMode

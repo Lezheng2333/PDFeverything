@@ -12,7 +12,7 @@ PROJECT_ROOT = Path(SPECPATH)
 # ── 收集 data files ──────────────────────────────────────
 
 datas = []
-for mod in ('fitz', 'PIL'):
+for mod in ('pymupdf', 'fitz', 'PIL'):
     try:
         datas += collect_data_files(mod)
     except Exception:
@@ -34,6 +34,7 @@ hiddenimports = [
     "pikepdf",
     "pikepdf._core",
     "pikepdf.models",
+    "pymupdf",
     "fitz",
     "PIL",
     "PIL.Image",
@@ -142,8 +143,14 @@ app = BUNDLE(
                 "LSItemContentTypes": ["com.adobe.pdf"],
             },
         ],
-        "NSAppleEventsUsageDescription": "PDFeverything needs to open PDF files.",
-        "LSMinimumSystemVersion": "11.0",
+        "NSAppleEventsUsageDescription": "PDFeverything uses AppleScript to convert Office documents (Word/Excel/PPT) to PDF when Microsoft Office is installed.",
+        "NSDesktopFolderUsageDescription": "PDFeverything needs access to your Desktop folder to read and save PDF files.",
+        "NSDocumentsFolderUsageDescription": "PDFeverything needs access to your Documents folder to read and save PDF files.",
+        "NSDownloadsFolderUsageDescription": "PDFeverything needs access to your Downloads folder to read and save PDF files.",
+        "NSVolumesUsageDescription": "PDFeverything needs access to external volumes to read and save PDF files.",
+        "LSMinimumSystemVersion": "14.0",
         "NSHumanReadableCopyright": "© 2026 PDFeverything",
+        "LSApplicationCategoryType": "public.app-category.productivity",
+        "NSRequiresAquaSystemAppearance": False,
     },
 )

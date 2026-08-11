@@ -12,7 +12,7 @@ from PyInstaller.utils.hooks import collect_data_files
 PROJECT_ROOT = Path(SPECPATH)
 
 datas = []
-for mod in ('fitz', 'PIL'):
+for mod in ('pymupdf', 'fitz', 'PIL'):
     try:
         datas += collect_data_files(mod)
     except Exception:
@@ -22,7 +22,7 @@ hiddenimports = [
     "PyQt6.QtCore", "PyQt6.QtGui", "PyQt6.QtWidgets", "PyQt6.sip",
     "pypdf", "pypdf.generic", "pypdf.filters",
     "pikepdf", "pikepdf._core", "pikepdf.models",
-    "fitz",
+    "pymupdf", "fitz",
     "PIL", "PIL.Image", "PIL.ImageDraw", "PIL.PdfImagePlugin",
     "docx", "docx.document", "docx.table", "docx.text",
     "pptx", "pptx.slide", "pptx.shapes",

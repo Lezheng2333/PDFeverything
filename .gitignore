@@ -20,6 +20,11 @@ test files/
 
 # Python virtual environment
 .venv/
+venv/
+
+# PyInstaller local cache (avoids macOS 26 TCC permission issues)
+.pyinstaller_cache/
 
 # Claude / AI assistant workspace (local only, never push)
 .claude/
+.omo/
