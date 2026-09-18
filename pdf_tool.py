@@ -203,20 +203,23 @@ def main():
     # --- page editing ---
     p_del = sub.add_parser("delete-pages", help="删除指定页面")
     p_del.add_argument("-i", "--input", required=True)
-    p_del.add_argument("-o", "--output", required=True)
+    p_del.add_argument("-o", "--output",
+                       help="输出 PDF（省略或与 -i 相同 = 就地修改，可被 page-undo 撤销）")
     p_del.add_argument("--pages", required=True, help="1,3,5 或 1-5 或 all")
     p_del.add_argument("--json", action="store_true", help="JSON 输出")
 
     p_rotp = sub.add_parser("rotate-pages", help="旋转指定页面")
     p_rotp.add_argument("-i", "--input", required=True)
-    p_rotp.add_argument("-o", "--output", required=True)
+    p_rotp.add_argument("-o", "--output",
+                       help="输出 PDF（省略或与 -i 相同 = 就地修改）")
     p_rotp.add_argument("--pages", required=True, help="1,3,5 或 1-5 或 all")
     p_rotp.add_argument("--degrees", type=int, required=True, choices=[90,180,270])
     p_rotp.add_argument("--json", action="store_true")
 
     p_mov = sub.add_parser("move-pages", help="移动页面到目标位置")
     p_mov.add_argument("-i", "--input", required=True)
-    p_mov.add_argument("-o", "--output", required=True)
+    p_mov.add_argument("-o", "--output",
+                       help="输出 PDF（省略或与 -i 相同 = 就地修改）")
     p_mov.add_argument("--source", required=True, help="1,2")
     p_mov.add_argument("--target", type=int, required=True, help="目标位置 (1-based)")
     p_mov.add_argument("--json", action="store_true")
@@ -229,12 +232,14 @@ def main():
 
     p_undo = sub.add_parser("page-undo", help="撤销上次页面编辑")
     p_undo.add_argument("-i", "--input", required=True)
-    p_undo.add_argument("-o", "--output", required=True)
+    p_undo.add_argument("-o", "--output",
+                       help="输出 PDF（省略或与 -i 相同 = 就地修改）")
     p_undo.add_argument("--json", action="store_true")
 
     p_redo = sub.add_parser("page-redo", help="重做上次撤销")
     p_redo.add_argument("-i", "--input", required=True)
-    p_redo.add_argument("-o", "--output", required=True)
+    p_redo.add_argument("-o", "--output",
+                       help="输出 PDF（省略或与 -i 相同 = 就地修改）")
     p_redo.add_argument("--json", action="store_true")
 
     p_hist = sub.add_parser("page-history", help="查看操作历史")
@@ -480,7 +485,11 @@ def main():
                 print(json.dumps(out, ensure_ascii=False))
 
             input_path = Path(args.input)
-            output_path = Path(args.output) if hasattr(args, 'output') and args.output else None
+            # Omitting -o edits the file in place. That is not just convenience:
+            # the undo journal is keyed to the document, so an in-place edit is
+            # the only form the next `page-undo` invocation can still reverse.
+            output_path = (Path(args.output)
+                           if getattr(args, "output", None) else input_path)
             editor = PdfPageEditor(input_path)
             # Continue the session recorded by an earlier CLI call so
             # page-undo/page-redo/page-history actually have a history.
@@ -541,11 +550,17 @@ def main():
                 msg = f"已旋转 {len(pages)} 页 ({args.degrees}°)"
             elif args.command == "move-pages":
                 source = _parse_pages(args.source, total)
+                if not source:
+                    editor.close()
+                    sys.exit(f"❌ 错误: --source 没有匹配任何页面 (共 {total} 页)")
                 target = args.target - 1
                 editor.move_pages(source, target)
                 msg = f"已移动 {len(source)} 页到位置 {args.target}"
             elif args.command == "extract-pages":
                 pages = _parse_pages(args.pages, total)
+                if not pages:
+                    editor.close()
+                    sys.exit(f"❌ 错误: --pages 没有匹配任何页面 (共 {total} 页)")
                 editor.extract_pages(pages, output_path)
                 editor.close()
                 msg = f"已提取 {len(pages)} 页 → {output_path}"
@@ -567,12 +582,15 @@ def main():
                     sys.exit("❌ 错误: 没有可重做的操作")
                 msg = f"重做: {desc}"
 
-            if output_path and args.command != "extract-pages":
-                editor.save(output_path)
-            # Persist the stack so the next invocation can undo/redo this step.
+            # Order matters: the journal must be recorded while the editor still
+            # points at its input, otherwise saving to a new -o path would move
+            # the journal key and the history would be written to a fresh journal
+            # that the next invocation never reads.
             if args.command in ("delete-pages", "rotate-pages", "move-pages",
                                 "page-undo", "page-redo"):
                 editor.save_journal()
+            if output_path and args.command != "extract-pages":
+                editor.save(output_path)
             editor.close()
 
             if getattr(args, "json", False):

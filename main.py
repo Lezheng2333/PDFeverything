@@ -86,6 +86,12 @@ Commands:
 
     <spec> accepts "all", "3", "1-5", "1-3,7,9-12"
 
+    Page-editing commands (-o optional): omit -o, or pass the same path as -i,
+    to edit the file in place. Only an in-place edit keeps the undo history, so
+    a following page-undo can still reverse it:
+        PDFeverything.exe delete-pages -i doc.pdf --pages 3
+        PDFeverything.exe page-undo    -i doc.pdf
+
   Other
     -h, --help                               Show this help
     --version                                Show version
@@ -108,7 +114,7 @@ Subsequent runs in the same session are instant.
 """
 
 
-VERSION = "1.8.0"
+VERSION = "1.9.0"
 PROJECT_DIR = Path(__file__).parent.resolve()
 _DARK_MODE = False  # set by launch_gui before any GUI widgets are created
 
@@ -246,6 +252,15 @@ def launch_gui(open_files=None):
     sys.exit(app.exec())
 
 
+def _looks_like_path(arg: str) -> bool:
+    """True when argv[1] is plausibly a file to open rather than a typo'd command."""
+    if arg.startswith(("-", "/", "~", ".")):
+        return True
+    if Path(arg).exists():
+        return True
+    return Path(arg).suffix != ""   # "report.pdf" even before it exists
+
+
 def main():
     if len(sys.argv) > 1 and sys.argv[1] in ("-h", "--help"):
         print(HELP_TEXT)
@@ -269,6 +284,24 @@ def main():
         from pdf_tool import main as cli_main
         cli_main()
         return
+
+    # A first argument that is neither a flag nor a plausible path is a mistyped
+    # command: refuse it loudly instead of silently opening the GUI with the
+    # typed arguments dropped, which used to make a failed scripted call look
+    # like a successful one (exit code 0, no output).
+    first = sys.argv[1] if len(sys.argv) > 1 else None
+    if first is not None and first.startswith("-"):
+        print(f"Unknown option: {first}", file=sys.stderr)
+        print("Run with -h to see all commands and options.", file=sys.stderr)
+        sys.exit(2)
+    if first is not None and not _looks_like_path(first):
+        import difflib
+        close = difflib.get_close_matches(first, sorted(CLI_COMMANDS), n=3, cutoff=0.6)
+        print(f"Unknown command: {first}", file=sys.stderr)
+        if close:
+            print(f"Did you mean: {', '.join(close)}?", file=sys.stderr)
+        print("Run with -h to see all commands.", file=sys.stderr)
+        sys.exit(2)
 
     open_files = _collect_file_args()
     if open_files:

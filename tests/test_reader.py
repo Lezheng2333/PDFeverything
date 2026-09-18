@@ -44,6 +44,14 @@ def make_test_pdf(pages: int, with_colors: bool = True) -> Path:
 
 # ═══════════ Test 1: Open & Render ═══════════
 print("\n═══ Test 1: Open & Render ═══")
+# The reader remembers the last page + zoom per file (v1.6 "reading position
+# memory"), and /tmp/test_reader_3p.pdf persists between runs, so a stale
+# remembered zoom would otherwise decide what "default zoom" means here.
+from PyQt6.QtCore import QSettings
+_settings = QSettings("PDFeverything", "PDFeverything")
+_settings.remove("reader_positions")
+_settings.sync()
+
 pdf_3p = make_test_pdf(3)
 w = PdfReaderWidget()
 w.resize(1200, 900)
@@ -57,8 +65,16 @@ test(w._total_pages == 3, "3-page PDF opens with correct page count")
 test(w.has_document(), "has_document() returns True")
 test(w.current_path() == pdf_3p, "current_path() returns correct path")
 test(w.label_filename.text() == "test_reader_3p.pdf", "filename displayed in toolbar")
-test(w._zoom_mode == 1.0, f"default zoom is 100% (got {w._zoom_mode})")
-test(w.zoom_edit.text() == "100", f"zoom_edit shows 100 (got {w.zoom_edit.text()})")
+# Since v1.6 the reader opens fitted to the page height, so the default zoom
+# depends on the viewport size instead of being a hard-coded 100%.
+test(w._zoom_mode == "fit_height", f"opens fitted to page height (got {w._zoom_mode})")
+test(w.zoom_edit.text() == str(w._default_zoom_pct),
+     f"zoom_edit shows the live fit percentage (got {w.zoom_edit.text()}, "
+     f"expected {w._default_zoom_pct})")
+_expected_fit = max(50, min(300, int(w._fh_ratio * 100)))
+test(w._default_zoom_pct == _expected_fit,
+     f"fit-height percentage matches the viewport ratio (got {w._default_zoom_pct}, "
+     f"expected {_expected_fit})")
 test(len(w._labels) == 3, f"3 labels created (got {len(w._labels)})")
 test(w._labels[0].isVisible(), "first label is visible (Scroll mode)")
 test(w._labels[0].pixmap() is not None and not w._labels[0].pixmap().isNull(),
@@ -242,16 +258,21 @@ w.open_pdf(pdf_3p)
 app.processEvents(); time.sleep(0.3)
 
 from gui.pdf_reader_widget import PdfReaderWidget as PRW
-# After open, 100% base should be cached for all pages
-base_hit = all(PRW._cache_get((pi, "z:1.000")) is not None for pi in range(3))
-test(base_hit, "100% base cached for all pages after open")
+# Rendering is windowed: only the pages around the current one hold a 100% base,
+# which is what keeps a 1000-page document as cheap to open as a 3-page one.
+_wfirst, _wlast = w._render_window()
+base_hit = all(PRW._cache_get((pi, "z:1.000")) is not None
+               for pi in range(_wfirst, _wlast))
+test(base_hit, f"100% base cached for the live window {(_wfirst, _wlast)}")
 
-# Zoom to 150% — deferred render should populate cache
+# Zoom to 150% — Pass 1 scales the base instantly, Pass 2 re-renders for sharpness
 w._set_zoom_pct(150)
-app.processEvents(); time.sleep(0.5)  # wait for _sharp_render (40ms timer)
-# After sharp render, zoom:1.500 should be cached for visible pages (±1)
+app.processEvents()
+for _ in range(40):                        # let the deferred sharp render land
+    app.processEvents(); time.sleep(0.05)
 zhits = sum(1 for pi in range(3) if PRW._cache_get((pi, "z:1.500")) is not None)
 test(zhits >= 1, f"zoom 150% cached for at least 1 page (got {zhits} cached)")
+test(w.zoom_edit.text() == "150", f"zoom label follows the manual zoom (got {w.zoom_edit.text()})")
 
 # Memory tracking is working
 test(PRW._cache_memory_bytes > 0, f"cache memory tracking active ({PRW._cache_memory_bytes} bytes)")

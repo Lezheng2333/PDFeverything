@@ -51,7 +51,7 @@ except Exception:
     except Exception:
         pass
 
-SERVER_VERSION = "1.8.0"
+SERVER_VERSION = "1.9.0"
 
 # ── Tool definitions (OpenAI-compatible JSON schemas) ──────
 
@@ -138,7 +138,8 @@ TOOLS = [
                 },
                 "start_number": {"type": "integer", "description": "First number (default 1)", "default": 1},
                 "font_size": {"type": "integer", "description": "Font size in points (default 10)", "default": 10},
-                "pages": {"type": "string", "description": "Page range to stamp, e.g. '1-5' (default: all)"}
+                "pages": {"type": "string",
+                          "description": "Page range: 'all', '3' or '1-5' or '1-3,7,9-12' (default: all)"}
             },
             "required": ["input", "output"]
         }
@@ -228,7 +229,7 @@ TOOLS = [
                 },
                 "pages": {
                     "type": "string",
-                    "description": "Limit the search to a page range, e.g. \"1-5,8\" or \"all\" (default: all pages)"
+                    "description": "Limit the search to a page range. Page range: 'all', '3' or '1-5' or '1-3,7,9-12' (default: all pages)"
                 },
                 "max_hits": {
                     "type": "integer",
@@ -344,6 +345,12 @@ TOOLS = [
                 "output": {
                     "type": "string",
                     "description": "Absolute path for the compressed PDF file"
+                },
+                "mode": {
+                    "type": "string",
+                    "enum": ["lossless", "medium", "max"],
+                    "description": "lossless rewrites object streams only (no quality change); medium re-encodes images at 150 DPI / quality 75; max uses 96 DPI / quality 45 (default: lossless)",
+                    "default": "lossless"
                 }
             },
             "required": ["input", "output"]
@@ -432,7 +439,7 @@ TOOLS = [
     },
     {
         "name": "pdf_rotate",
-        "description": "Rotate pages in a PDF by 90, 180, or 270 degrees. You can rotate all pages or specific pages.",
+        "description": "Rotate pages in a PDF by 90, 180, or 270 degrees. Omit `pages` to rotate all pages; otherwise pass a list of 1-based page numbers.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -557,7 +564,8 @@ TOOLS = [
             "properties": {
                 "input": {"type": "string", "description": "Absolute path to the input PDF file"},
                 "output": {"type": "string", "description": "Absolute path for the output PDF file"},
-                "pages": {"type": "string", "description": "Page numbers: 1,3,5 or 1-5 or all"},
+                "pages": {"type": "string",
+                          "description": "Page range: 'all', '3' or '1-5' or '1-3,7,9-12'"},
                 "degrees": {"type": "integer", "enum": [90, 180, 270]}
             },
             "required": ["input", "output", "pages", "degrees"]
@@ -571,7 +579,8 @@ TOOLS = [
             "properties": {
                 "input": {"type": "string", "description": "Absolute path to the input PDF file"},
                 "output": {"type": "string", "description": "Absolute path for the output PDF file"},
-                "source": {"type": "string", "description": "Source page numbers: 1,2"},
+                "source": {"type": "string",
+                            "description": "Source pages to move. Page range: 'all', '3' or '1-5' or '1-3,7,9-12'"},
                 "target": {"type": "integer", "description": "Target position (1-based, insert before this page)"}
             },
             "required": ["input", "output", "source", "target"]
@@ -585,7 +594,8 @@ TOOLS = [
             "properties": {
                 "input": {"type": "string", "description": "Absolute path to the input PDF file"},
                 "output": {"type": "string", "description": "Absolute path for the extracted PDF file"},
-                "pages": {"type": "string", "description": "Page numbers to extract (1-based): 1,3,5 or 1-5 or all"}
+                "pages": {"type": "string",
+                          "description": "Pages to keep. Page range: 'all', '3' or '1-5' or '1-3,7,9-12'"}
             },
             "required": ["input", "output", "pages"]
         }
@@ -616,7 +626,7 @@ TOOLS = [
     },
     {
         "name": "pdf_history",
-        "description": "Show the operation history for a PDF editing session.",
+        "description": "Show the persisted page-editing history (undo/redo states) recorded for this document, with the current cursor position.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -631,18 +641,22 @@ TOOLS = [
 # ── Helpers ─────────────────────────────────────────
 
 def _parse_page_list(pages_str: str, total: int) -> list[int]:
-    """Parse page range string to 0-based ordinal indices."""
-    if pages_str.lower() == "all":
-        return list(range(total))
-    result = []
-    for part in pages_str.split(","):
-        part = part.strip()
-        if "-" in part:
-            a, b = part.split("-", 1)
-            result.extend(range(int(a) - 1, int(b)))
-        else:
-            result.append(int(part) - 1)
-    return sorted(set(r for r in result if 0 <= r < total))
+    """Parse a page-range string to 0-based ordinals, using the shared parser.
+
+    This used to be a hand-rolled splitter that accepted only "1,3" and "1-5"
+    and raised a bare ValueError on anything else — so a range the CLI understood
+    ("1–5", "1，3", "3-1", "1..5") silently failed or crashed on the MCP channel.
+    All three channels now share one grammar (core.utils.parse_page_ranges)."""
+    from core.utils import parse_page_ranges
+
+    return parse_page_ranges(pages_str, total=total, one_based=True)
+
+
+def _require_pages(pages: list, total: int, what: str = "pages") -> list:
+    """Reject an empty selection instead of silently doing nothing."""
+    if not pages:
+        raise ValueError(f"{what} 没有匹配任何页面 (文档共 {total} 页)")
+    return pages
 
 
 # ── Command handlers — delegate to core.PdfOperator ────────
@@ -788,7 +802,8 @@ def _run_tool(name: str, args: dict) -> str:
             })
 
         elif name == "pdf_compress":
-            result = PdfOperator.compress(Path(args["input"]), Path(args["output"]))
+            result = PdfOperator.compress(Path(args["input"]), Path(args["output"]),
+                                          mode=args.get("mode", "lossless") or "lossless")
             result["success"] = True
             result["before_human"] = format_bytes(result["before_bytes"])
             result["after_human"] = format_bytes(result["after_bytes"])
@@ -867,7 +882,11 @@ def _run_tool(name: str, args: dict) -> str:
             from core.page_editor import PdfPageEditor as PE
             editor = PE(Path(args["input"]))
             total = editor.page_count
-            pages = _parse_page_list(args["pages"], total)
+            pages = _require_pages(_parse_page_list(args["pages"], total), total)
+            if len(pages) >= total:
+                editor.close()
+                return json.dumps({"success": False,
+                                   "error": "不能删除全部页面"})
             editor.delete_pages(pages)
             editor.save(Path(args["output"])); editor.close()
             return json.dumps({"success": True, "deleted": len(pages), "remaining": total - len(pages)})
@@ -876,7 +895,7 @@ def _run_tool(name: str, args: dict) -> str:
             from core.page_editor import PdfPageEditor as PE
             editor = PE(Path(args["input"]))
             total = editor.page_count
-            pages = _parse_page_list(args["pages"], total)
+            pages = _require_pages(_parse_page_list(args["pages"], total), total)
             editor.rotate_pages(pages, args["degrees"])
             editor.save(Path(args["output"])); editor.close()
             return json.dumps({"success": True, "rotated": len(pages), "degrees": args["degrees"]})
@@ -885,7 +904,7 @@ def _run_tool(name: str, args: dict) -> str:
             from core.page_editor import PdfPageEditor as PE
             editor = PE(Path(args["input"]))
             total = editor.page_count
-            source = _parse_page_list(args["source"], total)
+            source = _require_pages(_parse_page_list(args["source"], total), total, "source")
             target = args["target"] - 1  # 1-based to 0-based
             editor.move_pages(source, target)
             editor.save(Path(args["output"])); editor.close()
@@ -895,7 +914,7 @@ def _run_tool(name: str, args: dict) -> str:
             from core.page_editor import PdfPageEditor as PE
             editor = PE(Path(args["input"]))
             total = editor.page_count
-            pages = _parse_page_list(args["pages"], total)
+            pages = _require_pages(_parse_page_list(args["pages"], total), total)
             editor.extract_pages(pages, Path(args["output"]))
             editor.close()
             return json.dumps({"success": True, "extracted": len(pages)})
@@ -903,6 +922,7 @@ def _run_tool(name: str, args: dict) -> str:
         elif name == "pdf_undo":
             from core.page_editor import PdfPageEditor as PE
             editor = PE(Path(args["input"]))
+            editor.load_journal()
             desc = editor.undo()
             if desc:
                 editor.save(Path(args["output"]))
@@ -912,6 +932,7 @@ def _run_tool(name: str, args: dict) -> str:
         elif name == "pdf_redo":
             from core.page_editor import PdfPageEditor as PE
             editor = PE(Path(args["input"]))
+            editor.load_journal()
             desc = editor.redo()
             if desc:
                 editor.save(Path(args["output"]))
@@ -921,9 +942,13 @@ def _run_tool(name: str, args: dict) -> str:
         elif name == "pdf_history":
             from core.page_editor import PdfPageEditor as PE
             editor = PE(Path(args["input"]))
-            history = editor.undo_stack_desc
+            editor.load_journal()   # same source as the CLI: the persisted journal
+            history = [s["desc"] for s in editor.history]
+            cursor = editor.history_cursor
             editor.close()
-            return json.dumps({"success": True, "history": history})
+            return json.dumps({"success": True, "history": history,
+                               "cursor": cursor, "count": len(history)},
+                              ensure_ascii=False)
 
         else:
             return json.dumps({"success": False, "error": f"Unknown tool: {name}"})

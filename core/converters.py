@@ -22,6 +22,47 @@ def _has_cjk(text: str) -> bool:
     return bool(_NON_LATIN.search(text or ""))
 
 
+def _text_font(text: str, mono: bool = False):
+    """Pick a font object that can actually encode `text`."""
+    import fitz
+    if _has_cjk(text):
+        try:
+            return fitz.Font("china-s")
+        except Exception:
+            pass
+    return fitz.Font("cour" if mono else "helv")
+
+
+def _wrap_by_width(text: str, font, fontsize: float, max_width: float) -> list:
+    """Split one logical line into chunks that fit `max_width`.
+
+    The old code estimated a fixed 6.5pt per character, which is wrong in both
+    directions: Latin text stopped ~85pt short of the right margin while CJK
+    overflowed the page by ~55pt (a full-width glyph is twice as wide). Measuring
+    with the actual font is exact and still cheap — ``text_length`` is a C call."""
+    if not text:
+        return [""]
+    if font.text_length(text, fontsize=fontsize) <= max_width:
+        return [text]
+    chunks = []
+    rest = text
+    while rest:
+        # Longest prefix that fits: binary search on character count.
+        lo, hi = 1, len(rest)
+        if font.text_length(rest[:1], fontsize=fontsize) > max_width:
+            lo = hi = 1              # a single glyph is already too wide
+        else:
+            while lo < hi:
+                mid = (lo + hi + 1) // 2
+                if font.text_length(rest[:mid], fontsize=fontsize) <= max_width:
+                    lo = mid
+                else:
+                    hi = mid - 1
+        chunks.append(rest[:lo])
+        rest = rest[lo:]
+    return chunks
+
+
 def _draw_text_block(page, x: float, y: float, lines, fontsize: float,
                      mono: bool = False, color=(0, 0, 0)) -> None:
     """把若干行文字画到 PDF 页面上，自动为 CJK 选择可用字体。"""
@@ -254,22 +295,19 @@ class TextConverter(BaseConverter):
         margin = 50
         usable_width = rect.width - 2 * margin
         usable_height = rect.height - 2 * margin
+        fontsize = 9
         line_height = 12
-        chars_per_line = max(1, int(usable_width / 6.5))  # 等宽字体近似
 
+        font = _text_font(content, mono=True)
         y = margin + line_height
         for line in content.split("\n"):
-            # 先按字符宽度折行，再逐行写出
-            if len(line) > chars_per_line:
-                chunks = [line[i:i + chars_per_line]
-                          for i in range(0, len(line), chars_per_line)]
-            else:
-                chunks = [line]
-            for chunk in chunks:
+            # Wrap by measured width so nothing runs past the right margin and no
+            # space is wasted (Latin) — see _wrap_by_width.
+            for chunk in _wrap_by_width(line, font, fontsize, usable_width):
                 if y + line_height > margin + usable_height:
                     page = doc.new_page()
                     y = margin + line_height
-                _draw_text_block(page, margin, y, [chunk], 9, mono=True)
+                _draw_text_block(page, margin, y, [chunk], fontsize, mono=True)
                 y += line_height
 
         doc.save(out)
@@ -382,8 +420,10 @@ class WordConverter(BaseConverter):
                 current_page.insert_image(img_rect, stream=image_blob)
                 y += img_h + 10
                 return img_h
-            except Exception as e:
-                print(f"  [Warning] 图片插入失败: {e}")
+            except Exception:
+                # Never print here: on the MCP stdio channel any stray stdout line
+                # corrupts the JSON-RPC stream. A failed image must not abort the
+                # conversion either — the surrounding text still converts.
                 return 0
 
         # ── 提取段落中的图片（用 python-docx 标准 API） ──

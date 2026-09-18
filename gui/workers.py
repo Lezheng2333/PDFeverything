@@ -74,9 +74,15 @@ class BaseWorker(QThread):
     GRACE_MS = 5000
 
     def _force_terminate_if_running(self) -> None:
-        if self.isRunning():
-            self.terminate()
-            self.wait(2000)
+        if not self.isRunning():
+            return
+        self.terminate()
+        self.wait(2000)
+        # terminate() kills the thread without run() ever returning, so none of
+        # the finished/error/cancelled signals fire and the window stayed
+        # permanently "busy" with its buttons disabled and no explanation.
+        # Emit the terminal state ourselves so the UI always recovers.
+        self._emit_once(self.cancelled)
 
     # ── Execution ────────────────────────────────────
 

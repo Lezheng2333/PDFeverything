@@ -69,6 +69,29 @@ def _prepare_output(path: Path) -> Path:
     return Path(path)
 
 
+def _reject_if_encrypted(*paths) -> None:
+    """Fail with an actionable message when a PDF needs a password.
+
+    Without this the underlying libraries leak their own diagnostics —
+    "File has not been decrypted" from pypdf, "document closed or encrypted"
+    from MuPDF, "PasswordError" from pikepdf — none of which tell the user what
+    to do. Encrypted input is a normal situation, not an internal error, so it
+    gets one consistent message across every operation and every channel."""
+    import fitz
+
+    for p in paths:
+        try:
+            doc = fitz.open(p)
+        except Exception:
+            continue  # unreadable for another reason; let the real op report it
+        try:
+            if doc.needs_pass:
+                raise ValueError(
+                    f"PDF 受密码保护，请先用 decrypt 移除密码: {Path(p).name}")
+        finally:
+            doc.close()
+
+
 class PdfOperator:
     """PDF 操作静态方法集合。CLI 和 GUI 共用。"""
 
@@ -131,6 +154,7 @@ class PdfOperator:
         total = len(input_paths)
         for i, p in enumerate(input_paths):
             check_input(p)
+            _reject_if_encrypted(p)
             writer.append(p)
             if progress_callback:
                 progress_callback(f"合并中 ({i+1}/{total}): {p.name}", int((i+1)/total*100))
@@ -155,6 +179,7 @@ class PdfOperator:
         from pypdf import PdfReader, PdfWriter
 
         check_input(input_path)
+        _reject_if_encrypted(input_path)
         reader = PdfReader(input_path)
         out_dir = ensure_output_dir(output_dir)
         stem = input_path.stem
@@ -203,6 +228,7 @@ class PdfOperator:
         pypdf，保证加密/损坏文件也有最后一次机会。"""
         check_input(input_path)
         _prepare_output(output_path)
+        _reject_if_encrypted(input_path)
 
         content = PdfOperator._extract_text_mupdf(input_path, progress_callback)
         if content is None:
@@ -261,6 +287,7 @@ class PdfOperator:
         import fitz  # PyMuPDF
 
         check_input(input_path)
+        _reject_if_encrypted(input_path)
         out_dir = ensure_output_dir(output_dir)
         doc = fitz.open(input_path)
         count = 0
@@ -294,6 +321,7 @@ class PdfOperator:
         import fitz
 
         check_input(input_path)
+        _reject_if_encrypted(input_path)
         out_dir = ensure_output_dir(output_dir)
         stem = input_path.stem
         dpi = max(36, min(1200, int(dpi)))
@@ -378,6 +406,7 @@ class PdfOperator:
 
         check_input(input_path)
         _prepare_output(output_path)
+        _reject_if_encrypted(input_path)
         if progress_callback:
             progress_callback("正在压缩...", 20)
 
@@ -481,6 +510,7 @@ class PdfOperator:
         check_input(input_path)
         check_input(watermark_path)
         _prepare_output(output_path)
+        _reject_if_encrypted(input_path, watermark_path)
 
         reader = PdfReader(input_path)
         watermark_reader = PdfReader(watermark_path)
@@ -596,6 +626,7 @@ class PdfOperator:
 
         check_input(input_path)
         _prepare_output(output_path)
+        _reject_if_encrypted(input_path)
         reader = PdfReader(input_path)
         writer = PdfWriter()
         total = len(reader.pages)
@@ -633,6 +664,7 @@ class PdfOperator:
 
         check_input(input_path)
         _prepare_output(output_path)
+        _reject_if_encrypted(input_path)
         opacity = max(0.0, min(1.0, float(opacity)))
         font = PdfOperator._watermark_font(text)
 
@@ -710,6 +742,7 @@ class PdfOperator:
             raise ValueError(f"未知位置: {position}")
         check_input(input_path)
         _prepare_output(output_path)
+        _reject_if_encrypted(input_path)
         align_name, at_top = PdfOperator.STAMP_POSITIONS[position]
 
         doc = fitz.open(input_path)
@@ -783,6 +816,7 @@ class PdfOperator:
 
         check_input(input_path)
         _prepare_output(output_path)
+        _reject_if_encrypted(input_path)
         clean = {k: str(v) for k, v in (metadata or {}).items()
                  if k in PdfOperator.METADATA_FIELDS and v is not None}
         if not clean:
@@ -820,6 +854,7 @@ class PdfOperator:
             raise ValueError("每张纸页数只支持 2/4/6/8/9/16")
         check_input(input_path)
         _prepare_output(output_path)
+        _reject_if_encrypted(input_path)
 
         paper_sizes = {
             "a4": (595.0, 842.0),
@@ -889,6 +924,7 @@ class PdfOperator:
         check_input(input_path)
         check_input(source_path)
         _prepare_output(output_path)
+        _reject_if_encrypted(input_path, source_path)
 
         doc = fitz.open(input_path)
         try:
@@ -922,6 +958,7 @@ class PdfOperator:
 
         check_input(input_path)
         _prepare_output(output_path)
+        _reject_if_encrypted(input_path)
         ordered = [p for p in pages or []]
         if not ordered:
             raise ValueError("没有选择任何页面")
@@ -957,6 +994,7 @@ class PdfOperator:
 
         check_input(input_path)
         _prepare_output(output_path)
+        _reject_if_encrypted(input_path)
         doc = fitz.open(input_path)
         try:
             total = len(doc)
@@ -992,6 +1030,7 @@ class PdfOperator:
 
         check_input(input_path)
         _prepare_output(output_path)
+        _reject_if_encrypted(input_path)
         doc_in = fitz.open(input_path)
         doc_out = Document()
         total = len(doc_in)
@@ -1103,11 +1142,14 @@ class PdfOperator:
 
         PyMuPDF 1.27 has no ``TableHeader.explicit_outer`` (the previous code
         raised AttributeError and silently produced no tables at all); and
-        ``find_tables`` scales badly on drawing-heavy pages, so very busy pages
-        are skipped rather than hanging for minutes."""
+        ``find_tables`` cost climbs steeply with the number of vector segments on
+        a page, so drawing-heavy pages are skipped rather than hanging."""
         try:
-            if page.get_drawings().__len__() > TABLE_MAX_DRAWINGS:
-                return []
+            count = 0
+            for _ in page.get_drawings():      # iterate lazily — no big list
+                count += 1
+                if count >= TABLE_MAX_DRAWINGS:
+                    return []
         except Exception:
             pass
         try:
@@ -1143,6 +1185,7 @@ class PdfOperator:
 
         check_input(input_path)
         _prepare_output(output_path)
+        _reject_if_encrypted(input_path)
         dpi = max(36, min(1200, int(dpi)))
         doc = fitz.open(input_path)
         prs = Presentation()
@@ -1185,6 +1228,7 @@ class PdfOperator:
 
         check_input(input_path)
         _prepare_output(output_path)
+        _reject_if_encrypted(input_path)
         doc = fitz.open(input_path)
         wb = Workbook()
         wb.remove(wb.active)   # drop the default sheet

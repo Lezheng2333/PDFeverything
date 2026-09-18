@@ -50,7 +50,7 @@ from .pdf_reader_widget import PdfReaderWidget
 from .workers import BaseWorker
 
 
-VERSION = "1.8.0"
+VERSION = "1.9.0"
 
 
 def _dc(dark, light):
@@ -480,6 +480,11 @@ class MainWindow(QMainWindow):
                 event.ignore(); return
             if result == "save_as":
                 self.reader._save_edited_copy()
+        # Persist where the reader is before the widget is destroyed. Only
+        # close_document() used to do this, so quitting with the window button or
+        # Cmd+Q lost the reading position and the file always reopened at page 1.
+        if self.reader.has_document():
+            self.reader._remember_reading_position()
         self._settings.setValue("window_geometry",
                                 bytes(self.saveGeometry()).hex())
         if self._worker and self._worker.isRunning():

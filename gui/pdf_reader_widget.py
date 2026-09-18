@@ -62,6 +62,8 @@ class PdfReaderWidget(QWidget):
     open_requested = pyqtSignal()
     _cache: OrderedDict = OrderedDict()
     _cache_memory_bytes: int = 0
+    _protected_pages: set = set()   # pages whose entries survive eviction longest
+    _cache_budget: Optional[int] = None  # resolved once from the machine's RAM
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -73,6 +75,7 @@ class PdfReaderWidget(QWidget):
         self._labels: list[QLabel] = []
         self._page_heights: list[int] = []
         self._page_geoms: list[tuple] = []
+        self._page_rects = None      # cached per-page (w, h) for layout hot paths
         self._btn_open_source = 'dialog'
         # Lazy base-render state
         self._lazy_rendering = False
@@ -114,6 +117,10 @@ class PdfReaderWidget(QWidget):
 
         self._hide_timer = QTimer(self); self._hide_timer.setSingleShot(True)
         self._hide_timer.setInterval(200)
+
+        self._auto_hide_timer = QTimer(self); self._auto_hide_timer.setSingleShot(True)
+        self._auto_hide_timer.setInterval(5000)
+        self._auto_hide_timer.timeout.connect(lambda: self._tooltip.hide())
 
         self._zoom_popup_timer = QTimer(self); self._zoom_popup_timer.setSingleShot(True)
         self._zoom_popup_timer.setInterval(1200)
@@ -726,6 +733,10 @@ class PdfReaderWidget(QWidget):
         index = max(0, min(index, len(self._search_hits) - 1))
         self._search_index = index
         hit = self._search_hits[index]
+        # A hit carried over from a previously opened document could point past
+        # the end of the new one, which made the page label read e.g. "61 / 3".
+        if hit.page >= self._total_pages:
+            return
         self.search_list.setCurrentRow(index)
         self._current_page = hit.page
         self._pending_scroll_page = hit.page
@@ -812,8 +823,9 @@ class PdfReaderWidget(QWidget):
                 self._tooltip.show(); self._tooltip.raise_()
                 # Cancel hide timer if tooltip was re-shown, then set 5s auto-hide
                 self._hide_timer.stop()  # stop any pending leave-hide
-                self._auto_hide_timer = QTimer(self); self._auto_hide_timer.setSingleShot(True)
-                self._auto_hide_timer.timeout.connect(self._tooltip.hide)
+                # One reusable timer: allocating a fresh QTimer per hover left 6
+                # live timers after 6 hovers, and an older 5s timer would hide a
+                # later tooltip early.
                 self._auto_hide_timer.start(5000)
 
     # ═══════════ Mode ═══════════
@@ -938,6 +950,11 @@ class PdfReaderWidget(QWidget):
 
     def open_pdf(self, path: Path) -> None:
         import fitz
+        # Leave any previous editing session first: its page editor still points
+        # at the OLD document, so an edit made after this open would silently act
+        # on (and then display) the previous file while the filename chip showed
+        # the new one.
+        self._reset_document_state()
         self._cancel_deferred_renders()
         PdfReaderWidget._clear_cache(); self._destroy_labels(); self._destroy_welcome()
         try: self.doc = fitz.open(path)
@@ -950,10 +967,17 @@ class PdfReaderWidget(QWidget):
         self._configure_mupdf_aa()
         self._path = path
         self._total_pages = len(self.doc); self._current_page = 0
+        if self._total_pages == 0:
+            # MuPDF happily opens a PDF with an empty page tree; self.doc[0]
+            # below would raise IndexError inside a menu-action slot.
+            self.doc.close(); self.doc = None; self._path = None
+            self._show_welcome()
+            return
         self._zoom_mode = "fit_height"     # open at page-height fit
         self.btn_fit_width.setChecked(False); self.btn_fit_height.setChecked(True)
         self._view_mode = ViewMode.SCROLL
         self.btn_scroll.setChecked(True); self.btn_grid.setChecked(False)
+        self._page_rects = None      # geometry is per-document
         # Pre-compute fit ratios for later use
         page = self.doc[0]; pw, ph = page.rect.width, page.rect.height
         vw, vh = self._viewport_size()
@@ -978,6 +1002,42 @@ class PdfReaderWidget(QWidget):
         self._restore_reading_position(path)
         self.document_changed.emit(str(path))
         self.setFocus()
+
+    def _reset_document_state(self):
+        """Drop every piece of per-document state before another file is opened.
+
+        Search hits, highlight rectangles, the sidebar list and the page editor
+        all used to survive the switch: search results from a 100-page document
+        stayed in the sidebar over a 3-page one, the page label could read
+        "61 / 3", and the old document's hit rectangles were baked into the new
+        document's pixmaps. Edit mode also stayed armed on the old editor."""
+        if self._edit_mode:
+            self._leave_edit_mode(skip_prompt=True)
+        self._page_editor = None
+        self._original_snapshot = None
+        self._unsaved_edits = False
+        self._selected_pages.clear()
+        self._prev_selected.clear()
+        self._drag_source = None
+        self._drag_active = False
+        self._drag_target = None
+        self._rubber_origin = None
+        self._rubber_rect = None
+        self._search_hits = []
+        self._search_index = -1
+        self._search_query = ""
+        self._highlight_rects = {}
+        self._outline_entries = []
+        if getattr(self, "outline_tree", None) is not None:
+            self.outline_tree.clear()
+        if getattr(self, "search_list", None) is not None:
+            self.search_list.clear()
+        if getattr(self, "search_status", None) is not None:
+            self.search_status.setText("")
+        if getattr(self, "search_count_label", None) is not None:
+            self.search_count_label.setText("")
+        if getattr(self, "search_edit", None) is not None:
+            self.search_edit.clear()
 
     # ═══════════ Reading position memory ═══════════
 
@@ -1040,6 +1100,7 @@ class PdfReaderWidget(QWidget):
 
     def close_document(self):
         self._remember_reading_position()
+        self._original_snapshot = None   # a full copy of the file must not outlive it
         self._cancel_deferred_renders()
         self._grid_geom = None
         self._page_heights = []
@@ -1212,6 +1273,9 @@ class PdfReaderWidget(QWidget):
             return
         first, last = self._render_window()
         self._lazy_window = (first, last)
+        # Tell the shared cache which pages must not be evicted: these are the
+        # ones Pass 1 zoom scaling and the next re-layout read from.
+        PdfReaderWidget._protected_pages = set(range(first, last))
         self._lazy_pre_render_index = first
         self._lazy_rendering = True
         QTimer.singleShot(LAZY_RENDER_INTERVAL_MS, self._lazy_pre_render)
@@ -1424,17 +1488,38 @@ class PdfReaderWidget(QWidget):
 
     # ── Scroll mode ──────────────────────────────────
 
+    def _page_rects_px(self) -> list:
+        """Per-page (width, height) in PDF points, cached per document.
+
+        _layout_scroll runs on every scroll-stop, zoom tick, mode switch and
+        resize, and it needs every page's geometry. Reading `doc[pi].rect` inside
+        that loop accounted for 7.5ms of the 9.5ms a 1000-page layout cost, so a
+        pinch-zoom tick spent most of its 16.7ms frame budget there. The geometry
+        only changes when the document changes, so one cached pass pays off."""
+        if self._page_rects is not None and len(self._page_rects) == self._total_pages:
+            return self._page_rects
+        rects = []
+        if self.doc is not None:
+            for pi in range(self._total_pages):
+                try:
+                    r = self.doc[pi].rect
+                    rects.append((r.width, r.height))
+                except Exception:
+                    rects.append((595.0, 842.0))
+        self._page_rects = rects
+        return rects
+
     def _layout_scroll(self, vw: int):
         sp, mg = 16, 20
         z = self._current_zoom_pct() / 100.0
         heights = self._page_heights = []
+        rects = self._page_rects_px()
         y = mg
         visible_y0 = self.scroll_area.verticalScrollBar().value()
         visible_y1 = visible_y0 + self._viewport_height()
         for pi, label in enumerate(self._labels):
-            if self.doc and pi < self._total_pages:
-                rect = self.doc[pi].rect
-                w, h = int(rect.width * z), int(rect.height * z)
+            if pi < len(rects):
+                w, h = int(rects[pi][0] * z), int(rects[pi][1] * z)
             else:
                 w, h = 600, 800
             label.setFixedSize(w, h)
@@ -1552,15 +1637,23 @@ class PdfReaderWidget(QWidget):
             if not hasattr(label, "_grid_click_set"):
                 label._grid_click_set = True
                 orig_press = label.mousePressEvent
-                label.mousePressEvent = self._make_grid_press(orig_press)
+                label.mousePressEvent = self._make_grid_press(orig_press, pi)
                 label.mouseDoubleClickEvent = self._grid_dbl_click_handler
 
         self.page_container.setFixedSize(
             vw, 2 * mg + g["rows"] * cell_h + max(0, g["rows"] - 1) * gutter_v)
 
-    def _make_grid_press(self, orig_press):
+    def _make_grid_press(self, orig_press, page_index: int):
+        """Press handler for one grid cell.
+
+        The index is passed in rather than derived from the event: a Qt event
+        delivered to a QLabel carries *label-local* coordinates, while
+        _grid_page_at_pos works in container space, so hit-testing the event
+        position made every thumbnail resolve to page 1 (and its left edge to
+        the phantom index -1) — i.e. "click page 5, press Delete" deleted page 1.
+        The embedding loop already knows which page this label is."""
         def handler(e):
-            pi = self._grid_page_at_pos(e.position().toPoint())
+            pi = page_index
             if self._edit_mode:
                 self._on_grid_click(pi, e)
                 return
@@ -1920,6 +2013,11 @@ class PdfReaderWidget(QWidget):
                 offset = sum(1 for s in source_list if s < target)
                 effective_target = target - offset
                 self._page_editor.move_pages(source_list, effective_target)
+                # move_pages rebuilds the document through pypdf and binds a new
+                # fitz.Document; keeping the old handle made the very next line
+                # raise ValueError("document closed") inside a Qt slot, which
+                # aborts the process and loses the unsaved edits without a prompt.
+                self.doc = self._page_editor.doc
                 self._unsaved_edits = True
                 self._selected_pages.clear()
                 PdfReaderWidget._clear_cache()
@@ -1956,6 +2054,8 @@ class PdfReaderWidget(QWidget):
             self._selected_pages = set(range(start, end + 1))
         else:
             # Toggle single
+            if pi < 0 or pi >= self._total_pages:
+                return
             if pi in self._selected_pages and len(self._selected_pages) == 1:
                 self._selected_pages.clear()
             else:
@@ -2026,9 +2126,10 @@ class PdfReaderWidget(QWidget):
         # so all entries for these page indices are stale. One sweep over the cache
         # instead of one sweep per selected page.
         PdfReaderWidget._invalidate_pages(self._selected_pages)
-        # Page rects changed (rotation swaps width/height for 90°/270°), so the
-        # grid geometry cache is stale too.
+        # Page rects changed (rotation swaps width/height for 90°/270°), so both
+        # the grid geometry and the cached page rects are stale.
         self._grid_geom = None
+        self._page_rects = None
         if self._view_mode == ViewMode.GRID:
             self._grid_geometry(self._viewport_size()[0])
         for pi in self._selected_pages:
@@ -2100,10 +2201,14 @@ class PdfReaderWidget(QWidget):
             self._page_editor.extract_pages(list(self._selected_pages), Path(path))
         elif fmt == "jpg":
             import tempfile
-            tmp = Path(tempfile.gettempdir()) / "pdfeverything_export_tmp.pdf"
-            if self._page_editor:
+            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as fh:
+                tmp = Path(fh.name)
+            try:
                 self._page_editor.extract_pages(list(self._selected_pages), tmp)
-                PdfReaderWidget._export_pages_to_images(tmp, Path(path))
+                written = PdfReaderWidget._export_pages_to_images(tmp, Path(path))
+                if len(written) > 1:
+                    path = str(Path(path).parent / f"{Path(path).stem}_p*.jpg")
+            finally:
                 tmp.unlink(missing_ok=True)
         elif fmt == "word":
             import tempfile
@@ -2123,17 +2228,34 @@ class PdfReaderWidget(QWidget):
                                 tr("reader_exported_body", path=path))
 
     @staticmethod
-    def _export_pages_to_images(pdf_path: Path, output_dir: Path):
-        """Export PDF pages as JPG images to a directory."""
+    def _export_pages_to_images(pdf_path: Path, output_path: Path) -> list:
+        """Export PDF pages as JPGs, honouring the path the user picked.
+
+        Selecting "photo.jpg" used to write "photo_p0001.jpg" and nothing at the
+        chosen name, while the success dialog still reported the path the user
+        typed — a file that did not exist. Now one page is written exactly where
+        the user asked, and multiple pages go to a folder beside it. Returns the
+        paths actually written."""
         import fitz
         doc = fitz.open(pdf_path)
-        stem = output_dir.stem
-        parent = output_dir.parent
-        for i, page in enumerate(doc, start=1):
-            pix = page.get_pixmap(dpi=200)
-            img_path = parent / f"{stem}_p{i:04d}.jpg"
-            pix.save(str(img_path))
-        doc.close()
+        total = len(doc)
+        written = []
+        try:
+            if total <= 1:
+                for i in range(total):
+                    pix = doc[i].get_pixmap(dpi=200)
+                    pix.save(str(output_path))
+                    written.append(output_path)
+            else:
+                stem, parent = output_path.stem, output_path.parent
+                for i in range(total):
+                    img_path = parent / f"{stem}_p{i + 1:04d}.jpg"
+                    pix = doc[i].get_pixmap(dpi=200)
+                    pix.save(str(img_path))
+                    written.append(img_path)
+        finally:
+            doc.close()
+        return written
 
     def _edit_undo(self):
         if self._page_editor and self._page_editor.can_undo():
@@ -2166,13 +2288,15 @@ class PdfReaderWidget(QWidget):
         self._total_pages = new_count
         self._build_labels()
         self._current_page = min(self._current_page, new_count - 1) if new_count else 0
-        # Render thumbnails for new layout
-        vw, vh = self._viewport_size()
-        old_zm = self._zoom_mode
-        self._zoom_mode = 1.0
-        for pi in range(new_count):
-            self._get_or_render(pi, vw, vh)
-        self._zoom_mode = old_zm
+        # Stay lazy: only the pages on screen get a pixmap. Rendering every page
+        # here defeated the whole windowed renderer — one delete on a 100-page
+        # document allocated 189MB on the GUI thread, and a 1000-page one would
+        # have needed ~1.9GB. _layout_labels + _refresh_visible_pixmaps already
+        # fill exactly the visible rows.
+        self._grid_geom = None
+        self._page_rects = None      # rotation/pages changed with the edit
+        self._selected_pages = {p for p in self._selected_pages if p < new_count}
+        self._queue_lazy_pre_render()
 
     def _edit_select_all(self):
         if not self._edit_mode: return
@@ -2316,7 +2440,12 @@ class PdfReaderWidget(QWidget):
         # resolution we request — no oversampling needed.
         mat = fitz.Matrix(zoom * dpr, zoom * dpr)
         pix = page.get_pixmap(matrix=mat)
-        qimg = QImage(pix.samples, pix.width, pix.height,
+        # QImage does not take ownership of (or copy) the buffer it is handed, so
+        # it pointed straight at the MuPDF pixmap's memory. fromImage() copies
+        # synchronously today, but that is an implementation detail of Qt — an
+        # explicit copy keeps the renderer correct by construction.
+        samples = bytes(pix.samples)
+        qimg = QImage(samples, pix.width, pix.height,
                       pix.stride, QImage.Format.Format_RGB888)
         pixmap = QPixmap.fromImage(qimg)
         if dpr != 1.0:
@@ -2394,34 +2523,82 @@ class PdfReaderWidget(QWidget):
         return pix.width(), pix.height()
 
     @classmethod
+    def _cache_budget_bytes(cls) -> int:
+        """Memory ceiling for the pixmap cache, adapted to the actual machine.
+
+        400MB is the ceiling on a well-endowed desktop, but on a small laptop
+        that is a large slice of RAM for a cache. Take a quarter of physical
+        memory, clamped to [128MB, 400MB]."""
+        if cls._cache_budget is None:
+            cap = MAX_CACHE_MB * 1024 * 1024
+            try:
+                page = os.sysconf("SC_PAGE_SIZE")
+                avail = os.sysconf("SC_PHYS_PAGES") * page
+                cap = min(cap, max(128 * 1024 * 1024, avail // 4))
+            except (ValueError, OSError, AttributeError):
+                pass
+            cls._cache_budget = cap
+        return cls._cache_budget
+
+    @staticmethod
+    def _pixmap_bytes(pix: QPixmap) -> int:
+        """RAM held by one pixmap, in bytes.
+
+        ``QPixmap.width()``/``height()`` already report *device* pixels in Qt6
+        (a 100-logical-px pixmap at dpr 2 reports 200), so the devicePixelRatio
+        must NOT be multiplied in again — doing so over-counted by 4× on every
+        Retina screen and made the 400MB budget behave like 100MB, which caused
+        constant eviction and re-rendering."""
+        return pix.width() * pix.height() * 4
+
+    @classmethod
     def _cache_put(cls, key, pix: QPixmap):
-        """LRU insert with memory-aware eviction. 100% base + fit modes are immortal.
-        Memory tracking accounts for devicePixelRatio: Qt6 returns logical-pixel
-        dimensions from pix.width()/height(), but RAM is consumed by physical pixels."""
+        """LRU insert with a hard memory ceiling.
+
+        The 100% base ("z:1.000") and fit-mode ("fh"/"fw") entries are the ones
+        Pass 1 scaling reads from, so they are evicted *last* — but they are no
+        longer immortal. Treating them as immortal used to stop eviction dead on
+        the first base entry it met, letting the cache grow past its budget
+        without limit (measured: 638MB against a 400MB cap). Now the eviction
+        runs two tiers: everything unprotected first, and only if that is not
+        enough, the protected entries outside the live page window."""
         if key in cls._cache:
+            # Replacing an entry must account for the size it already occupied,
+            # otherwise the tracked total drifts below reality and eviction
+            # stops firing early.
+            cls._cache_memory_bytes -= cls._pixmap_bytes(cls._cache[key])
             cls._cache.move_to_end(key)
             cls._cache[key] = pix
+            cls._cache_memory_bytes += cls._pixmap_bytes(pix)
             return
-        # Physical pixel memory: logical_px × dpr × logical_px × dpr × 4 bytes
-        mem = pix.width() * pix.height() * 4
-        r = pix.devicePixelRatio()
-        if r != 1.0:
-            mem = int(mem * r * r)
-        cls._cache_memory_bytes += mem
+
         cls._cache[key] = pix
-        while cls._cache_memory_bytes > MAX_CACHE_MB * 1024 * 1024 and len(cls._cache) > 1:
-            oldest_key, oldest_pix = next(iter(cls._cache.items()))
-            pi, zk = oldest_key
-            # Immortal: 100% base + fit modes
-            if zk in ("fh", "fw", "z:1.000"):
+        cls._cache_memory_bytes += cls._pixmap_bytes(pix)
+
+        budget = cls._cache_budget_bytes()
+        if cls._cache_memory_bytes <= budget:
+            return
+
+        protected = cls._protected_pages
+        is_base = lambda k: k[1] in ("fh", "fw", "z:1.000")  # noqa: E731
+        # Tier 1 — evict the disposable zoomed/thumbnail entries only. This keeps
+        # every 100% base (the source Pass 1 scales from) plus the live pages.
+        for k in list(cls._cache.keys()):
+            if cls._cache_memory_bytes <= budget:
                 break
-            ow, oh = oldest_pix.width(), oldest_pix.height()
-            orr = oldest_pix.devicePixelRatio()
-            oldest_mem = ow * oh * 4
-            if orr != 1.0:
-                oldest_mem = int(oldest_mem * orr * orr)
-            cls._cache_memory_bytes -= oldest_mem
-            cls._cache.popitem(last=False)
+            if k == key or len(cls._cache) <= 1 or is_base(k):
+                continue
+            cls._cache_pop(k)
+        # Tier 2 — still over budget: the base pixmaps themselves are the bulk,
+        # so give up the off-screen ones. The page the reader is looking at is
+        # never dropped, so a zoom still has a base to scale from.
+        if cls._cache_memory_bytes > budget:
+            for k in list(cls._cache.keys()):
+                if cls._cache_memory_bytes <= budget:
+                    break
+                if k == key or len(cls._cache) <= 1 or k[0] in protected:
+                    continue
+                cls._cache_pop(k)
 
     @classmethod
     def _cache_get(cls, key):
@@ -2440,6 +2617,18 @@ class PdfReaderWidget(QWidget):
             if r != 1.0:
                 mem = int(mem * r * r)
             cls._cache_memory_bytes -= mem
+
+    @classmethod
+    def _invalidate_zoom_keys(cls, zoom_keys) -> None:
+        """Drop every cache entry whose zoom key is in `zoom_keys`.
+
+        Used for viewport-dependent renders ("fh"/"fw"), which are invalidated by
+        a resize even though the page index is unchanged."""
+        wanted = set(zoom_keys)
+        if not wanted or not cls._cache:
+            return
+        for key in [k for k in cls._cache if k[1] in wanted]:
+            cls._cache_pop(key)
 
     @classmethod
     def _invalidate_pages(cls, ordinals):
@@ -2509,6 +2698,11 @@ class PdfReaderWidget(QWidget):
         self._fw_ratio = vw / pw if pw > 0 else 1.0
         self._fh_ratio = vh / ph if ph > 0 else 1.0
         self._default_zoom_pct = max(50, min(300, int(self._fh_ratio * 100)))
+        # A fit-mode pixmap is only valid for the viewport it was rendered in, and
+        # its cache key ("fh"/"fw") does not encode the size. Without this purge
+        # the label kept the pre-resize pixmap inside the new, larger frame
+        # (measured: 424x600 inside 809x1145) and never filled the window again.
+        PdfReaderWidget._invalidate_zoom_keys(("fh", "fw"))
         # While a fit mode is active the page size itself tracks the viewport,
         # so the layout must be recomputed (not just re-rendered).
         self._layout_labels()

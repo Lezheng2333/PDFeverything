@@ -153,7 +153,17 @@ def parse_page_ranges(spec, total: Optional[int] = None,
     for part in _RANGE_SEP.split(_DASH_PAD.sub(lambda m: m.group(0).strip(), text)):
         if not part:
             continue
-        tokens = [t for t in _RANGE_DASH.split(part) if t and t.strip()]
+        # A dash with an empty side ("1-", "-5") is a truncated range, not a
+        # single page. Reading "1-" as "1" silently acted on a different set of
+        # pages than the user typed, which is worse than refusing the input.
+        # "-5" is reported as a negative page number, since that is what the
+        # user almost certainly typed.
+        if re.fullmatch(r"-\d+", part):
+            raise ValueError(f"页码不能为负数（页码从 1 开始）: {part}")
+        sides = _RANGE_DASH.split(part)
+        if len(sides) > 1 and not all(s.strip() for s in sides):
+            raise ValueError(f"无法识别的页码写法: {part}")
+        tokens = [t for t in sides if t and t.strip()]
         if len(tokens) == 1:
             result.add(_to_int(tokens[0], text))
         elif len(tokens) == 2:

@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/Lezheng2333/PDFeverything/releases"><img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-blue?style=flat-square" /></a>
-  <a href="https://github.com/Lezheng2333/PDFeverything/releases/latest"><img src="https://img.shields.io/badge/version-v1.8.0-007aff?style=flat-square" /></a>
+  <a href="https://github.com/Lezheng2333/PDFeverything/releases/latest"><img src="https://img.shields.io/badge/version-v1.9.0-007aff?style=flat-square" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" /></a>
 </p>
 
@@ -35,24 +35,73 @@ Drag everything in — any combination of PDFs, Word documents, PowerPoint decks
 
 > 🔗 [**Latest Release →**](https://github.com/Lezheng2333/PDFeverything/releases/latest)
 
-## 🆕 What's New in v1.8.0
+## 🆕 What's New in v1.9.0
 
-**Interface polish: the same power, far less noise.**
+**A QA-led hardening round: 19 defects fixed, hot paths made several times faster.**
 
-- 🧹 **The right-hand panel shrank by half.** The seven format-conversion buttons
-  became a **Convert** menu — every action is still one click away, but the panel
-  now only holds what a file list needs (merge, split, compress, watermark,
-  encrypt, decrypt, rotate, info). Panel buttons: 48 → 41.
-- 📊 **The file list tells you what you have** — rows show name, size **and page
-  count** (`report.pdf (2.4 MB, 18p)`), with a summary line underneath:
-  *"2 files · 16.4 KB · 32 pages · mostly PDF"*. An empty list explains what to do
-  instead of showing nothing.
-- 🧹 **Dead code removed** — 13 unused imports, a duplicate method, a vestigial
-  cache constant, and the awkward `_office_cache` poke replaced by a real
-  `set_office_cache()` API.
-- 🧪 8 more GUI checks (summary line, page counts, menu structure, panel-slimming)
-  → **93 core + 70 GUI + 38 reader = 201 checks**.
+Every item below came out of an adversarial test pass (malformed input, boundary
+values, hostile page ranges, cross-channel consistency, memory accounting) plus an
+independent audit of the reader. Each fix has a regression test that failed before it.
 
+- 🧠 **The reader's memory ceiling is real now.** The 400 MB pixmap cache stopped
+  evicting the moment it met a 100%-zoom page — the exact entries a freshly opened
+  document is full of — so it grew without limit (measured **638 MB** against a 400 MB
+  cap). Eviction is now two-tier: disposable zoomed renders first, then off-screen
+  bases, never the page you are looking at. It also charged the device pixel ratio
+  twice, over-counting 4× on Retina and making the cap behave like 100 MB.
+- 🖱️ **Grid clicks hit the page you clicked.** Grid cells were hit-tested with
+  *label-local* mouse coordinates against a *container-space* grid, so **every**
+  thumbnail resolved to page 1 — "click page 5, press Delete" deleted page 1. The left
+  edge of any thumbnail produced the phantom index `-1`, which could duplicate the last
+  page during a drag-sort.
+- 🛡️ **Drag-sort no longer aborts the app.** Reordering rebuilt the document and left
+  the reader holding a closed handle; the next line raised inside a Qt slot, which
+  terminates the process and lost unsaved edits with no prompt.
+- ⚡ **Zoom and resize are ~10× faster on long documents.** Layout read
+  `doc[i].rect` for every page on every scroll-stop, zoom tick and resize — 7.5 ms of a
+  9.5 ms pass at 1000 pages, i.e. most of a 16.7 ms frame budget per pinch tick. Page
+  geometry is now cached: **9.5 ms → 0.94 ms** per layout, **11.9 ms → 1.55 ms** per
+  pinch tick. A 1000-page PDF still opens in **30 ms** using **10 MB**.
+- 🪶 **Edits stay lazy.** Deleting a page re-rendered the entire document at 100% on the
+  GUI thread (189 MB for 100 pages, ~1.9 GB at 1000). Only the visible rows are
+  materialised now — the windowed renderer finally holds for edits too.
+- ↩️ **Undo history actually works from the CLI.** The journal was keyed on
+  `(path, size, mtime)`, so a command's own output never matched its input and
+  `page-undo` always answered "nothing to undo". Commands now edit in place when `-o`
+  is omitted, and the journal identity is recorded so it survives the rewrite.
+  Journal snapshots are also byte-budgeted and stale ones are swept — it used to keep
+  50 full copies of the document in RAM *and* on disk forever.
+- 🔐 **Password-protected PDFs explain themselves.** Every operation used to leak a
+  library internal ("File has not been decrypted", "document closed or encrypted",
+  "PasswordError"). All 16 entry points now return one actionable message.
+- 🧩 **One page-range grammar for all three channels.** The MCP server had its own
+  splitter that rejected what the CLI accepted (`1–5`, `1，3`, `3-1`, `1..5`) and
+  crashed on others. GUI, CLI and MCP now share `core.utils.parse_page_ranges`, and
+  truncated specs like `1-` are refused instead of silently meaning `1`.
+- 📐 **Text→PDF wrapping measures instead of guessing.** A fixed 6.5 pt/char estimate
+  left Latin text 85 pt short of the margin and pushed CJK **54 pt past the page edge**.
+  Chunks are now measured with the real font.
+- 🧹 **CLI stops lying.** An unknown command silently opened the GUI with exit code 0
+  (a failed scripted call looked successful); it now prints a suggestion and exits 2.
+- 🎯 **Per-document state resets on open.** Search hits, highlights and edit mode used
+  to survive a file switch: a 100-page document's results stayed in the sidebar over a
+  3-page one, the page label could read "61 / 3", and old hit rectangles were baked into
+  the new document's pages.
+- 🖼️ **Fit-mode renders follow a resize.** The fit cache key ignored the viewport, so
+  after resizing, the label kept the pre-resize pixmap (424×600 inside a 809×1145 frame)
+  and never filled the window again.
+- 🧪 **A hostile-file pass.** 0-page, 0-byte, truncated, fake-header and
+  password-protected files are now opened and edited without a crash; a failed open
+  reports what went wrong instead of leaving a blank dead-end.
+- 🧰 Plus: reading position is saved on ⌘Q (not only on ✕), a force-terminated worker
+  releases the UI, the tooltip uses one timer instead of one per hover, JPG export
+  honours the filename you chose, and a stray `print()` that corrupted the MCP
+  JSON-RPC stream is gone.
+- 🧪 **New test gates**: `tests/qa_adversarial.py` (170 probes: robustness, accuracy,
+  cross-channel consistency, performance and temp-file hygiene) and
+  `tests/qa_reader_defects.py` (37 reader regressions, one per defect above).
+  Full set: **93 core + 70 GUI + 38 reader + 85 reader-comprehensive + 37 reader-defects
+  + 170 adversarial = 493 checks**.
 
 ---
 
@@ -291,6 +340,32 @@ pyinstaller PDFeverything.spec --noconfirm --clean
 # → dist/PDFeverything.app
 ```
 
+## 🧪 Testing
+
+Three gates run on every release, plus two adversarial suites added in v1.9.0:
+
+```bash
+.venv/bin/python tests/test_core.py                            # core / CLI / MCP / i18n   93
+QT_QPA_PLATFORM=offscreen .venv/bin/python tests/test_gui.py    # workers / batch / dialogs 70
+QT_QPA_PLATFORM=offscreen .venv/bin/python tests/qa_reader.py   # reader QA                 38
+QT_QPA_PLATFORM=offscreen .venv/bin/python tests/test_reader.py # reader comprehensive      85
+
+# adversarial suites — these attack the software, they do not just re-check it
+.venv/bin/python tests/qa_adversarial.py                        # robustness / accuracy   170
+QT_QPA_PLATFORM=offscreen .venv/bin/python tests/qa_reader_defects.py  # reader defects    37
+```
+
+`tests/qa_adversarial.py` covers malformed and hostile input (0-byte, truncated,
+fake-header, encrypted, 0-page PDFs), page-range boundary values, cross-channel
+consistency between GUI/CLI/MCP, pixel-level accuracy oracles, memory and
+file-descriptor ceilings, and temp-file hygiene. Every probe prints the concrete
+evidence when it fails.
+
+`tests/qa_reader_defects.py` holds one regression per reader defect fixed in v1.9.0;
+each of them failed before its fix.
+
+**Total: 493 checks.**
+
 ## 🧱 Tech Stack
 
 | Layer | Tech |
@@ -369,19 +444,54 @@ MIT — do whatever you want with it. [LICENSE](resources/LICENSE.txt)
 | 🔄 **旋转** | 旋转页面 90° / 180° / 270° |
 | ℹ️ **信息** | 查看页数、元数据、加密状态 |
 
-### 🆕 v1.8.0 新功能
+### 🆕 v1.9.0 新功能
 
-**界面打磨：能力不变，噪音减半。**
+**以 QA 为主导的加固迭代：修复 19 个缺陷，热点路径提速近 10 倍。**
 
-- 🧹 **右侧面板瘦身一半** — 7 个格式转换按钮收进新的「转换」菜单：每个功能仍然
-  一键可达，但面板只保留文件列表真正需要的操作（合并/拆分/压缩/水印/加密/解密/旋转/信息）。
-  面板按钮数 48 → 41。
-- 📊 **文件列表一眼看清内容** — 每行显示名称、大小**和页数**（`report.pdf (2.4 MB, 18p)`），
-  下方汇总行显示"共 2 个文件 · 16.4 KB · 32 页 · 主要是 PDF"；空列表会提示怎么开始。
-- 🧹 **清理死代码** — 移除 13 处未使用导入、重复方法、无用缓存常量，
-  并把别扭的 `_office_cache` 直接赋值改成正式的 `set_office_cache()` 接口。
-- 🧪 新增 8 项 GUI 测试（汇总行、页数、菜单结构、面板瘦身）→
-  **93 核心 + 70 GUI + 38 阅读器 = 201 项全部通过**。
+下面每一条都来自对抗性测试（畸形输入、边界值、恶意页码范围、三通道一致性、
+内存计量）以及一次独立的阅读器审计。每个修复都配有"修复前必然失败"的回归测试。
+
+- 🧠 **阅读器的内存上限真正生效了** — 原先淘汰循环一遇到 100% 缩放的页面就 `break`，
+  而刚打开的文档里全是这种页面，于是缓存无上限增长（实测 **638 MB** 对 400 MB 上限）。
+  现在分两级淘汰：先丢可再生的缩放/缩略图渲染，再丢屏幕外的 base，绝不丢你正在看的那一页。
+  同时修正了重复计算 devicePixelRatio 的问题（Retina 上 4 倍高估，使 400 MB 实际只有 100 MB）。
+- 🖱️ **网格视图点哪页选哪页** — 网格单元用**标签局部坐标**去做**容器坐标**的命中测试，
+  导致每个缩略图都解析成第 1 页：点第 5 页再按删除，删掉的是第 1 页。缩略图左边缘还会产生
+  幽灵索引 `-1`，拖拽排序时可能复制最后一页。
+- 🛡️ **拖拽排序不再让程序崩溃** — 重排会重建文档，阅读器却仍持有已关闭的句柄，
+  下一行在 Qt 槽函数里抛异常 → 进程直接 abort，未保存的修改无提示丢失。
+- ⚡ **长文档缩放/缩放窗口快约 10 倍** — 布局在每次滚动停止、缩放、改变窗口时都要为
+  每一页读 `doc[i].rect`（1000 页时占 9.5ms 中的 7.5ms，等于一次捏合缩放吃掉大半个帧预算）。
+  页码几何现已缓存：**布局 9.5ms → 0.94ms**，**捏合一次 11.9ms → 1.55ms**。
+  1000 页 PDF 打开仍是 **30ms**、占用 **10MB**。
+- 🪶 **编辑后依然惰性渲染** — 删除一页曾在 GUI 线程上把整本文档按 100% 全部重渲
+  （100 页 189MB，1000 页约 1.9GB）。现在只渲染可见行。
+- ↩️ **CLI 的撤销历史真的能用了** — 日志键基于 `(路径, 大小, mtime)`，
+  导致命令自己的输出永远匹配不上输入，`page-undo` 总是回答"没有可撤销的操作"。
+  现在省略 `-o` 即就地修改，且日志身份被持久记录，改写后依然能找回历史。
+  日志快照同时按字节预算裁剪，陈旧日志会被清理（原先会在内存和磁盘各留 50 份完整副本）。
+- 🔐 **加密 PDF 给出可操作的提示** — 原先 16 个入口各自泄漏底层库的内部错误
+  （"File has not been decrypted"、"document closed or encrypted"、"PasswordError"）。
+- 🧩 **三通道统一页码语法** — MCP 曾有一套自己的解析器，CLI 能识别的 `1–5`、`1，3`、
+  `3-1`、`1..5` 它会报错，另一些则直接崩溃。现在 GUI/CLI/MCP 共用
+  `core.utils.parse_page_ranges`，且 `1-` 这类残缺写法会被明确拒绝而不是悄悄当成 `1`。
+- 📐 **文本转 PDF 按实际宽度折行** — 原先按 6.5pt/字符估算：拉丁文比右边距短 85pt，
+  中文则**超出页面 54pt**。现在用真实字体测量。
+- 🧹 **CLI 不再"假装成功"** — 未知命令原先会静默打开 GUI 并返回 0（脚本调用失败看起来像成功），
+  现在会给出相近命令建议并以退出码 2 结束。
+- 🎯 **切换文件时重置每文档状态** — 搜索结果、高亮、编辑模式原先会跨文件残留：
+  100 页文档的结果留在 3 页文档的侧栏里，页码可能显示 "61 / 3"，
+  旧文档的命中矩形还会被画进新文档的位图。
+- 🖼️ **适应窗口模式跟随窗口尺寸** — fit 缓存键没有包含视口尺寸，改变窗口后
+  标签仍拿着改变前的位图（424×600 塞在 809×1145 的框里），永远不会铺满。
+- 🧪 **恶意文件专项测试** — 0 页、0 字节、截断、伪造文件头、加密 PDF 现在都能
+  正常打开/编辑而不崩溃；打开失败会说明原因而不是留下一片空白。
+- 🧰 其他：⌘Q 退出也会记住阅读位置（原先只有点 ✕ 才记）、强制终止的 worker 会释放界面、
+  工具提示改为单个复用定时器、JPG 导出遵循你选的文件名、
+  以及一处会污染 MCP JSON-RPC 流的 `print()` 已移除。
+- 🧪 **新增测试门禁**：`tests/qa_adversarial.py`（170 项：鲁棒性/准确性/三通道一致性/
+  性能/临时文件卫生）与 `tests/qa_reader_defects.py`（37 项阅读器回归，每个缺陷一项）。
+  全套件：**93 核心 + 70 GUI + 38 阅读器 + 85 阅读器综合 + 37 阅读器缺陷 + 170 对抗 = 493 项**。
 
 ### 🖥️ 界面预览
 
@@ -534,6 +644,30 @@ pyinstaller PDFeverything.spec --noconfirm --clean
 # → dist/PDFeverything.app
 ```
 
+### 🧪 测试
+
+发布前跑三个门禁套件，v1.9.0 起再加两个对抗性套件：
+
+```bash
+.venv/bin/python tests/test_core.py                            # 核心 / CLI / MCP / i18n   93
+QT_QPA_PLATFORM=offscreen .venv/bin/python tests/test_gui.py    # Worker / 批量 / 对话框   70
+QT_QPA_PLATFORM=offscreen .venv/bin/python tests/qa_reader.py   # 阅读器 QA                38
+QT_QPA_PLATFORM=offscreen .venv/bin/python tests/test_reader.py # 阅读器综合测试            85
+
+# 对抗性套件 —— 它们主动攻击软件，而不只是复检既有行为
+.venv/bin/python tests/qa_adversarial.py                        # 鲁棒性 / 准确性         170
+QT_QPA_PLATFORM=offscreen .venv/bin/python tests/qa_reader_defects.py  # 阅读器缺陷回归    37
+```
+
+`tests/qa_adversarial.py` 覆盖畸形与恶意输入（0 字节、截断、伪造文件头、加密、0 页 PDF）、
+页码范围边界值、GUI/CLI/MCP 三通道一致性、像素级准确性判据、
+内存与文件描述符上限、临时文件卫生。每一条失败时都会打印具体证据。
+
+`tests/qa_reader_defects.py` 中每个 v1.9.0 修复的阅读器缺陷都对应一项回归，
+它们在修复前必然失败。
+
+**合计 493 项。**
+
 ### 🧱 技术栈
 
 | 层 | 技术 |
@@ -541,7 +675,7 @@ pyinstaller PDFeverything.spec --noconfirm --clean
 | 🖼️ 界面 | **PyQt6** — macOS / Windows 原生体验 |
 | 🧠 PDF 引擎 | **PyMuPDF** + **pypdf** + **pikepdf** |
 | 📝 Office 转换 | **AppleScript** (macOS) / **COM** (Windows) / **python-docx** + **python-pptx** + **openpyxl** (备选) |
-| 🔌 AI 集成 | **MCP (Model Context Protocol)** — 23 个工具自动发现 |
+| 🔌 AI 集成 | **MCP (Model Context Protocol)** — 29 个工具自动发现 |
 | 📦 打包 | **PyInstaller** (Windows onefile / macOS app bundle) |
 
 ### 📄 许可证

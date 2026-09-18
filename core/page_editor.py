@@ -6,6 +6,15 @@ from typing import Callable
 import io, time, fitz, pypdf
 
 MAX_UNDO_DEPTH = 50
+# Every journal state is a full copy of the document, so the depth cap alone does
+# not bound anything: 50 snapshots of a 20MB document is 1GB of RAM, and the same
+# again written to disk on every save. Budget by bytes as well and always keep at
+# least this many states so undo still has something to work with.
+JOURNAL_MAX_BYTES = 96 * 1024 * 1024
+JOURNAL_MIN_STATES = 3
+# Journals live in the temp directory and are never touched again once their
+# document is gone, so reclaim them by age.
+JOURNAL_MAX_AGE_SECONDS = 7 * 24 * 3600
 
 
 class PdfPageEditor:
@@ -21,6 +30,8 @@ class PdfPageEditor:
             self._path = doc_or_path
             self._doc = fitz.open(doc_or_path)
             self._own_doc = True
+        self._journal_key_path = None   # pinned once a journal is adopted
+        self._journal_dir = None        # resolved once, then kept stable
         self._undo_stack: list[tuple[str, bytes]] = []
         self._redo_stack: list[tuple[str, bytes]] = []
         self._journal_states: list[tuple[str, float, bytes]] = []
@@ -77,23 +88,64 @@ class PdfPageEditor:
     # ── On-disk journal (makes CLI page-undo/redo meaningful) ──
 
     def journal_dir(self) -> Path:
-        """Directory holding this document's on-disk undo journal."""
-        import hashlib
+        """Directory holding this document's on-disk history journal.
+
+        The key identifies the *document*, not a byte-exact revision of it. Two
+        earlier schemes failed here: hashing (path, size, mtime_ns) meant a
+        command's own output no longer matched its input, and hashing the inode
+        broke the moment an in-place save replaced the file. Both left the next
+        invocation with no history, so cross-session `page-undo` always reported
+        "nothing to undo". The key is now recorded once in a sidecar and reused.
+        """
         import tempfile
 
         base = Path(tempfile.gettempdir()) / "pdfeverything_journal"
-        if self._path is None:
-            return base / "anonymous"
+        if self._journal_dir is not None:
+            return self._journal_dir
+        key_path = self._journal_key_path or self._path
+        if key_path is None:
+            self._journal_dir = base / "anonymous"
+            return self._journal_dir
+        resolved = Path(key_path).resolve()
+        self._journal_dir = base / self._journal_identity(base, resolved)
+        return self._journal_dir
+
+    @staticmethod
+    def _journal_identity(base: Path, resolved: Path) -> str:
+        """Stable journal key for a document path.
+
+        File metadata cannot provide this on its own: saving in place replaces
+        the file, which changes both its inode and its mtime, so the journal that
+        was just written would be orphaned the moment the edit landed. The
+        identity is therefore recorded once in a tiny sidecar keyed by the
+        resolved path, and every later invocation reuses it. When the sidecar is
+        missing (fresh temp dir, or a first-ever edit) it is rebuilt from the
+        current inode."""
+        import hashlib
+
+        ident_dir = base / "identity"
+        digest = hashlib.sha1(str(resolved).encode("utf-8")).hexdigest()[:16]
+        sidecar = ident_dir / f"{digest}.id"
         try:
-            st = Path(self._path).stat()
-            # Nanosecond mtime: with 1-second resolution two edits made in the
-            # same second produced the same key and clobbered each other's journal.
-            fingerprint = (f"{Path(self._path).resolve()}:{st.st_size}:"
-                           f"{st.st_mtime_ns}")
+            existing = sidecar.read_text(encoding="utf-8").strip()
+            if existing:
+                return existing
         except OSError:
-            fingerprint = str(self._path)
-        key = hashlib.sha1(fingerprint.encode("utf-8")).hexdigest()[:16]
-        return base / key
+            pass
+
+        try:
+            st = resolved.stat()
+            identity = (f"{resolved}:{st.st_ino}" if st.st_ino
+                        else f"{resolved}:{st.st_size}:{st.st_mtime_ns}")
+        except OSError:
+            identity = str(resolved)
+        key = hashlib.sha1(identity.encode("utf-8")).hexdigest()[:16]
+        try:
+            ident_dir.mkdir(parents=True, exist_ok=True)
+            sidecar.write_text(key, encoding="utf-8")
+        except OSError:
+            pass
+        return key
 
     # ── Journal state (linear history with a cursor) ──
     #
@@ -108,25 +160,6 @@ class PdfPageEditor:
     # Undo moves the cursor back, redo moves it forward, and a new operation
     # truncates everything after the cursor.
 
-    def journal_dir(self) -> Path:
-        """Directory holding this document's on-disk history journal."""
-        import hashlib
-        import tempfile
-
-        base = Path(tempfile.gettempdir()) / "pdfeverything_journal"
-        if self._path is None:
-            return base / "anonymous"
-        try:
-            st = Path(self._path).stat()
-            # Nanosecond mtime: 1-second resolution made two edits made in the
-            # same second share a key and clobber each other's journal.
-            fingerprint = (f"{Path(self._path).resolve()}:{st.st_size}:"
-                           f"{st.st_mtime_ns}")
-        except OSError:
-            fingerprint = str(self._path)
-        key = hashlib.sha1(fingerprint.encode("utf-8")).hexdigest()[:16]
-        return base / key
-
     @property
     def history(self) -> list:
         """[{"desc": str, "time": float}] for every recorded state."""
@@ -137,9 +170,17 @@ class PdfPageEditor:
         return self._journal_cursor
 
     def load_journal(self) -> None:
-        """Restore the persisted linear history (best effort)."""
+        """Restore the persisted linear history (best effort).
+
+        Also pins the journal key: once a session has adopted a history, every
+        later :meth:`save_journal` writes back to that same journal even if the
+        output went to a different path. Without the pin, saving to `-o out.pdf`
+        would move `self._path` and the next write would land in a different
+        journal, breaking the undo chain halfway through."""
         import json
 
+        if self._journal_key_path is None:
+            self._journal_key_path = self._path   # pin BEFORE computing the key
         d = self.journal_dir()
         meta_file = d / "history.json"
         if not meta_file.exists():
@@ -177,13 +218,90 @@ class PdfPageEditor:
                 (d / name).write_bytes(raw)
                 meta["states"].append({"desc": desc, "time": ts, "blob": name})
             (d / "history.json").write_text(json.dumps(meta), encoding="utf-8")
+            db = (d / "history.json").stat().st_size
+            for f in d.glob("state_*.pdf"):
+                db += f.stat().st_size
+            # Journal files are not tracked by anything: touch the directory so a
+            # stale sweep can tell a live document from an abandoned one.
+            if db > JOURNAL_MAX_BYTES:
+                self._journal_trim(d)
         except OSError:
             pass
+
+    def _journal_trim(self, d: Path) -> None:
+        """Shrink an over-budget journal on disk, newest states first."""
+        keep: list = []
+        total = 0
+        for name in sorted((f"state_{i:04d}.pdf" for i in range(len(self._journal_states))),
+                           reverse=True):
+            p = d / name
+            try:
+                size = p.stat().st_size
+            except OSError:
+                continue
+            if len(keep) < JOURNAL_MIN_STATES or total + size <= JOURNAL_MAX_BYTES:
+                keep.append(name)
+                total += size
+            else:
+                p.unlink(missing_ok=True)
+        keep_set = set(keep)
+        for p in d.glob("state_*.pdf"):
+            if p.name not in keep_set:
+                p.unlink(missing_ok=True)
+
+    def _journal_trim_memory(self) -> None:
+        """Bound the in-RAM snapshot list.
+
+        The depth cap bounds the *count*; this bounds the *bytes*. Oldest states
+        are dropped until the total fits, but never below JOURNAL_MIN_STATES so
+        undo keeps working on a huge document."""
+        if len(self._journal_states) <= JOURNAL_MIN_STATES:
+            return
+        total = sum(len(raw) for _, _, raw in self._journal_states)
+        while (total > JOURNAL_MAX_BYTES
+               and len(self._journal_states) > JOURNAL_MIN_STATES):
+            _, _, raw = self._journal_states.pop(0)
+            total -= len(raw)
+            self._journal_cursor = max(0, self._journal_cursor - 1)
 
     def clear_journal(self) -> None:
         import shutil
 
         shutil.rmtree(self.journal_dir(), ignore_errors=True)
+
+    @staticmethod
+    def sweep_stale_journals(max_age_seconds: int = JOURNAL_MAX_AGE_SECONDS) -> int:
+        """Delete journal directories nobody has touched in `max_age_seconds`.
+
+        Journals are keyed per document and are never revisited once the document
+        is gone, so without this they accumulate forever (one directory plus up
+        to 50 full document copies each). Returns the number of directories
+        removed."""
+        import shutil
+        import tempfile
+        import time as _time
+
+        base = Path(tempfile.gettempdir()) / "pdfeverything_journal"
+        if not base.is_dir():
+            return 0
+        cutoff = _time.time() - max_age_seconds
+        removed = 0
+        try:
+            entries = list(base.iterdir())
+        except OSError:
+            return 0
+        for entry in entries:
+            try:
+                if not entry.is_dir():
+                    continue
+                newest = max((f.stat().st_mtime for f in entry.rglob("*")),
+                             default=entry.stat().st_mtime)
+                if newest < cutoff:
+                    shutil.rmtree(entry, ignore_errors=True)
+                    removed += 1
+            except OSError:
+                continue
+        return removed
 
     def _journal_init(self) -> None:
         """Seed state 0 with the document as it is *before* any mutation, so the
@@ -212,6 +330,7 @@ class PdfPageEditor:
         if len(self._journal_states) > MAX_UNDO_DEPTH:
             self._journal_states.pop(0)
             self._journal_cursor = max(0, self._journal_cursor - 1)
+        self._journal_trim_memory()
 
     # ── Operations ───────────────────────
 
@@ -221,6 +340,9 @@ class PdfPageEditor:
         self._undo_stack.append((desc, snap))
         self._redo_stack.clear()
         if len(self._undo_stack) > MAX_UNDO_DEPTH:
+            self._undo_stack.pop(0)
+        while (len(self._undo_stack) > JOURNAL_MIN_STATES
+               and sum(len(s) for _, s in self._undo_stack) > JOURNAL_MAX_BYTES):
             self._undo_stack.pop(0)
         self._emit("changed")
 
@@ -246,6 +368,12 @@ class PdfPageEditor:
         self._emit("changed")
 
     def move_pages(self, source_ordinals: list[int], target: int):
+        # Filter first: a stray negative ordinal used to reach reader.pages[-1],
+        # which silently duplicated the LAST page instead of moving the intended
+        # one (6 pages became 7) while the caller still counted 6.
+        total_now = len(self._doc)
+        source_ordinals = sorted({o for o in (source_ordinals or [])
+                                  if 0 <= o < total_now})
         if not source_ordinals: return
         self._journal_init()
         self._push_undo(f"移动 {len(source_ordinals)} 页")
@@ -325,10 +453,43 @@ class PdfPageEditor:
 
     # ── Save / Close ─────────────────────
     def save(self, output_path: Path):
-        # garbage/clean force MuPDF to rebuild the page tree: without them a
-        # document that had pages deleted still serialises the stale page objects
-        # and the output keeps the original page count.
-        self._doc.save(str(output_path), garbage=4, deflate=True, clean=True)
+        """Write the document out.
+
+        Saving over the file the editor was opened from needs care: MuPDF cannot
+        write to a file it still has open for reading, so the content goes to a
+        temporary file first and then replaces the original. That path is what
+        makes `page-undo` usable from the CLI — editing in place keeps the same
+        document (and therefore the same journal), while writing to a new output
+        file starts a new document with no history."""
+        from .utils import ensure_output_dir
+
+        output_path = Path(output_path)
+        ensure_output_dir(output_path.parent)
+        target = output_path.resolve()
+        same_file = False
+        if self._path is not None:
+            try:
+                same_file = target == Path(self._path).resolve()
+            except OSError:
+                same_file = False
+
+        if not same_file:
+            self._doc.save(str(output_path), garbage=4, deflate=True, clean=True)
+            self._emit("saved")
+            return
+
+        import os
+        import tempfile
+
+        fd, tmp_name = tempfile.mkstemp(suffix=".pdf", dir=str(output_path.parent))
+        os.close(fd)
+        tmp = Path(tmp_name)
+        try:
+            self._doc.save(str(tmp), garbage=4, deflate=True, clean=True)
+            os.replace(tmp, output_path)     # atomic: never a half-written PDF
+        except Exception:
+            tmp.unlink(missing_ok=True)
+            raise
         self._emit("saved")
 
     def close(self):

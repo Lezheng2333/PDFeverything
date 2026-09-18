@@ -38,13 +38,14 @@
 
 ## 当前开发状态
 
-### 最新版本：v1.8.0
+### 最新版本：v1.9.0
 - 📖 **PDF 阅读器**：两模式（Scroll 连续滚动 / Grid 3 列缩略图）+ 可折叠侧栏（目录 / 搜索结果）
   - **窗口化渲染**：只渲染可见页 ±3 的环形窗口，1000 页文档与 3 页文档打开成本相同
   - **矢量级画质**：精确分辨率渲染（无 SSAA/无 downscale），MuPDF 原生子像素 AA
   - **HiDPI 原生**：`devicePixelRatio` 驱动渲染矩阵 + `setDevicePixelRatio` 1:1 像素映射
   - 两阶段缩放：Pass 1 瞬时像素拉伸 (<5ms) + Pass 2 精确分辨率渲染 (40ms)
-  - LRU OrderedDict 缓存，400MB 内存上限（dpr² 校正），base/fit 模式驻留保护
+  - LRU OrderedDict 缓存，内存上限按机器自适应（物理内存 1/4，钳制 128–400MB），
+    两级淘汰 + 当前渲染窗口驻留保护（v1.9.0 修正了原先上限失效与 4 倍高估的问题）
   - 🔍 全文搜索：命中高亮绘制进位图、侧栏结果列表、⌘F 查找栏（大小写/整词/上下文）
   - 📑 目录侧栏 + 🔁 阅读位置记忆（按文件记录页码与缩放）
   - ⌨️ 快捷键：⌘F 查找 / ⌘B 侧栏 / ⌘+ ⌘− 缩放 / ⌘0 ⌘1 适应 / ⌘G 上下一个 / ←→ 翻页
@@ -62,7 +63,8 @@
 ✅ Immortal 100% base ✅ 矢量级画质(精确解析度+MuPDF原生AA)
 ✅ v1.5.0 正确性大修(窗口化渲染/协作取消/CJK/加密/压缩档位) ✅ 回归测试套件
 ✅ v1.6.0 阅读器搜索+目录侧栏+阅读位置记忆 ✅ v1.7.0 页码/元数据/N-up/插入页面
-✅ v1.8.0 界面清爽化(转换菜单/文件列表汇总) => 持续优化
+✅ v1.8.0 界面清爽化(转换菜单/文件列表汇总)
+✅ v1.9.0 QA 加固(19 缺陷修复 + 缓存上限/布局/惰性渲染提速) => 持续优化
 ```
 
 ### 测试
@@ -70,8 +72,17 @@
 .venv/bin/python tests/test_core.py    # 核心 / CLI / MCP / i18n   93 项
 .venv/bin/python tests/test_gui.py     # Worker / 批量 / 对话框 / 阅读器  70 项
 QT_QPA_PLATFORM=offscreen .venv/bin/python tests/qa_reader.py   # 阅读器 QA  38 项
+QT_QPA_PLATFORM=offscreen .venv/bin/python tests/test_reader.py # 阅读器综合  85 项
+
+# 对抗性套件（v1.9.0 新增）—— 主动攻击软件，而非复检既有行为
+.venv/bin/python tests/qa_adversarial.py                        # 鲁棒性/准确性 170 项
+QT_QPA_PLATFORM=offscreen .venv/bin/python tests/qa_reader_defects.py  # 阅读器缺陷 37 项
 ```
-发布前必须三套全绿（当前 201 项）。
+发布前三套门禁必须全绿；改动阅读器或 core 后必须连同对抗性套件一起跑。
+当前全套 493 项。
+
+注：tests/qa_adversarial.py 里的每条探针失败时会打印具体证据，可直接据此定位；
+tests/qa_reader_defects.py 中每项都对应 v1.9.0 的一个已修缺陷，修复前必然失败。
 
 ### 已知脆弱点补充（v1.5.0+）
 - **reader 窗口化渲染**：只渲染可见页 ±3，新增页面渲染入口必须走 `_schedule_render_visible`，
@@ -85,8 +96,27 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python tests/qa_reader.py   # 阅读器 QA  
 - **MCP stdout**：任何 `print()` 都会污染 JSON-RPC 流，已全局屏蔽 PyMuPDF 提示，
   新增第三方库调用需注意
 
+### 已知脆弱点补充（v1.9.0+）
+- **reader 缓存淘汰**：`_cache_put` 是两级淘汰（先非 base，再屏幕外 base），
+  `_protected_pages` 必须由 `_queue_lazy_pre_render` 更新，否则当前页 base 会被淘汰，
+  Pass 1 缩放失去源位图而退化为重新渲染
+- **reader 网格命中测试**：网格标签的事件坐标是**标签局部**坐标，
+  绝不能把 `e.position()` 传给按容器坐标实现的 `_grid_page_at_pos`；
+  页面索引必须由布局循环传入（`_make_grid_press(orig, pi)`）
+- **reader 文档句柄**：`PdfPageEditor.move_pages` / `undo` / `redo` 会关闭并重建
+  `fitz.Document`，阅读器必须重新读取 `self._page_editor.doc`；
+  任何在 Qt 槽函数里逃逸的异常都会让 PyQt6 直接 abort 进程
+- **page_editor 日志身份**：`journal_dir()` 一旦解析就固定（`_journal_dir`），
+  身份来自 identity sidecar（路径哈希 → key），不能用 mtime/大小/inode 现算——
+  就地保存会换 inode，现算会立刻丢失刚写入的历史
+- **page_editor 保存顺序**：CLI 必须先 `save_journal()` 再 `save(output)`，
+  否则输出路径会改变日志键，历史写进另一本日志
+- **`_pixmap_bytes`**：Qt6 的 `QPixmap.width()` 已是设备像素，绝不能再乘 dpr²
+- **加密 PDF**：新增操作入口必须调用 `_reject_if_encrypted()`，否则会泄漏
+  pypdf/MuPDF/pikepdf 的内部错误文本
+
 ### 已知脆弱点（修改前必须理解上下文）
-- **Reader 缓存键**：`z:1.000` 是 immortal base 键，`_cache_put` 中必须跳过淘汰；修改 `_zoom_key` 格式会影响所有缓存命中
+- **Reader 缓存键**：`z:1.000` 是 100% base 键，`_cache_put` 的两级淘汰必须**最后**才丢它（v1.9.0 起不再是「永不淘汰」——那会导致缓存无上限增长）；修改 `_zoom_key` 格式会影响所有缓存命中
 - **Reader 缩放流水线**：Pass 1 必须从 100% base 出发（`base_key = (pi, "z:1.000")`），不能从 label.pixmap 出发；Pass 2 `_sharp_render` 依赖 `_pending_zoom_pct is not None` 守卫
 - **_layout_labels render_missing**：缩放路径必须传 `render_missing=False`，只有 `open_pdf` 传 True；传错会导致 Pass 1 缩放结果被 100% 覆盖
 - **_scroll_to_page_top()**：`_set_zoom_pct`、`_apply_fit_mode` 末尾必须调用，否则缩放后滚动位置丢失
