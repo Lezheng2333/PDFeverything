@@ -146,6 +146,60 @@ def main():
     p_te.add_argument("-i", "--input", required=True, help="输入 PDF 文件")
     p_te.add_argument("-o", "--output", required=True, help="输出 .xlsx 文件")
 
+    # --- page-numbers / metadata / nup / insert ---
+    p_pn = sub.add_parser("add-page-numbers", help="添加页码/页眉页脚")
+    p_pn.add_argument("-i", "--input", required=True)
+    p_pn.add_argument("-o", "--output", required=True)
+    p_pn.add_argument("--position", default="bottom-center",
+                      choices=["bottom-center", "bottom-left", "bottom-right",
+                               "top-center", "top-left", "top-right"])
+    p_pn.add_argument("--template", default="{n}",
+                      help="支持 {n} 当前序号 / {total} 总页数 / {page} 原始页码")
+    p_pn.add_argument("--start", type=int, default=1, help="起始编号 (默认 1)")
+    p_pn.add_argument("--font-size", type=int, default=10)
+    p_pn.add_argument("--margin", type=float, default=28.0)
+    p_pn.add_argument("--pages", help="限定页面: all / 1-5 / 1,3,5")
+    p_pn.add_argument("--json", action="store_true")
+
+    p_md = sub.add_parser("set-metadata", help="修改 PDF 元数据（标题/作者等）")
+    p_md.add_argument("-i", "--input", required=True)
+    p_md.add_argument("-o", "--output", required=True)
+    p_md.add_argument("--title")
+    p_md.add_argument("--author")
+    p_md.add_argument("--subject")
+    p_md.add_argument("--keywords")
+    p_md.add_argument("--creator")
+    p_md.add_argument("--producer")
+    p_md.add_argument("--json", action="store_true")
+
+    p_nup = sub.add_parser("nup", help="N 页拼版到一张纸（省纸打印）")
+    p_nup.add_argument("-i", "--input", required=True)
+    p_nup.add_argument("-o", "--output", required=True)
+    p_nup.add_argument("--per-sheet", type=int, default=2,
+                       choices=[2, 4, 6, 8, 9, 16], help="每张纸页数 (默认 2)")
+    p_nup.add_argument("--paper", default="a4", choices=["a4", "a3", "letter"])
+    p_nup.add_argument("--json", action="store_true")
+
+    p_ins = sub.add_parser("insert-pages", help="把另一个 PDF 插入到指定位置")
+    p_ins.add_argument("-i", "--input", required=True, help="目标 PDF")
+    p_ins.add_argument("-s", "--source", required=True, help="要插入的 PDF")
+    p_ins.add_argument("-o", "--output", required=True)
+    p_ins.add_argument("--at", type=int, default=-1,
+                       help="插入位置（1-based，默认追加到末尾）")
+    p_ins.add_argument("--json", action="store_true")
+
+    p_ex = sub.add_parser("extract-pages-fitz", help="抽取页面为新 PDF（PyMuPDF 实现）")
+    p_ex.add_argument("-i", "--input", required=True)
+    p_ex.add_argument("-o", "--output", required=True)
+    p_ex.add_argument("--pages", required=True)
+    p_ex.add_argument("--json", action="store_true")
+
+    p_dl = sub.add_parser("delete-pages-fitz", help="删除页面（PyMuPDF 实现）")
+    p_dl.add_argument("-i", "--input", required=True)
+    p_dl.add_argument("-o", "--output", required=True)
+    p_dl.add_argument("--pages", required=True)
+    p_dl.add_argument("--json", action="store_true")
+
     # --- page editing ---
     p_del = sub.add_parser("delete-pages", help="删除指定页面")
     p_del.add_argument("-i", "--input", required=True)
@@ -201,6 +255,17 @@ def main():
         if not 36 <= value <= 1200:
             sys.exit(f"❌ 错误: DPI 必须在 36-1200 之间，收到 {value}")
         return value
+
+    def _emit(args, op: str, message: str, data=None):
+        """统一的人类可读 / JSON 输出。"""
+        if getattr(args, "json", False):
+            import json as _json
+            payload = {"success": True, "operation": op, "message": message}
+            if data:
+                payload["data"] = data
+            print(_json.dumps(payload, ensure_ascii=False))
+        else:
+            print(f"✅ {message}")
 
     # 命令分发 — 全部委托给 PdfOperator
     try:
@@ -274,6 +339,50 @@ def main():
                         indent = "  " * flat.level
                         page = f"  p.{flat.page + 1}" if flat.page >= 0 else ""
                         print(f"{indent}- {flat.title}{page}")
+
+        elif args.command == "add-page-numbers":
+            pages = (parse_page_ranges(args.pages, one_based=True)
+                     if args.pages else None)
+            count = PdfOperator.add_page_numbers(
+                Path(args.input), Path(args.output), position=args.position,
+                start_number=args.start, font_size=args.font_size,
+                template=args.template, margin=args.margin, pages=pages)
+            msg = f"已为 {count} 页添加页码 ({args.position})"
+            _emit(args, "add-page-numbers", msg, {"pages": count})
+
+        elif args.command == "set-metadata":
+            fields = {k: v for k, v in (
+                ("title", args.title), ("author", args.author),
+                ("subject", args.subject), ("keywords", args.keywords),
+                ("creator", args.creator), ("producer", args.producer)) if v is not None}
+            result = PdfOperator.set_metadata(Path(args.input), Path(args.output), fields)
+            _emit(args, "set-metadata",
+                  "已更新元数据: " + ", ".join(f"{k}={v}" for k, v in fields.items()),
+                  {"metadata": result})
+
+        elif args.command == "nup":
+            sheets = PdfOperator.nup(Path(args.input), Path(args.output),
+                                     per_sheet=args.per_sheet, paper=args.paper)
+            _emit(args, "nup",
+                  f"已拼版为 {sheets} 张（每张 {args.per_sheet} 页, {args.paper.upper()}）",
+                  {"sheets": sheets})
+
+        elif args.command == "insert-pages":
+            inserted = PdfOperator.insert_pages(
+                Path(args.input), Path(args.source), Path(args.output),
+                at=None if args.at < 0 else args.at - 1)
+            _emit(args, "insert-pages", f"已插入 {inserted} 页", {"inserted": inserted})
+
+        elif args.command == "extract-pages-fitz":
+            pages = parse_page_ranges(args.pages, one_based=True)
+            count = PdfOperator.extract_pages(Path(args.input), Path(args.output), pages)
+            _emit(args, "extract-pages-fitz", f"已提取 {count} 页", {"extracted": count})
+
+        elif args.command == "delete-pages-fitz":
+            pages = parse_page_ranges(args.pages, one_based=True)
+            left = PdfOperator.delete_pages(Path(args.input), Path(args.output), pages)
+            _emit(args, "delete-pages-fitz", f"已删除 {len(pages)} 页，剩余 {left} 页",
+                  {"remaining": left})
 
         elif args.command == "info":
             info = PdfOperator.get_info(Path(args.input))

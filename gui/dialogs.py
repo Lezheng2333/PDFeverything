@@ -436,3 +436,179 @@ class InfoDialog(QDialog):
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         self.buttons.rejected.connect(self.reject)
         layout.addWidget(self.buttons)
+
+
+# ── Page numbers / stamps ────────────────────────────────
+
+class PageNumberDialog(QDialog):
+    """页码 / 页眉页脚盖章设置。"""
+
+    POSITIONS = [
+        ("bottom-center", "pos_bottom_center"),
+        ("bottom-left", "pos_bottom_left"),
+        ("bottom-right", "pos_bottom_right"),
+        ("top-center", "pos_top_center"),
+        ("top-left", "pos_top_left"),
+        ("top-right", "pos_top_right"),
+    ]
+    TEMPLATES = [
+        ("{n}", "tpl_plain"),
+        ("{n} / {total}", "tpl_slash"),
+        ("- {n} -", "tpl_dashes"),
+        ("Page {n} of {total}", "tpl_page_of"),
+        ("第 {n} 页 / 共 {total} 页", "tpl_cn"),
+    ]
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(tr("dlg_pagenum_title"))
+        self.setMinimumWidth(420)
+        self._init_ui()
+
+    def _init_ui(self):
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+
+        self.position_combo = QComboBox()
+        for value, key in self.POSITIONS:
+            self.position_combo.addItem(tr(key), value)
+        form.addRow(tr("pn_position"), self.position_combo)
+
+        self.template_combo = QComboBox()
+        self.template_combo.setEditable(True)
+        for value, key in self.TEMPLATES:
+            self.template_combo.addItem(tr(key), value)
+        self.template_combo.setCurrentIndex(1)
+        form.addRow(tr("pn_template"), self.template_combo)
+
+        self.start_spin = QSpinBox()
+        self.start_spin.setRange(1, 99999)
+        self.start_spin.setValue(1)
+        form.addRow(tr("pn_start"), self.start_spin)
+
+        self.size_spin = QSpinBox()
+        self.size_spin.setRange(6, 48)
+        self.size_spin.setValue(10)
+        form.addRow(tr("pn_font_size"), self.size_spin)
+
+        self.all_pages_check = QCheckBox(tr("rot_all_pages"))
+        self.all_pages_check.setChecked(True)
+        self.all_pages_check.toggled.connect(lambda v: self.pages_edit.setEnabled(not v))
+        form.addRow("", self.all_pages_check)
+
+        self.pages_edit = QLineEdit()
+        self.pages_edit.setPlaceholderText(tr("rot_range_placeholder"))
+        self.pages_edit.setEnabled(False)
+        form.addRow(tr("rot_page_range"), self.pages_edit)
+
+        layout.addLayout(form)
+        preview = QLabel("")
+        preview.setStyleSheet("color:#888;font-size:11px;")
+        layout.addWidget(preview)
+        self._preview_label = preview
+
+        self.buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        self.buttons.accepted.connect(self._validate)
+        self.buttons.rejected.connect(self.reject)
+        layout.addWidget(self.buttons)
+
+        self.template_combo.editTextChanged.connect(self._update_preview)
+        self.start_spin.valueChanged.connect(self._update_preview)
+        self._update_preview()
+
+    def _update_preview(self, *_):
+        tpl = self.get_template()
+        sample = (tpl.replace("{n}", str(self.start_spin.value()))
+                     .replace("{total}", "12").replace("{page}", "1"))
+        self._preview_label.setText(tr("pn_preview", text=sample) if sample else "")
+
+    def _validate(self):
+        if not self.get_template().strip():
+            QMessageBox.warning(self, tr("msg_op_failed"), tr("msg_pn_empty"))
+            return
+        if not self.all_pages_check.isChecked():
+            try:
+                pages = parse_page_ranges(self.pages_edit.text(), one_based=True)
+            except ValueError as e:
+                QMessageBox.warning(self, tr("msg_op_failed"),
+                                    tr("msg_rot_range_invalid", e=str(e)))
+                return
+            if not pages:
+                QMessageBox.warning(self, tr("msg_op_failed"), tr("msg_rot_empty"))
+                return
+        self.accept()
+
+    def get_position(self) -> str:
+        return self.position_combo.currentData() or "bottom-center"
+
+    def get_template(self) -> str:
+        data = self.template_combo.currentData()
+        if self.template_combo.isEditable():
+            typed = self.template_combo.currentText()
+            if typed and typed != data:
+                return typed
+        return data or self.template_combo.currentText() or "{n}"
+
+    def get_start(self) -> int:
+        return self.start_spin.value()
+
+    def get_font_size(self) -> int:
+        return self.size_spin.value()
+
+    def get_pages(self):
+        """0-based page list, or None for all pages."""
+        if self.all_pages_check.isChecked():
+            return None
+        return parse_page_ranges(self.pages_edit.text(), one_based=True)
+
+
+# ── Metadata ─────────────────────────────────────────────
+
+class MetadataDialog(QDialog):
+    """编辑 PDF 文档信息。"""
+
+    def __init__(self, info: dict, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(tr("dlg_metadata_title"))
+        self.setMinimumWidth(440)
+        self._init_ui(info or {})
+
+    def _init_ui(self, info: dict):
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+        self.edits = {}
+        for key, label_key in (("title", "info_label_title"),
+                               ("author", "info_label_author"),
+                               ("subject", "info_label_subject"),
+                               ("keywords", "meta_keywords"),
+                               ("creator", "info_label_creator"),
+                               ("producer", "info_label_producer")):
+            edit = QLineEdit(str(info.get(key) or ""))
+            edit.setPlaceholderText(tr("meta_placeholder"))
+            form.addRow(QLabel(tr(label_key)), edit)
+            self.edits[key] = edit
+        layout.addLayout(form)
+
+        hint = QLabel(tr("meta_hint"))
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color:#888;font-size:11px;")
+        layout.addWidget(hint)
+
+        self.buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        layout.addWidget(self.buttons)
+
+    def get_metadata(self) -> dict:
+        """只有被修改过的字段才会返回，避免覆盖未展示的信息。"""
+        out = {}
+        for key, edit in self.edits.items():
+            text = edit.text().strip()
+            if text != str(getattr(self, "_original", {}).get(key, "") or ""):
+                out[key] = text
+        return out
+
+    def set_original(self, info: dict):
+        self._original = {k: str(info.get(k) or "") for k in self.edits}

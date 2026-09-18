@@ -208,6 +208,85 @@ check("CLI info end-to-end", run.returncode == 0 and "页数" in run.stdout,
       run.stdout[:200] + run.stderr[:200])
 
 # ═══════════════════════════════════════════════════════════
+print("\n═══ 2b. Compose: page numbers, metadata, N-up, insert ═══")
+numbered = TMP / "numbered.pdf"
+n = PdfOperator.add_page_numbers(SRC, numbered, template="Page {n} / {total}",
+                                 position="bottom-center")
+check("add_page_numbers covers every page", n == 5, str(n))
+check("page number text present", "Page 1 / 5" in fitz.open(numbered)[0].get_text(),
+      repr(fitz.open(numbered)[0].get_text()[:60]))
+cn_numbered = TMP / "numbered_cn.pdf"
+PdfOperator.add_page_numbers(SRC, cn_numbered, template="第 {n} 页 / 共 {total} 页")
+check("CJK page numbers render (not boxes)",
+      "第 1 页" in fitz.open(cn_numbered)[0].get_text(),
+      repr(fitz.open(cn_numbered)[0].get_text()[:60]))
+check("page numbers honour a page subset",
+      PdfOperator.add_page_numbers(SRC, TMP / "pn_sub.pdf", pages=[0, 1]) == 2)
+for bad_pos in ("middle", ""):
+    try:
+        PdfOperator.add_page_numbers(SRC, TMP / "bad.pdf", position=bad_pos)
+        check(f"reject position {bad_pos!r}", False, "no exception")
+    except ValueError:
+        check(f"reject position {bad_pos!r}", True)
+
+meta_out = TMP / "meta.pdf"
+result = PdfOperator.set_metadata(SRC, meta_out,
+                                  {"title": "Quarterly Report", "author": "Ada",
+                                   "keywords": "pdf,test"})
+check("set_metadata returns fields", result["title"] == "Quarterly Report")
+info_meta = PdfOperator.get_info(meta_out)
+check("metadata persisted", info_meta["title"] == "Quarterly Report"
+      and info_meta["author"] == "Ada", str(info_meta.get("title")))
+check("metadata keeps other fields", info_meta["pages"] == 5)
+try:
+    PdfOperator.set_metadata(SRC, TMP / "bad_meta.pdf", {"bogus": "x"})
+    check("set_metadata rejects unknown keys", False, "no exception")
+except ValueError:
+    check("set_metadata rejects unknown keys", True)
+
+nup2 = TMP / "nup2.pdf"
+sheets = PdfOperator.nup(SRC, nup2, per_sheet=2, paper="a4")
+check("2-up halves the sheet count", sheets == 3, str(sheets))
+check("2-up sheet is landscape-ish A4",
+      abs(fitz.open(nup2)[0].rect.width - 595) < 1, str(fitz.open(nup2)[0].rect))
+nup4 = TMP / "nup4.pdf"
+sheets = PdfOperator.nup(SRC, nup4, per_sheet=4, paper="a4")
+check("4-up uses 2 sheets", sheets == 2, str(sheets))
+for bad in (3, 5, 100):
+    try:
+        PdfOperator.nup(SRC, TMP / "bad_nup.pdf", per_sheet=bad)
+        check(f"reject {bad}-up", False, "no exception")
+    except ValueError:
+        check(f"reject {bad}-up", True)
+
+ins = TMP / "inserted.pdf"
+inserted = PdfOperator.insert_pages(SRC, numbered, ins, at=2)
+check("insert_pages reports the count", inserted == 5, str(inserted))
+ins_doc = fitz.open(ins)
+check("insert_pages grows the document", len(ins_doc) == 10, str(len(ins_doc)))
+check("insert_pages puts pages at the right offset",
+      "page 1" in ins_doc[2].get_text().lower()
+      and "page 3" in ins_doc[7].get_text().lower(),
+      f"[2]={ins_doc[2].get_text()[:24]!r} [7]={ins_doc[7].get_text()[:24]!r}")
+appended = TMP / "appended.pdf"
+PdfOperator.insert_pages(SRC, numbered, appended, at=None)
+check("insert_pages appends by default", len(fitz.open(appended)) == 10)
+
+extracted = TMP / "extracted.pdf"
+count = PdfOperator.extract_pages(SRC, extracted, [0, 2, 4])
+check("extract_pages keeps the chosen pages", count == 3, str(count))
+check("extract_pages output content",
+      "page 1" in fitz.open(extracted)[0].get_text().lower())
+deleted = TMP / "deleted.pdf"
+left = PdfOperator.delete_pages(SRC, deleted, [0, 1])
+check("delete_pages reports remaining", left == 3, str(left))
+try:
+    PdfOperator.delete_pages(SRC, TMP / "bad_del.pdf", list(range(5)))
+    check("delete_pages refuses to empty a document", False, "no exception")
+except ValueError:
+    check("delete_pages refuses to empty a document", True)
+
+# ═══════════════════════════════════════════════════════════
 print("\n═══ 4b. Search + outline (core/search.py) ═══")
 import fitz as _fitz  # noqa: E402
 

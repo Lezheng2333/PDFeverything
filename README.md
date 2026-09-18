@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/Lezheng2333/PDFeverything/releases"><img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-blue?style=flat-square" /></a>
-  <a href="https://github.com/Lezheng2333/PDFeverything/releases/latest"><img src="https://img.shields.io/badge/version-v1.6.0-007aff?style=flat-square" /></a>
+  <a href="https://github.com/Lezheng2333/PDFeverything/releases/latest"><img src="https://img.shields.io/badge/version-v1.7.0-007aff?style=flat-square" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" /></a>
 </p>
 
@@ -35,28 +35,27 @@ Drag everything in — any combination of PDFs, Word documents, PowerPoint decks
 
 > 🔗 [**Latest Release →**](https://github.com/Lezheng2333/PDFeverything/releases/latest)
 
-## 🆕 What's New in v1.6.0
+## 🆕 What's New in v1.7.0
 
-**The reader becomes a real reader: search, bookmarks and a place to come back to.**
+**Four new operations — PDFeverything can now finish documents, not just convert them.**
 
-- 🔍 **Full-text search (⌘/Ctrl+F)** — a find bar with match count, next/previous
-  (`⏎` / `⇧⏎` / `⌘G`), case sensitivity, and **highlights painted directly into the
-  page** — including an orange marker on the current hit. Hits are listed in the
-  sidebar with their surrounding context; clicking one jumps straight to it.
-- 📑 **Contents sidebar** — the document's bookmark tree in a collapsible left panel
-  (`⌘/Ctrl+B`), with nesting, page targets and one-click navigation. Documents
-  without bookmarks say so instead of showing an empty box.
-- 🔁 **Reading position memory** — closing and reopening a PDF returns you to the
-  page and zoom level you left, per file.
-- ⌨️ **Reader shortcuts** — `⌘F` find, `⌘B` sidebar, `⌘+`/`⌘−` zoom, `⌘0` fit height,
-  `⌘1` fit width, `←`/`→` pages, `Home`/`End` first/last, `Esc` closes the find bar.
-- 🖱️ **Double-click toggles fit-width ↔ fit-height**, page range navigation stays
-  native (PageUp/PageDown keep smooth scrolling).
-- 🤖 **`pdf_search` and `pdf_outline` MCP tools** (25 total) and matching CLI
-  commands — `search -q "invoice" --json` returns every match with page, rectangle
-  and context; `outline` dumps the bookmark tree.
-- 🧪 Search/outline/navigation are covered by the GUI suite: **62 checks** in
-  `tests/test_gui.py` (134 → 151 across all suites).
+- 🔢 **Page numbers, headers & footers** — stamp any page with a template
+  (`{n}`, `{total}`, `{page}` or free text), six positions, custom start number and
+  font size, optional page range. CJK templates like `第 {n} 页 / 共 {total} 页`
+  render correctly instead of showing boxes.
+- 🏷️ **Document properties editor** — change title, author, subject, keywords,
+  creator and producer. Only the fields you touch are written.
+- 🧩 **N-up imposition (2/4/6/8/9/16 per sheet)** — halve your paper use. Page
+  content stays vector; landscape sheets are chosen automatically for 4-up and up.
+- ➕ **Insert / append pages** — drop another PDF's pages into the middle of a
+  document (or at the end) while keeping links and annotations.
+- The new operations are available in **all three channels**: GUI *Compose* menu,
+  CLI (`add-page-numbers`, `set-metadata`, `nup`, `insert-pages`,
+  `extract-pages-fitz`, `delete-pages-fitz`) and MCP (**29 tools** now, was 25).
+- 🧪 24 new core checks (page numbers incl. CJK, metadata round-trip, N-up sizes,
+  insertion offsets, guard rails) → **93 core + 62 GUI + 38 reader = 193 checks**.
+
+
 ---
 
 ## 🎯 The Killer Feature: Mixed-File Merge
@@ -154,7 +153,7 @@ A high-performance PDF reader with **vector-grade rendering** — rivaling Acrob
 
 ## 🤖 AI Agent Integration (MCP Server)
 
-PDFeverything comes with a built-in **Model Context Protocol (MCP)** server. Any AI agent (Claude Desktop, Claude Code, Cursor, etc.) can discover all 25 PDF tools and call them directly — **no Python, no install, just the app file**.
+PDFeverything comes with a built-in **Model Context Protocol (MCP)** server. Any AI agent (Claude Desktop, Claude Code, Cursor, etc.) can discover all 29 PDF tools and call them directly — **no Python, no install, just the app file**.
 
 ### How it works
 
@@ -209,7 +208,7 @@ Add to `.claude/settings.json` in your project:
 }
 ```
 
-### What the AI sees (25 tools)
+### What the AI sees (29 tools)
 
 Once connected, the agent automatically discovers these tools — no manual instruction needed:
 
@@ -229,6 +228,10 @@ Once connected, the agent automatically discovers these tools — no manual inst
 | `pdf_to_excel` | Extract PDF tables into Excel sheets (.xlsx) |
 | `pdf_compress` | Shrink a PDF (lossless / medium / max) |
 | `pdf_watermark` | Add a text watermark with real opacity and angle |
+| `pdf_insert_pages` | Insert or append pages from another PDF |
+| `pdf_nup` | Impose 2/4/6/8/9/16 pages per sheet for printing |
+| `pdf_set_metadata` | Edit document properties (title, author, subject, keywords) |
+| `pdf_add_page_numbers` | Stamp page numbers / headers / footers with a `{n}`/`{total}` template |
 | `pdf_encrypt` | Set an open password (AES-256) |
 | `pdf_decrypt` | Remove the password from a PDF |
 | `pdf_rotate` | Rotate pages 90/180/270° |
@@ -368,23 +371,23 @@ MIT — do whatever you want with it. [LICENSE](resources/LICENSE.txt)
 | 🔄 **旋转** | 旋转页面 90° / 180° / 270° |
 | ℹ️ **信息** | 查看页数、元数据、加密状态 |
 
-### 🆕 v1.6.0 新功能
+### 🆕 v1.7.0 新功能
 
-**阅读器升级为真正的阅读器：搜索、目录、以及"上次读到哪"。**
+**四个新操作——PDFeverything 现在不只是转换，还能把文档"收尾"。**
 
-- 🔍 **全文搜索（⌘/Ctrl+F）** — 查找栏带命中计数、上/下一个（`⏎` / `⇧⏎` / `⌘G`）、
-  区分大小写，**高亮直接绘制在页面位图上**，当前位置用橙色标记；侧栏列出每处命中
-  及其上下文，点击即跳转。
-- 📑 **目录侧栏** — 可折叠左栏（`⌘/Ctrl+B`）展示书签树，支持层级、目标页码与一键跳转；
-  没有书签的文档会给出说明而不是一片空白。
-- 🔁 **阅读位置记忆** — 关闭再打开同一文件，自动回到上次的页码与缩放级别。
-- ⌨️ **阅读器快捷键** — `⌘F` 查找、`⌘B` 侧栏、`⌘+`/`⌘−` 缩放、`⌘0` 适应高度、
-  `⌘1` 适应宽度、`←`/`→` 翻页、`Home`/`End` 首末页、`Esc` 关闭查找栏。
-- 🖱️ **双击在适应宽度/适应高度之间切换**；PageUp/PageDown 保留原生平滑滚动。
-- 🤖 **新增 `pdf_search` 与 `pdf_outline` MCP 工具**（共 25 个）及对应 CLI 命令 —
-  `search -q "invoice" --json` 返回每处命中的页码、矩形与上下文。
-- 🧪 搜索/目录/导航已纳入 GUI 测试套件：`tests/test_gui.py` 62 项
-  （全部套件 134 → 151 项）。
+- 🔢 **页码 / 页眉页脚** — 支持模板（`{n}`、`{total}`、`{page}` 或任意文字）、
+  六个位置、自定义起始编号与字号，可限定页码范围；中文模板
+  `第 {n} 页 / 共 {total} 页` 正常渲染（不再是方框）。
+- 🏷️ **文档属性编辑** — 修改标题、作者、主题、关键词、创建者、生成工具；
+  只写入你改动过的字段。
+- 🧩 **N-up 拼版（每张 2/4/6/8/9/16 页）** — 直接省一半纸；页面内容保持矢量，
+  4-up 及以上自动改用横向纸张。
+- ➕ **插入 / 追加页面** — 把另一个 PDF 的页面插到文档中间或末尾，保留链接与批注。
+- 新操作在**三个通道**同时可用：GUI「排版与信息」菜单、CLI（`add-page-numbers`、
+  `set-metadata`、`nup`、`insert-pages`、`extract-pages-fitz`、`delete-pages-fitz`）
+  与 MCP（**29 个工具**，此前 25 个）。
+- 🧪 新增 24 项核心测试（页码含中文、元数据往返、拼版尺寸、插入偏移、参数校验）
+  → **93 核心 + 62 GUI + 38 阅读器 = 193 项全部通过**。
 
 ### 🖥️ 界面预览
 
@@ -413,7 +416,7 @@ MIT — do whatever you want with it. [LICENSE](resources/LICENSE.txt)
 
 ### 🤖 AI Agent 集成（MCP 服务器）
 
-PDFeverything 内置了 **Model Context Protocol (MCP)** 服务器。任何 AI Agent（Claude Desktop、Claude Code、Cursor 等）都能自动发现全部 25 个 PDF 工具并直接调用——**无需安装 Python、无需额外依赖，只要有这个 app 文件就行**。
+PDFeverything 内置了 **Model Context Protocol (MCP)** 服务器。任何 AI Agent（Claude Desktop、Claude Code、Cursor 等）都能自动发现全部 29 个 PDF 工具并直接调用——**无需安装 Python、无需额外依赖，只要有这个 app 文件就行**。
 
 #### 同一个文件，三种模式
 
@@ -466,7 +469,7 @@ PDFeverything 内置了 **Model Context Protocol (MCP)** 服务器。任何 AI A
 }
 ```
 
-#### AI 能看到的 25 个工具
+#### AI 能看到的 29 个工具
 
 连接后 Agent 会自动发现这些工具——无需手动教它：
 

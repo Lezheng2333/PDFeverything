@@ -23,6 +23,8 @@ CLI_COMMANDS = {
     "to-images", "from-images", "compress", "watermark",
     "encrypt", "decrypt", "rotate", "info",
     "to-word", "to-ppt", "to-excel", "mixed-merge", "search", "outline",
+    "add-page-numbers", "set-metadata", "nup", "insert-pages",
+    "extract-pages-fitz", "delete-pages-fitz",
     "delete-pages", "rotate-pages", "move-pages",
     "extract-pages", "page-undo", "page-redo", "page-history",
     "page-list",
@@ -64,12 +66,20 @@ Commands:
     rotate      -i <pdf>       -o <pdf> --angle <90|180|270>  Rotate pages
     info        -i <pdf>                     Show PDF metadata
 
+  Compose & stamp
+    add-page-numbers -i <pdf> -o <pdf> [--template "第 {n} / {total} 页"]
+                                        [--position bottom-center|top-right|...]
+    set-metadata -i <pdf> -o <pdf> [--title T] [--author A] [--subject S] [--keywords K]
+    nup         -i <pdf>       -o <pdf>  [--per-sheet 2|4|6|8|9|16] [--paper a4|a3|letter]
+    insert-pages -i <pdf> -s <other.pdf> -o <pdf> [--at <n>]   Insert/append pages
+
   Page editing (persistent undo history per file)
     page-list     -i <pdf>     [--json]                    List pages + rotation
     delete-pages  -i <pdf> -o <pdf> --pages <spec>         Delete pages
     rotate-pages  -i <pdf> -o <pdf> --pages <spec> --degrees <90|180|270>
     move-pages    -i <pdf> -o <pdf> --source <spec> --target <n>
     extract-pages -i <pdf> -o <pdf> --pages <spec>         Keep only these pages
+    extract-pages-fitz / delete-pages-fitz                 Same, via PyMuPDF (keeps links)
     page-undo     -i <pdf> -o <pdf>                        Undo last edit
     page-redo     -i <pdf> -o <pdf>                        Redo last undone edit
     page-history  -i <pdf>     [--json]                    Show edit history
@@ -85,6 +95,9 @@ Examples:
     PDFeverything.exe merge -i a.pdf b.pdf c.pdf -o merged.pdf
     PDFeverything.exe mixed-merge -i report.docx chart.png notes.txt -o bundle.pdf
     PDFeverything.exe search -i report.pdf -q "invoice" --json
+    PDFeverything.exe add-page-numbers -i doc.pdf -o numbered.pdf --template "第 {n} / {total} 页"
+    PDFeverything.exe nup -i handout.pdf -o handout-4up.pdf --per-sheet 4
+    PDFeverything.exe insert-pages -i main.pdf -s cover.pdf -o merged.pdf --at 1
     PDFeverything.exe compress -i big.pdf -o small.pdf --mode medium
     PDFeverything.exe rotate-pages -i doc.pdf -o out.pdf --pages 1-3 --degrees 90
     PDFeverything.exe page-undo -i out.pdf -o reverted.pdf
@@ -95,7 +108,7 @@ Subsequent runs in the same session are instant.
 """
 
 
-VERSION = "1.6.0"
+VERSION = "1.7.0"
 PROJECT_DIR = Path(__file__).parent.resolve()
 _DARK_MODE = False  # set by launch_gui before any GUI widgets are created
 

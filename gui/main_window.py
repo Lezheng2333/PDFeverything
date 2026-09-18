@@ -7,6 +7,7 @@ from PyQt6.QtCore import QSettings, Qt, QThread, QTimer
 from PyQt6.QtGui import QCloseEvent, QDragEnterEvent, QDropEvent
 from PyQt6.QtWidgets import (
     QFileDialog,
+    QInputDialog,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -38,6 +39,8 @@ from .dialogs import (
     DecryptDialog,
     EncryptDialog,
     InfoDialog,
+    MetadataDialog,
+    PageNumberDialog,
     RotateDialog,
     SplitRangeDialog,
     WatermarkDialog,
@@ -48,7 +51,7 @@ from .pdf_reader_widget import PdfReaderWidget
 from .workers import BaseWorker
 
 
-VERSION = "1.6.0"
+VERSION = "1.7.0"
 
 
 def _dc(dark, light):
@@ -116,6 +119,17 @@ class MainWindow(QMainWindow):
         self.act_decrypt = self.menu_op.addAction(tr("btn_decrypt"), self._on_decrypt_clicked)
         self.act_rotate = self.menu_op.addAction(tr("btn_rotate"), self._on_rotate_clicked)
 
+        # Compose: stamping, metadata, imposition, page insertion
+        self.menu_compose = mb.addMenu(tr("menu_compose"))
+        self.act_page_numbers = self.menu_compose.addAction(
+            tr("pn_btn"), self._on_page_numbers_clicked)
+        self.act_metadata = self.menu_compose.addAction(
+            tr("meta_btn"), self._on_metadata_clicked)
+        self.menu_compose.addSeparator()
+        self.act_nup = self.menu_compose.addAction(tr("nup_btn"), self._on_nup_clicked)
+        self.act_insert = self.menu_compose.addAction(
+            tr("insert_btn"), self._on_insert_pages_clicked)
+
         # Settings → Language
         self.menu_settings = mb.addMenu(tr("menu_settings"))
         self.menu_lang = self.menu_settings.addMenu(tr("menu_language"))
@@ -157,6 +171,11 @@ class MainWindow(QMainWindow):
         self.act_encrypt.setText(tr("btn_encrypt"))
         self.act_decrypt.setText(tr("btn_decrypt"))
         self.act_rotate.setText(tr("btn_rotate"))
+        self.menu_compose.setTitle(tr("menu_compose"))
+        self.act_page_numbers.setText(tr("pn_btn"))
+        self.act_metadata.setText(tr("meta_btn"))
+        self.act_nup.setText(tr("nup_btn"))
+        self.act_insert.setText(tr("insert_btn"))
         self.menu_settings.setTitle(tr("menu_settings"))
         self.menu_lang.setTitle(tr("menu_language"))
         self.act_lang_zh.setText(tr("menu_lang_zh"))
@@ -1021,6 +1040,100 @@ class MainWindow(QMainWindow):
             self._run_worker(PdfOperator.to_excel, files[0], Path(out))
         else:
             self._run_batch(files, "excel", PdfOperator.to_excel, ext=".xlsx")
+
+    # ── Compose actions ──────────────────────────────
+
+    def _on_page_numbers_clicked(self):
+        files = self._pick_input_files()
+        if not files:
+            return
+        dlg = PageNumberDialog(self)
+        if not dlg.exec():
+            return
+        pages = dlg.get_pages()
+        position = dlg.get_position()
+        template = dlg.get_template()
+        start = dlg.get_start()
+        size = dlg.get_font_size()
+        if len(files) == 1:
+            out = self._get_output_path(f"{files[0].stem}_numbered.pdf")
+            if not out:
+                return
+            self._run_worker(PdfOperator.add_page_numbers, files[0], out,
+                             position, start, size, template, 28.0, pages)
+        else:
+            self._run_batch(files, "numbered", PdfOperator.add_page_numbers,
+                            position, start, size, template, 28.0, pages)
+
+    def _on_metadata_clicked(self):
+        files = self._pick_input_files()
+        if not files:
+            return
+        try:
+            info = PdfOperator.get_info(files[0])
+        except Exception as e:  # noqa: BLE001
+            QMessageBox.warning(self, tr("msg_op_failed"), str(e))
+            return
+        dlg = MetadataDialog(info, self)
+        dlg.set_original(info)
+        if not dlg.exec():
+            return
+        fields = dlg.get_metadata()
+        if not fields:
+            return
+        if len(files) == 1:
+            out = self._get_output_path(f"{files[0].stem}_meta.pdf")
+            if not out:
+                return
+            self._run_worker(PdfOperator.set_metadata, files[0], out, fields)
+        else:
+            self._run_batch(files, "meta", PdfOperator.set_metadata, fields)
+
+    def _on_nup_clicked(self):
+        files = self._pick_input_files()
+        if not files:
+            return
+        per_sheet, ok = QInputDialog.getItem(
+            self, tr("dlg_nup_title"), tr("nup_per_sheet"),
+            ["2", "4", "6", "8", "9", "16"], 0, False)
+        if not ok:
+            return
+        paper, ok = QInputDialog.getItem(
+            self, tr("dlg_nup_title"), tr("nup_paper"),
+            ["A4", "A3", "Letter"], 0, False)
+        if not ok:
+            return
+        n = int(per_sheet)
+        if len(files) == 1:
+            out = self._get_output_path(f"{files[0].stem}_{n}up.pdf")
+            if not out:
+                return
+            self._run_worker(PdfOperator.nup, files[0], out, n, paper.lower(), 18.0, 8.0)
+        else:
+            self._run_batch(files, f"{n}up", PdfOperator.nup, n, paper.lower(), 18.0, 8.0)
+
+    def _on_insert_pages_clicked(self):
+        target = self._pick_input_file()
+        if not target:
+            return
+        source_str, _ = QFileDialog.getOpenFileName(
+            self, tr("dlg_select_pdf"), "", tr("file_filter_pdf"))
+        if not source_str:
+            return
+        source = Path(source_str)
+        try:
+            target_pages = PdfOperator.get_info(target).get("pages", 0)
+        except Exception:
+            target_pages = 0
+        at, ok = QInputDialog.getInt(
+            self, tr("dlg_insert_title"), tr("insert_at"),
+            max(1, target_pages + 1), 1, max(1, target_pages + 1))
+        if not ok:
+            return
+        out = self._get_output_path(f"{target.stem}_inserted.pdf")
+        if not out:
+            return
+        self._run_worker(PdfOperator.insert_pages, target, source, out, at - 1)
 
     def _on_about(self):
         QMessageBox.about(self, tr("about_title"), tr("about_text", version=VERSION))

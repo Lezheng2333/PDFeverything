@@ -54,7 +54,7 @@ except Exception:
     except Exception:
         pass
 
-SERVER_VERSION = "1.6.0"
+SERVER_VERSION = "1.7.0"
 
 # ── Tool definitions (OpenAI-compatible JSON schemas) ──────
 
@@ -117,6 +117,92 @@ TOOLS = [
                 }
             },
             "required": ["input"]
+        }
+    },
+    {
+        "name": "pdf_add_page_numbers",
+        "description": "Stamp page numbers, headers or footers onto a PDF. The template supports {n} (current number), {total} (page count) and {page} (original page number), so you can write things like 'Page {n} of {total}'.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "input": {"type": "string", "description": "Absolute path to the input PDF"},
+                "output": {"type": "string", "description": "Absolute path for the output PDF"},
+                "position": {
+                    "type": "string",
+                    "enum": ["bottom-center", "bottom-left", "bottom-right",
+                             "top-center", "top-left", "top-right"],
+                    "description": "Where on the page to stamp (default: bottom-center)",
+                    "default": "bottom-center"
+                },
+                "template": {
+                    "type": "string",
+                    "description": "Text template, e.g. '{n}' or 'Page {n} of {total}'",
+                    "default": "{n}"
+                },
+                "start_number": {"type": "integer", "description": "First number (default 1)", "default": 1},
+                "font_size": {"type": "integer", "description": "Font size in points (default 10)", "default": 10},
+                "pages": {"type": "string", "description": "Page range to stamp, e.g. '1-5' (default: all)"}
+            },
+            "required": ["input", "output"]
+        }
+    },
+    {
+        "name": "pdf_set_metadata",
+        "description": "Set PDF document properties (title, author, subject, keywords, creator, producer). Only the fields you pass are changed.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "input": {"type": "string", "description": "Absolute path to the input PDF"},
+                "output": {"type": "string", "description": "Absolute path for the output PDF"},
+                "title": {"type": "string"},
+                "author": {"type": "string"},
+                "subject": {"type": "string"},
+                "keywords": {"type": "string"},
+                "creator": {"type": "string"},
+                "producer": {"type": "string"}
+            },
+            "required": ["input", "output"]
+        }
+    },
+    {
+        "name": "pdf_nup",
+        "description": "Impose several PDF pages onto one sheet (N-up) for paper-saving printing — 2, 4, 6, 8, 9 or 16 pages per sheet.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "input": {"type": "string", "description": "Absolute path to the input PDF"},
+                "output": {"type": "string", "description": "Absolute path for the output PDF"},
+                "per_sheet": {
+                    "type": "integer",
+                    "enum": [2, 4, 6, 8, 9, 16],
+                    "description": "Pages per sheet (default 2)",
+                    "default": 2
+                },
+                "paper": {
+                    "type": "string",
+                    "enum": ["a4", "a3", "letter"],
+                    "description": "Sheet size (default a4)",
+                    "default": "a4"
+                }
+            },
+            "required": ["input", "output"]
+        }
+    },
+    {
+        "name": "pdf_insert_pages",
+        "description": "Insert every page of one PDF into another at a given position (or append at the end). Links and annotations are preserved.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "input": {"type": "string", "description": "Absolute path to the target PDF"},
+                "source": {"type": "string", "description": "Absolute path to the PDF whose pages get inserted"},
+                "output": {"type": "string", "description": "Absolute path for the output PDF"},
+                "at": {
+                    "type": "integer",
+                    "description": "1-based insert position; omit to append at the end"
+                }
+            },
+            "required": ["input", "source", "output"]
         }
     },
     {
@@ -594,6 +680,46 @@ def _run_tool(name: str, args: dict) -> str:
                 "pages": len(outputs),
                 "output_dir": args["output_dir"]
             })
+
+        elif name == "pdf_add_page_numbers":
+            from core.utils import parse_page_ranges
+
+            pages = (parse_page_ranges(args["pages"], one_based=True)
+                     if args.get("pages") else None)
+            count = PdfOperator.add_page_numbers(
+                Path(args["input"]), Path(args["output"]),
+                position=args.get("position", "bottom-center"),
+                start_number=int(args.get("start_number", 1) or 1),
+                font_size=int(args.get("font_size", 10) or 10),
+                template=args.get("template", "{n}") or "{n}",
+                pages=pages)
+            return json.dumps({"success": True, "output": args["output"],
+                               "pages_stamped": count}, ensure_ascii=False)
+
+        elif name == "pdf_set_metadata":
+            fields = {k: args[k] for k in PdfOperator.METADATA_FIELDS if args.get(k) is not None}
+            if not fields:
+                return json.dumps({"success": False,
+                                   "error": "no metadata fields provided"})
+            result = PdfOperator.set_metadata(Path(args["input"]), Path(args["output"]),
+                                              fields)
+            return json.dumps({"success": True, "output": args["output"],
+                               "metadata": result}, ensure_ascii=False)
+
+        elif name == "pdf_nup":
+            sheets = PdfOperator.nup(Path(args["input"]), Path(args["output"]),
+                                     per_sheet=int(args.get("per_sheet", 2) or 2),
+                                     paper=args.get("paper", "a4") or "a4")
+            return json.dumps({"success": True, "output": args["output"],
+                               "sheets": sheets}, ensure_ascii=False)
+
+        elif name == "pdf_insert_pages":
+            at = args.get("at")
+            inserted = PdfOperator.insert_pages(
+                Path(args["input"]), Path(args["source"]), Path(args["output"]),
+                at=None if at is None else int(at) - 1)
+            return json.dumps({"success": True, "output": args["output"],
+                               "inserted_pages": inserted}, ensure_ascii=False)
 
         elif name == "pdf_search":
             from core.search import search_pdf

@@ -49,7 +49,7 @@ Add to `.claude/settings.json` in your project:
 }
 ```
 
-## 🔧 Available Tools (25 tools)
+## 🔧 Available Tools (29 tools)
 
 The AI agent will see these tools automatically:
 
@@ -69,6 +69,10 @@ The AI agent will see these tools automatically:
 | `pdf_to_excel` | Extract PDF tables into Excel sheets (.xlsx) |
 | `pdf_compress` | Shrink a PDF (lossless / medium / max) |
 | `pdf_watermark` | Add a text watermark with real opacity and angle |
+| `pdf_insert_pages` | Insert or append pages from another PDF |
+| `pdf_nup` | Impose 2/4/6/8/9/16 pages per sheet for printing |
+| `pdf_set_metadata` | Edit document properties (title, author, subject, keywords) |
+| `pdf_add_page_numbers` | Stamp page numbers / headers / footers with a `{n}`/`{total}` template |
 | `pdf_encrypt` | Set an open password (AES-256) |
 | `pdf_decrypt` | Remove the password from a PDF |
 | `pdf_rotate` | Rotate pages 90/180/270° |
@@ -103,7 +107,7 @@ AI Agent                          PDFeverything MCP Server
    │                                       │
    │── {"method":"tools/list"} ──────────► │
    │                                       │
-   │◄─ {"result":{"tools":[...25 tools]}} │
+   │◄─ {"result":{"tools":[...29 tools]}} │
    │                                       │
    │── {"method":"tools/call",            │
    │     "params":{"name":"pdf_info",      │

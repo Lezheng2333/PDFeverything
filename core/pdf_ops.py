@@ -675,6 +675,305 @@ class PdfOperator:
                 pass
         return fitz.Font("helv")
 
+    # ── 13b. 页码 / 页眉页脚 ─────────────────────────
+
+    # 位置 → (水平对齐, 是否在页面顶部)
+    STAMP_POSITIONS = {
+        "bottom-center": ("center", False),
+        "bottom-left": ("left", False),
+        "bottom-right": ("right", False),
+        "top-center": ("center", True),
+        "top-left": ("left", True),
+        "top-right": ("right", True),
+    }
+
+    @staticmethod
+    def add_page_numbers(
+        input_path: Path,
+        output_path: Path,
+        position: str = "bottom-center",
+        start_number: int = 1,
+        font_size: int = 10,
+        template: str = "{n}",
+        margin: float = 28.0,
+        pages: Optional[List[int]] = None,
+        progress_callback: Optional[Callable[[str, int], None]] = None,
+    ) -> int:
+        """给页面加盖页码/页眉页脚，返回处理的页数。
+
+        template 支持 {n}（当前序号）、{total}（总页数）、{page}（原始页码）与任意文字，
+        例如 "第 {n} 页 / 共 {total} 页"。
+        """
+        import fitz
+
+        if position not in PdfOperator.STAMP_POSITIONS:
+            raise ValueError(f"未知位置: {position}")
+        check_input(input_path)
+        _prepare_output(output_path)
+        align_name, at_top = PdfOperator.STAMP_POSITIONS[position]
+
+        doc = fitz.open(input_path)
+        try:
+            total = len(doc)
+            targets = list(range(total)) if pages is None else [
+                p for p in pages if 0 <= p < total
+            ]
+            font = PdfOperator._watermark_font(
+                template.replace("{n}", "").replace("{total}", "").replace("{page}", ""))
+            for i, pno in enumerate(targets):
+                page = doc[pno]
+                text = (template
+                        .replace("{n}", str(start_number + i))
+                        .replace("{total}", str(total))
+                        .replace("{page}", str(pno + 1)))
+                if not text:
+                    continue
+                width = font.text_length(text, fontsize=font_size)
+                rect = page.rect
+                if align_name == "left":
+                    x = margin
+                    align = fitz.TEXT_ALIGN_LEFT
+                    box_x0, box_x1 = margin, margin + max(width, 1) + 4
+                elif align_name == "right":
+                    align = fitz.TEXT_ALIGN_RIGHT
+                    box_x1 = rect.width - margin
+                    box_x0 = box_x1 - max(width, 1) - 4
+                else:
+                    align = fitz.TEXT_ALIGN_CENTER
+                    box_x0 = max(0.0, (rect.width - width) / 2 - 4)
+                    box_x1 = min(rect.width, (rect.width + width) / 2 + 4)
+                y0 = margin * 0.5 if at_top else rect.height - margin
+                baseline_y = y0 + font_size
+                if align_name == "left":
+                    origin_x = margin
+                elif align_name == "right":
+                    origin_x = rect.width - margin - width
+                else:
+                    origin_x = (rect.width - width) / 2
+                # TextWriter keeps the CJK-capable font (insert_textbox only
+                # accepts base-14 font names, which render CJK as boxes).
+                writer = fitz.TextWriter(rect, color=(0.25, 0.25, 0.25))
+                writer.append((origin_x, baseline_y), text,
+                              font=font, fontsize=font_size)
+                writer.write_text(page)
+                if progress_callback:
+                    progress_callback(f"添加页码 ({i + 1}/{len(targets)})",
+                                      int((i + 1) / max(1, len(targets)) * 100))
+            doc.save(output_path, garbage=3, deflate=True)
+            return len(targets)
+        finally:
+            doc.close()
+
+    # ── 13c. 元数据 ──────────────────────────────────
+
+    METADATA_FIELDS = ("title", "author", "subject", "keywords", "creator", "producer")
+
+    @staticmethod
+    def set_metadata(
+        input_path: Path,
+        output_path: Path,
+        metadata: dict,
+        progress_callback: Optional[Callable[[str, int], None]] = None,
+    ) -> dict:
+        """写入 PDF 文档信息，返回最终生效的元数据。
+
+        只接受 METADATA_FIELDS 中的键；空字符串表示清空该字段。
+        """
+        import fitz
+
+        check_input(input_path)
+        _prepare_output(output_path)
+        clean = {k: str(v) for k, v in (metadata or {}).items()
+                 if k in PdfOperator.METADATA_FIELDS and v is not None}
+        if not clean:
+            raise ValueError("没有需要写入的元数据字段")
+
+        doc = fitz.open(input_path)
+        try:
+            current = doc.metadata or {}
+            merged = {k: (current.get(k) or "") for k in PdfOperator.METADATA_FIELDS}
+            merged.update(clean)
+            doc.set_metadata(merged)
+            doc.save(output_path, garbage=3, deflate=True)
+            if progress_callback:
+                progress_callback("元数据已更新", 100)
+            return {k: merged.get(k, "") for k in PdfOperator.METADATA_FIELDS}
+        finally:
+            doc.close()
+
+    # ── 13d. N-up 拼版 ───────────────────────────────
+
+    @staticmethod
+    def nup(
+        input_path: Path,
+        output_path: Path,
+        per_sheet: int = 2,
+        paper: str = "a4",
+        margin: float = 18.0,
+        gap: float = 8.0,
+        progress_callback: Optional[Callable[[str, int], None]] = None,
+    ) -> int:
+        """把 N 页缩小拼到一张纸上（2-up / 4-up 省纸打印），返回新页数。"""
+        import fitz
+
+        if per_sheet not in (2, 4, 6, 8, 9, 16):
+            raise ValueError("每张纸页数只支持 2/4/6/8/9/16")
+        check_input(input_path)
+        _prepare_output(output_path)
+
+        paper_sizes = {
+            "a4": (595.0, 842.0),
+            "a3": (842.0, 1191.0),
+            "letter": (612.0, 792.0),
+        }
+        if paper not in paper_sizes:
+            raise ValueError(f"未知纸张: {paper}")
+        sheet_w, sheet_h = paper_sizes[paper]
+        if per_sheet > 2:
+            sheet_w, sheet_h = sheet_h, sheet_w  # 4-up 及以上用横向更省纸
+
+        cols, rows = PdfOperator._nup_grid(per_sheet)
+        cell_w = (sheet_w - 2 * margin - (cols - 1) * gap) / cols
+        cell_h = (sheet_h - 2 * margin - (rows - 1) * gap) / rows
+
+        src = fitz.open(input_path)
+        out = fitz.open()
+        try:
+            total = len(src)
+            sheets = (total + per_sheet - 1) // per_sheet
+            for sheet_index in range(sheets):
+                sheet = out.new_page(width=sheet_w, height=sheet_h)
+                for slot in range(per_sheet):
+                    pno = sheet_index * per_sheet + slot
+                    if pno >= total:
+                        break
+                    row, col = divmod(slot, cols)
+                    x0 = margin + col * (cell_w + gap)
+                    y0 = margin + row * (cell_h + gap)
+                    target = fitz.Rect(x0, y0, x0 + cell_w, y0 + cell_h)
+                    try:
+                        sheet.show_pdf_page(target, src, pno, keep_proportion=True)
+                    except Exception:
+                        continue
+                if progress_callback:
+                    progress_callback(f"拼版 ({sheet_index + 1}/{sheets})",
+                                      int((sheet_index + 1) / max(1, sheets) * 100))
+            out.save(output_path, garbage=3, deflate=True)
+            return len(out)
+        finally:
+            src.close()
+            out.close()
+
+    @staticmethod
+    def _nup_grid(per_sheet: int) -> tuple:
+        return {
+            2: (2, 1), 4: (2, 2), 6: (3, 2), 8: (4, 2), 9: (3, 3), 16: (4, 4),
+        }[per_sheet]
+
+    # ── 13e. 插入 / 追加页面 ─────────────────────────
+
+    @staticmethod
+    def insert_pages(
+        input_path: Path,
+        source_path: Path,
+        output_path: Path,
+        at: int = -1,
+        progress_callback: Optional[Callable[[str, int], None]] = None,
+    ) -> int:
+        """把另一个 PDF 的全部页面插入到指定位置，返回插入的页数。
+
+        at 为 0-based 插入位置；-1（默认）表示追加到末尾。
+        """
+        import fitz
+
+        check_input(input_path)
+        check_input(source_path)
+        _prepare_output(output_path)
+
+        doc = fitz.open(input_path)
+        try:
+            src = fitz.open(source_path)
+            try:
+                if len(src) == 0:
+                    raise ValueError("要插入的 PDF 没有任何页面")
+                start = len(doc) if at is None or at < 0 else max(0, min(at, len(doc)))
+                # start_at is handled by MuPDF's own page-tree insertion, which
+                # preserves links and annotations on both sides.
+                doc.insert_pdf(src, start_at=start)
+                inserted = len(src)
+            finally:
+                src.close()
+            doc.save(output_path, garbage=3, deflate=True)
+            if progress_callback:
+                progress_callback(f"已插入 {inserted} 页", 100)
+            return inserted
+        finally:
+            doc.close()
+
+    @staticmethod
+    def extract_pages(
+        input_path: Path,
+        output_path: Path,
+        pages: List[int],
+        progress_callback: Optional[Callable[[str, int], None]] = None,
+    ) -> int:
+        """把指定页面（0-based）抽取为新的 PDF，返回页数。"""
+        import fitz
+
+        check_input(input_path)
+        _prepare_output(output_path)
+        ordered = [p for p in pages or []]
+        if not ordered:
+            raise ValueError("没有选择任何页面")
+
+        doc = fitz.open(input_path)
+        out = fitz.open()
+        try:
+            total = len(doc)
+            for p in ordered:
+                if 0 <= p < total:
+                    out.insert_pdf(doc, from_page=p, to_page=p)
+            if len(out) == 0:
+                raise ValueError("所选页面都超出文档范围")
+            out.save(output_path, garbage=3, deflate=True)
+            if progress_callback:
+                progress_callback(f"已提取 {len(out)} 页", 100)
+            return len(out)
+        finally:
+            doc.close()
+            out.close()
+
+    # ── 13f. 删除页面 ────────────────────────────────
+
+    @staticmethod
+    def delete_pages(
+        input_path: Path,
+        output_path: Path,
+        pages: List[int],
+        progress_callback: Optional[Callable[[str, int], None]] = None,
+    ) -> int:
+        """删除指定页面（0-based），返回剩余页数。"""
+        import fitz
+
+        check_input(input_path)
+        _prepare_output(output_path)
+        doc = fitz.open(input_path)
+        try:
+            total = len(doc)
+            targets = sorted({p for p in (pages or []) if 0 <= p < total}, reverse=True)
+            if not targets:
+                raise ValueError("所选页面都超出文档范围")
+            if len(targets) >= total:
+                raise ValueError("不能删除全部页面")
+            for p in targets:
+                doc.delete_page(p)
+            doc.save(output_path, garbage=4, deflate=True)
+            if progress_callback:
+                progress_callback(f"已删除 {len(targets)} 页", 100)
+            return len(doc)
+        finally:
+            doc.close()
+
     # ── 14. PDF → Word ───────────────────────────────
 
     @staticmethod

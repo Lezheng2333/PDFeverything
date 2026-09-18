@@ -628,3 +628,31 @@ Ver 1.6.0 | 2026-09-18 — 阅读器升级：搜索 / 目录 / 阅读位置
     - 侧栏与搜索栏颜色跟随主题（暗色/亮色），全部文案接入 i18n（中英双语）
     - 测试：tests/test_gui.py 新增搜索/目录/阅读位置 17 项（45 → 62），全套件 151 项
     - BUGFIX: 搜索计数标签属性名不一致（_search_count_label vs search_count_label）导致首次搜索崩溃
+
+----------------------------------------------------------------
+
+Ver 1.7.0 | 2026-09-18 — 功能扩展：页码 / 元数据 / 拼版 / 插入页面
+----------------------------------------------------------------
+
+  Ver 1.7.0 | 大迭代第三轮：从「转换工具」到「文档收尾工具」
+    - PdfOperator.add_page_numbers：页码/页眉页脚盖章，模板支持 {n}/{total}/{page} 与任意文字，
+      6 个位置（页脚/页眉 × 左中右）、自定义起始编号与字号、可限定页码范围
+    - 页码使用 TextWriter + CJK 字体绘制，中文模板（"第 {n} 页 / 共 {total} 页"）正常显示
+      （insert_textbox 只接受 base-14 字体名，中文会渲染成方框）
+    - PdfOperator.set_metadata：修改标题/作者/主题/关键词/创建者/生成工具，
+      只写入传入字段，未知键直接拒绝
+    - PdfOperator.nup：2/4/6/8/9/16 页拼版到 A4/A3/Letter，页面内容保持矢量
+      （show_pdf_page），4-up 及以上自动横向出纸
+    - PdfOperator.insert_pages：把另一个 PDF 插入到指定位置或追加到末尾
+      （MuPDF insert_pdf，保留链接与批注）
+    - PdfOperator.extract_pages / delete_pages：全部走 PyMuPDF，保留链接/批注，
+      拒绝把文档删空
+    - GUI 新增「排版与信息」菜单：页码对话框（位置/模板/起始/字号/范围 + 实时预览）、
+      文档属性对话框（仅提交改动字段）、N-up 选择、插入页面（带目标页数校验）
+    - CLI 新增 6 命令：add-page-numbers / set-metadata / nup / insert-pages /
+      extract-pages-fitz / delete-pages-fitz，统一 --json 结构化输出
+    - MCP 新增 4 工具（25 → 29）：pdf_add_page_numbers / pdf_set_metadata /
+      pdf_nup / pdf_insert_pages
+    - i18n 新增 40 余键（Compose 菜单、对话框、位置模板、提示文案）中英双语
+    - tests/test_core.py 新增 24 项（页码含 CJK、元数据往返、拼版尺寸与页数、
+      插入偏移、删除/提取边界与参数校验），全套件 193 项
