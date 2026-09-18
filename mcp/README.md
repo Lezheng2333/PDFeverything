@@ -49,7 +49,7 @@ Add to `.claude/settings.json` in your project:
 }
 ```
 
-## 🔧 Available Tools (23 tools)
+## 🔧 Available Tools (25 tools)
 
 The AI agent will see these tools automatically:
 
@@ -58,6 +58,8 @@ The AI agent will see these tools automatically:
 | `pdf_merge` | Merge several PDFs into one, in the order you list them |
 | `pdf_split` | Split a PDF into single pages (or by custom ranges) |
 | `pdf_info` | Metadata: page count, size, author, title, encryption status |
+| `pdf_outline` | Bookmark / table-of-contents tree with target pages |
+| `pdf_search` | Find text in a PDF — every match with page, position and context |
 | `pdf_extract_text` | Extract all text from a PDF to a .txt file |
 | `pdf_extract_images` | Extract every embedded image to a folder |
 | `pdf_to_images` | Render each page to a PNG (adjustable DPI) |
@@ -101,7 +103,7 @@ AI Agent                          PDFeverything MCP Server
    │                                       │
    │── {"method":"tools/list"} ──────────► │
    │                                       │
-   │◄─ {"result":{"tools":[...23 tools]}} │
+   │◄─ {"result":{"tools":[...25 tools]}} │
    │                                       │
    │── {"method":"tools/call",            │
    │     "params":{"name":"pdf_info",      │

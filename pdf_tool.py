@@ -41,6 +41,21 @@ def main():
     p_mix.add_argument("-o", "--output", required=True, help="输出 PDF 文件")
     p_mix.add_argument("--json", action="store_true", help="JSON 输出")
 
+    # --- search ---
+    p_search = sub.add_parser("search", help="在 PDF 中查找文本")
+    p_search.add_argument("-i", "--input", required=True, help="输入 PDF 文件")
+    p_search.add_argument("-q", "--query", required=True, help="要查找的文本")
+    p_search.add_argument("-o", "--output", help="结果输出文件 (.json 或 .txt)")
+    p_search.add_argument("--case", action="store_true", help="区分大小写")
+    p_search.add_argument("--whole-word", action="store_true", help="仅整词匹配")
+    p_search.add_argument("--pages", help="限定范围: all / 1-5 / 1,3,5")
+    p_search.add_argument("--json", action="store_true", help="JSON 输出到终端")
+
+    # --- outline ---
+    p_outline = sub.add_parser("outline", help="导出 PDF 目录（书签）")
+    p_outline.add_argument("-i", "--input", required=True, help="输入 PDF 文件")
+    p_outline.add_argument("--json", action="store_true", help="JSON 输出")
+
     # --- info ---
     p_info = sub.add_parser("info", help="查看 PDF 信息")
     p_info.add_argument("-i", "--input", required=True, help="输入 PDF 文件")
@@ -202,6 +217,63 @@ def main():
                       f"→ {args.output}")
                 for f in result.get("failed", []):
                     print(f"  ⚠️  {Path(f['path']).name}: {f['reason']}")
+
+        elif args.command == "search":
+            from core.search import search_pdf
+
+            pages = None
+            if args.pages:
+                pages = parse_page_ranges(args.pages, one_based=True)
+            result = search_pdf(Path(args.input), args.query,
+                                case_sensitive=args.case,
+                                whole_word=args.whole_word,
+                                pages=pages)
+            if args.output:
+                out_path = Path(args.output)
+                if out_path.suffix.lower() == ".json":
+                    import json
+                    out_path.write_text(
+                        json.dumps(result.as_dict(), ensure_ascii=False, indent=2),
+                        encoding="utf-8")
+                else:
+                    lines = [f"# {result.query} — {result.count} matches "
+                             f"on {len(result.pages_with_hits())} page(s)"]
+                    for hit in result.hits:
+                        lines.append(f"p.{hit.page + 1}\t{hit.context or hit.text}")
+                    out_path.write_text("\n".join(lines), encoding="utf-8")
+                print(f"✅ 找到 {result.count} 处 → {args.output}")
+            elif args.json:
+                import json
+                print(json.dumps(result.as_dict(), ensure_ascii=False))
+            else:
+                if not result.count:
+                    print(f"未找到「{result.query}」")
+                else:
+                    heads = ", ".join(str(p + 1) for p in result.pages_with_hits()[:20])
+                    more = "…" if len(result.pages_with_hits()) > 20 else ""
+                    print(f"找到 {result.count} 处，位于第 {heads}{more} 页"
+                          + ("（已截断）" if result.truncated else ""))
+                    for hit in result.hits[:30]:
+                        print(f"  p.{hit.page + 1}  {hit.context or hit.text}")
+
+        elif args.command == "outline":
+            from core.search import get_outline
+
+            entries = get_outline(Path(args.input))
+            if args.json:
+                import json
+                print(json.dumps(
+                    {"success": True, "count": len(entries),
+                     "outline": [e.as_dict() for e in entries]},
+                    ensure_ascii=False))
+            else:
+                if not entries:
+                    print("(此文档没有书签目录)")
+                for entry in entries:
+                    for flat in entry.flatten():
+                        indent = "  " * flat.level
+                        page = f"  p.{flat.page + 1}" if flat.page >= 0 else ""
+                        print(f"{indent}- {flat.title}{page}")
 
         elif args.command == "info":
             info = PdfOperator.get_info(Path(args.input))

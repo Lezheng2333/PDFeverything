@@ -54,7 +54,7 @@ except Exception:
     except Exception:
         pass
 
-SERVER_VERSION = "1.5.0"
+SERVER_VERSION = "1.6.0"
 
 # ── Tool definitions (OpenAI-compatible JSON schemas) ──────
 
@@ -75,6 +75,7 @@ TOOLS = [
                     "description": "Absolute path for the output merged PDF file"
                 }
             },
+            "minItems": 1,
             "required": ["input_files", "output"]
         }
     },
@@ -91,6 +92,14 @@ TOOLS = [
                 "output_dir": {
                     "type": "string",
                     "description": "Absolute path to the directory where split PDFs will be saved"
+                },
+                "page_ranges": {
+                    "type": "array",
+                    "items": {
+                        "type": "array",
+                        "items": {"type": "integer"}
+                    },
+                    "description": "Optional 1-based inclusive ranges, e.g. [[1,5],[6,10]]. Omit to split every page into its own file."
                 }
             },
             "required": ["input", "output_dir"]
@@ -105,6 +114,57 @@ TOOLS = [
                 "input": {
                     "type": "string",
                     "description": "Absolute path to the PDF file to inspect"
+                }
+            },
+            "required": ["input"]
+        }
+    },
+    {
+        "name": "pdf_search",
+        "description": "Search for text inside a PDF and return every match with its page number, position and surrounding context. Useful for locating a clause, invoice number or keyword before extracting pages.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "input": {
+                    "type": "string",
+                    "description": "Absolute path to the PDF file to search"
+                },
+                "query": {
+                    "type": "string",
+                    "description": "Text to look for (case-insensitive by default)"
+                },
+                "case_sensitive": {
+                    "type": "boolean",
+                    "description": "Match case exactly (default: false)",
+                    "default": False
+                },
+                "whole_word": {
+                    "type": "boolean",
+                    "description": "Only match whole words (default: false)",
+                    "default": False
+                },
+                "pages": {
+                    "type": "string",
+                    "description": "Limit the search to a page range, e.g. \"1-5,8\" or \"all\" (default: all pages)"
+                },
+                "max_hits": {
+                    "type": "integer",
+                    "description": "Stop after this many matches (default: 500)",
+                    "default": 500
+                }
+            },
+            "required": ["input", "query"]
+        }
+    },
+    {
+        "name": "pdf_outline",
+        "description": "Return the bookmark/table-of-contents tree of a PDF with the page each entry points to.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "input": {
+                    "type": "string",
+                    "description": "Absolute path to the PDF file"
                 }
             },
             "required": ["input"]
@@ -523,12 +583,44 @@ def _run_tool(name: str, args: dict) -> str:
             })
 
         elif name == "pdf_split":
-            outputs = PdfOperator.split(Path(args["input"]), Path(args["output_dir"]))
+            ranges = args.get("page_ranges")
+            page_ranges = None
+            if ranges:
+                page_ranges = [(int(r[0]), int(r[1])) for r in ranges if len(r) >= 2]
+            outputs = PdfOperator.split(Path(args["input"]), Path(args["output_dir"]),
+                                        page_ranges)
             return json.dumps({
                 "success": True,
                 "pages": len(outputs),
                 "output_dir": args["output_dir"]
             })
+
+        elif name == "pdf_search":
+            from core.search import search_pdf
+
+            spec = args.get("pages")
+            pages = None
+            if spec:
+                from core.utils import parse_page_ranges
+                pages = parse_page_ranges(spec, one_based=True)
+            result = search_pdf(
+                Path(args["input"]), args["query"],
+                case_sensitive=bool(args.get("case_sensitive", False)),
+                whole_word=bool(args.get("whole_word", False)),
+                pages=pages,
+                max_hits=int(args.get("max_hits", 500) or 500),
+            )
+            return json.dumps(result.as_dict(), ensure_ascii=False)
+
+        elif name == "pdf_outline":
+            from core.search import get_outline
+
+            entries = get_outline(Path(args["input"]))
+            return json.dumps({
+                "success": True,
+                "count": len(entries),
+                "outline": [e.as_dict() for e in entries],
+            }, ensure_ascii=False)
 
         elif name == "pdf_info":
             info = PdfOperator.get_info(Path(args["input"]))

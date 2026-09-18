@@ -10,8 +10,10 @@ from typing import Optional
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QPoint, QMimeData, QEvent
 from PyQt6.QtGui import QImage, QPixmap, QKeyEvent, QWheelEvent, QIntValidator, QDrag, QPainter, QPen, QColor, QFont
 from PyQt6.QtWidgets import (
-    QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea,
-    QVBoxLayout, QWidget, QApplication, QMessageBox, QFileDialog,
+    QCheckBox, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
+    QPushButton, QScrollArea, QSplitter, QStackedWidget, QToolButton,
+    QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget, QApplication,
+    QMessageBox, QFileDialog,
 )
 
 from .i18n import tr
@@ -49,6 +51,9 @@ GRID_COLS = 3              # thumbnail columns in Grid view
 GRID_CELL_RATIO = 1.414    # A4 cell aspect ratio
 GRID_PAGE_LABEL_H = 16     # strip reserved under each thumbnail for its number
 GRID_MIN_CELL_H = 150      # never shrink a grid cell below this
+SIDEBAR_WIDTH = 230        # left panel (outline / search results)
+SEARCH_DEBOUNCE_MS = 260   # typing pause before a document-wide search runs
+SEARCH_MAX_HITS = 800      # cap on stored hits for very common words
 
 
 class PdfReaderWidget(QWidget):
@@ -76,6 +81,13 @@ class PdfReaderWidget(QWidget):
         # Grid geometry cache (populated by _layout_labels)
         self._grid_geom = None
         self._pending_scroll_page = None
+        # Search state
+        self._search_hits = []          # list[SearchHit]
+        self._search_index = -1         # current hit
+        self._search_query = ""
+        self._search_case = False
+        self._highlight_rects = {}      # {page: [fitz.Rect]}
+        self._sidebar_visible = True
 
         self._resize_timer = QTimer(self); self._resize_timer.setSingleShot(True)
         self._resize_timer.setInterval(RESIZE_DEBOUNCE)
@@ -92,6 +104,13 @@ class PdfReaderWidget(QWidget):
         self._hover_timer = QTimer(self); self._hover_timer.setSingleShot(True)
         self._hover_timer.setInterval(500)
         self._hover_timer.timeout.connect(self._show_tooltip)
+
+        # Search: debounce so a document-wide search only runs once typing stops
+        self._search_debounce = QTimer(self); self._search_debounce.setSingleShot(True)
+        self._search_debounce.setInterval(SEARCH_DEBOUNCE_MS)
+        self._search_debounce.timeout.connect(self._run_debounced_search)
+        self._outline_entries = []
+        self.btn_sidebar = None
 
         self._hide_timer = QTimer(self); self._hide_timer.setSingleShot(True)
         self._hide_timer.setInterval(200)
@@ -250,8 +269,21 @@ class PdfReaderWidget(QWidget):
         self.page_container = QWidget()
         self.page_container.setStyleSheet("background:transparent;")
         self.scroll_area.setWidget(self.page_container)
+
+        # ── Sidebar (outline / search results) + page area ──
+        self.body_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.body_splitter.setChildrenCollapsible(False)
+        self.sidebar = self._build_sidebar()
+        self.body_splitter.addWidget(self.sidebar)
+        self.body_splitter.addWidget(self.scroll_area)
+        self.body_splitter.setStretchFactor(0, 0)
+        self.body_splitter.setStretchFactor(1, 1)
+        self.body_splitter.setSizes([SIDEBAR_WIDTH, 1000])
+        self.sidebar.setFixedWidth(SIDEBAR_WIDTH)
+
         root.addWidget(self.edit_toolbar)
-        root.addWidget(self.scroll_area, 1)
+        root.addWidget(self._build_search_bar())
+        root.addWidget(self.body_splitter, 1)
 
         # toolbar
         self.toolbar = QWidget(); self.toolbar.setObjectName("reader_toolbar")
@@ -282,7 +314,23 @@ class PdfReaderWidget(QWidget):
         self.btn_grid.clicked.connect(lambda: self._set_mode(ViewMode.GRID))
         self._hover_on(self.btn_grid)
 
+        self.btn_sidebar = QPushButton("☰")
+        self.btn_sidebar.setCheckable(True)
+        self.btn_sidebar.setChecked(True)
+        self.btn_sidebar.setFixedSize(34, 34)
+        self.btn_sidebar.setToolTip(tr("reader_sidebar_tip"))
+        self.btn_sidebar.clicked.connect(lambda: self.toggle_sidebar())
+        self._hover_on(self.btn_sidebar)
+
+        self.btn_search = QPushButton("🔍")
+        self.btn_search.setFixedSize(34, 34)
+        self.btn_search.setToolTip(tr("reader_search_tip"))
+        self.btn_search.clicked.connect(lambda: self.show_search_bar(True))
+        self._hover_on(self.btn_search)
+
+        tb.addWidget(self.btn_sidebar)
         tb.addWidget(self.btn_scroll); tb.addWidget(self.btn_grid)
+        tb.addWidget(self.btn_search)
         tb.addSpacing(16)
         self.btn_edit = QPushButton("✎ Edit"); self.btn_edit.setCheckable(True)
         self.btn_edit.clicked.connect(self._toggle_edit_mode)
@@ -362,6 +410,7 @@ class PdfReaderWidget(QWidget):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus); self.setMouseTracking(True)
         # Collect all toolbar widgets for tooltip management
         self._toolbar_buttons = [
+            self.btn_sidebar, self.btn_search,
             self.btn_scroll, self.btn_grid, self.btn_edit, self.btn_prev, self.btn_next,
             self.btn_zoom_out, self.btn_zoom_in, self.zoom_edit, self.btn_fit_width,
             self.btn_fit_height, self.btn_close,
@@ -372,6 +421,346 @@ class PdfReaderWidget(QWidget):
             self.btn_edit_redo,
         ]
         self._store_tooltips()
+
+    # ═══════════ Sidebar (outline + search) ═══════════
+
+    def _build_sidebar(self) -> QWidget:
+        """Left panel with a Contents tab and a Search-results tab."""
+        panel = QWidget()
+        panel.setObjectName("reader_sidebar")
+        sb_bg = _dc("#252525", "#efefef")
+        sb_brd = _dc("#3a3a3a", "#d0d0d0")
+        sb_fg = _dc("#ccc", "#333")
+        panel.setStyleSheet(
+            f"QWidget#reader_sidebar{{background:{sb_bg};"
+            f"border-right:1px solid {sb_brd};}}"
+            f"QLabel{{color:{sb_fg};font-size:12px;}}"
+            f"QTreeWidget,QListWidget{{background:transparent;border:none;"
+            f"color:{sb_fg};font-size:12px;outline:none;}}"
+            f"QTreeWidget::item,QListWidget::item{{padding:3px 2px;}}"
+            f"QTreeWidget::item:selected,QListWidget::item:selected"
+            f"{{background:#007aff;color:#fff;border-radius:3px;}}"
+            f"QCheckBox{{color:{sb_fg};font-size:11px;}}")
+
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(6)
+
+        # Tabs
+        tabs = QHBoxLayout()
+        tabs.setSpacing(4)
+        self.btn_tab_outline = QToolButton()
+        self.btn_tab_search = QToolButton()
+        for btn in (self.btn_tab_outline, self.btn_tab_search):
+            btn.setCheckable(True)
+            btn.setAutoRaise(True)
+            btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+            tabs.addWidget(btn)
+        tabs.addStretch()
+        self.btn_tab_outline.setChecked(True)
+        self.btn_tab_outline.clicked.connect(lambda: self._show_sidebar_tab(0))
+        self.btn_tab_search.clicked.connect(lambda: self._show_sidebar_tab(1))
+        layout.addLayout(tabs)
+
+        self.sidebar_stack = QStackedWidget()
+
+        # Page 0 — outline
+        self.outline_tree = QTreeWidget()
+        self.outline_tree.setHeaderHidden(True)
+        self.outline_tree.itemClicked.connect(self._on_outline_clicked)
+        self.outline_tree.itemActivated.connect(self._on_outline_clicked)
+        self.sidebar_stack.addWidget(self.outline_tree)
+
+        # Page 1 — search results
+        search_page = QWidget()
+        sp_layout = QVBoxLayout(search_page)
+        sp_layout.setContentsMargins(0, 0, 0, 0)
+        sp_layout.setSpacing(4)
+        self.search_list = QListWidget()
+        self.search_list.itemClicked.connect(self._on_search_item_clicked)
+        sp_layout.addWidget(self.search_list, 1)
+        self.search_status = QLabel("")
+        self.search_status.setWordWrap(True)
+        sp_layout.addWidget(self.search_status)
+        self.sidebar_stack.addWidget(search_page)
+
+        layout.addWidget(self.sidebar_stack, 1)
+        return panel
+
+    def _show_sidebar_tab(self, index: int):
+        self.sidebar_stack.setCurrentIndex(index)
+        self.btn_tab_outline.setChecked(index == 0)
+        self.btn_tab_search.setChecked(index == 1)
+        if not self._sidebar_visible:
+            self.toggle_sidebar(True)
+
+    def toggle_sidebar(self, show: bool = None):
+        """Show/hide the left panel, keeping the splitter handle in sync."""
+        if show is None:
+            show = not self._sidebar_visible
+        self._sidebar_visible = show
+        self.sidebar.setVisible(show)
+        if self.btn_sidebar is not None:
+            self.btn_sidebar.setChecked(show)
+        if show:
+            sizes = self.body_splitter.sizes()
+            if sizes and sizes[0] < 60:
+                self.body_splitter.setSizes([SIDEBAR_WIDTH, max(200, sizes[1] - SIDEBAR_WIDTH)])
+        QTimer.singleShot(0, self._on_resize)
+
+    def _load_outline(self):
+        """Populate the Contents tab from the document outline."""
+        self.outline_tree.clear()
+        if not self._path:
+            self._update_outline_placeholder()
+            return
+        try:
+            from core.search import get_outline
+            entries = get_outline(self._path)
+        except Exception:
+            entries = []
+        self._outline_entries = entries
+        for entry in entries:
+            self.outline_tree.addTopLevelItem(self._outline_item(entry))
+        if entries:
+            self.outline_tree.expandToDepth(0)
+        self._update_outline_placeholder()
+
+    def _outline_item(self, entry) -> QTreeWidgetItem:
+        label = entry.title.strip() or f"Page {entry.page + 1}"
+        item = QTreeWidgetItem([label])
+        item.setData(0, Qt.ItemDataRole.UserRole, entry.page)
+        if entry.bold:
+            font = item.font(0)
+            font.setBold(True)
+            item.setFont(0, font)
+        if entry.page >= 0:
+            item.setToolTip(0, f"{label} — p.{entry.page + 1}")
+        for child in entry.children:
+            item.addChild(self._outline_item(child))
+        return item
+
+    def _update_outline_placeholder(self):
+        """Explain an empty outline instead of showing a blank panel."""
+        if self._outline_entries:
+            self.outline_tree.setHeaderHidden(True)
+            return
+        placeholder = QTreeWidgetItem([tr("reader_no_outline")])
+        placeholder.setFlags(Qt.ItemFlag.NoItemFlags)
+        self.outline_tree.addTopLevelItem(placeholder)
+
+    def _on_outline_clicked(self, item: QTreeWidgetItem, _column: int = 0):
+        page = item.data(0, Qt.ItemDataRole.UserRole)
+        if page is None or page < 0:
+            return
+        if self._view_mode == ViewMode.GRID:
+            self._on_grid_dbl_click(int(page))
+        else:
+            self.go_to_page(int(page) + 1)
+
+    # ═══════════ Search ═══════════
+
+    def _build_search_bar(self):
+        """Find bar shown above the toolbar when Ctrl+F is pressed."""
+        bar = QWidget()
+        bar.setObjectName("search_bar")
+        bg = _dc("#2a2a2a", "#ffffff")
+        brd = _dc("#3a3a3a", "#c8c8c8")
+        fg = _dc("#ccc", "#333")
+        bar.setStyleSheet(
+            f"QWidget#search_bar{{background:{bg};border-top:1px solid {brd};"
+            f"border-bottom:1px solid {brd};}}"
+            f"QLineEdit{{color:{fg};background:{_dc('#1e1e1e', '#f7f7f7')};"
+            f"border:1px solid {brd};border-radius:4px;padding:4px 8px;font-size:13px;}}"
+            f"QLabel{{color:{fg};font-size:12px;}}"
+            f"QCheckBox{{color:{fg};font-size:12px;}}")
+        row = QHBoxLayout(bar)
+        row.setContentsMargins(8, 5, 8, 5)
+        row.setSpacing(6)
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText(tr("reader_search_placeholder"))
+        self.search_edit.returnPressed.connect(self.find_next)
+        self.search_edit.textChanged.connect(self._on_search_text_changed)
+        self.search_edit.setMinimumWidth(200)
+        row.addWidget(self.search_edit, 1)
+
+        self.search_check_case = QCheckBox(tr("reader_search_case"))
+        self.search_check_case.toggled.connect(self._on_search_option_changed)
+        row.addWidget(self.search_check_case)
+
+        self.search_count_label = QLabel("")
+        row.addWidget(self.search_count_label)
+
+        self.btn_search_prev = QPushButton("◀")
+        self.btn_search_prev.setFixedSize(28, 26)
+        self.btn_search_prev.setToolTip(tr("reader_search_prev"))
+        self.btn_search_prev.clicked.connect(self.find_prev)
+        row.addWidget(self.btn_search_prev)
+
+        self.btn_search_next = QPushButton("▶")
+        self.btn_search_next.setFixedSize(28, 26)
+        self.btn_search_next.setToolTip(tr("reader_search_next"))
+        self.btn_search_next.clicked.connect(self.find_next)
+        row.addWidget(self.btn_search_next)
+
+        self.btn_search_close = QPushButton("✕")
+        self.btn_search_close.setFixedSize(28, 26)
+        self.btn_search_close.setToolTip(tr("reader_search_close"))
+        self.btn_search_close.clicked.connect(lambda: self.show_search_bar(False))
+        row.addWidget(self.btn_search_close)
+
+        self.search_bar = bar
+        bar.hide()
+        return bar
+
+    def show_search_bar(self, show: bool = True, query: str = None):
+        if show:
+            self.search_bar.show()
+            if query is not None:
+                self.search_edit.setText(query)
+            self.search_edit.setFocus()
+            self.search_edit.selectAll()
+            if self.search_edit.text().strip():
+                self.start_search(self.search_edit.text())
+        else:
+            self.search_bar.hide()
+            self.clear_search()
+            self.setFocus()
+
+    def _on_search_text_changed(self, _text: str):
+        self._search_debounce.start()
+
+    def _on_search_option_changed(self, _checked: bool):
+        if self.search_edit.text().strip():
+            self._search_debounce.start()
+
+    def _run_debounced_search(self):
+        self.start_search(self.search_edit.text())
+
+    def start_search(self, query: str, select_first: bool = True):
+        """Run a document-wide search and show the hits in the sidebar."""
+        self._search_debounce.stop()
+        query = (query or "").strip()
+        self._search_query = query
+        self._search_case = self.search_check_case.isChecked()
+        self._search_hits = []
+        self._search_index = -1
+        self._highlight_rects = {}
+        self.search_list.clear()
+        if not query or not self.doc or not self._path:
+            self.search_count_label.setText("")
+            self.search_status.setText("")
+            PdfReaderWidget._invalidate_pages(range(self._total_pages))
+            self._refresh_visible_pixmaps()
+            if self._view_mode == ViewMode.SCROLL:
+                self._render_visible_range_async(0)
+            return
+        try:
+            from core.search import search_pdf
+            result = search_pdf(self._path, query,
+                                case_sensitive=self._search_case,
+                                max_hits=SEARCH_MAX_HITS)
+        except Exception as ex:
+            self.search_status.setText(str(ex))
+            return
+        self._search_hits = result.hits
+        for i, hit in enumerate(result.hits):
+            text = hit.context or hit.text
+            item = QListWidgetItem(f"p.{hit.page + 1}  {text[:60]}")
+            item.setData(Qt.ItemDataRole.UserRole, i)
+            item.setToolTip(text)
+            self.search_list.addItem(item)
+        self._refresh_highlight_cache()
+        if self._search_hits:
+            self.search_status.setText(
+                tr("reader_search_found", count=len(self._search_hits),
+                   pages=len(result.pages_with_hits())))
+            self.search_count_label.setText(
+                f"{len(self._search_hits)}" + ("+" if result.truncated else ""))
+            self._show_sidebar_tab(1)
+            if select_first:
+                self._goto_hit(0)
+        else:
+            self.search_status.setText(tr("reader_search_none"))
+            self.search_count_label.setText("0")
+        self._repaint_highlights()
+
+    def _refresh_highlight_cache(self):
+        """Group hit rectangles per page for fast repaint."""
+        rects = {}
+        for hit in self._search_hits:
+            rects.setdefault(hit.page, []).append(hit.rect)
+        self._highlight_rects = rects
+        # Affected pages must be re-rendered: the highlights are painted into the
+        # cached pixmap, so the old entries are stale.
+        PdfReaderWidget._invalidate_pages(list(rects.keys()))
+
+    def clear_search(self):
+        self._search_hits = []
+        self._search_index = -1
+        self._search_query = ""
+        self._highlight_rects = {}
+        self.search_list.clear()
+        self.search_count_label.setText("")
+        self.search_status.setText("")
+        if self.doc:
+            PdfReaderWidget._invalidate_pages(range(self._total_pages))
+            self._repaint_highlights()
+
+    def find_next(self):
+        self._step_search(1)
+
+    def find_prev(self):
+        self._step_search(-1)
+
+    def _step_search(self, delta: int):
+        if not self._search_hits:
+            if self.search_edit.text().strip():
+                self.start_search(self.search_edit.text())
+            return
+        self._goto_hit((self._search_index + delta) % len(self._search_hits))
+
+    def _goto_hit(self, index: int):
+        if not self._search_hits:
+            return
+        index = max(0, min(index, len(self._search_hits) - 1))
+        self._search_index = index
+        hit = self._search_hits[index]
+        self.search_list.setCurrentRow(index)
+        self._current_page = hit.page
+        self._pending_scroll_page = hit.page
+        self._layout_labels()
+        self._apply_pending_scroll()
+        self._scroll_to_hit(hit)
+        self._update_nav_ui()
+        self.search_count_label.setText(f"{index + 1}/{len(self._search_hits)}")
+        self._repaint_highlights()
+
+    def _scroll_to_hit(self, hit):
+        """Nudge the viewport so the hit itself is visible, not just its page."""
+        if self._view_mode != ViewMode.SCROLL:
+            return
+        if hit.page >= len(self._page_heights):
+            return
+        page_top = self._page_heights[hit.page]
+        pct = self._current_zoom_pct() / 100.0
+        y0 = page_top + hit.rect[1] * pct
+        sb = self.scroll_area.verticalScrollBar()
+        view_h = self._viewport_height()
+        if y0 < sb.value() or y0 > sb.value() + view_h - 60:
+            sb.setValue(max(0, int(y0 - view_h / 3)))
+
+    def _repaint_highlights(self):
+        """Redraw the affected pages so search highlights appear/disappear."""
+        if self._view_mode == ViewMode.GRID:
+            self._refresh_visible_pixmaps()
+            return
+        self._render_visible_range_async(0)
+
+    def _on_search_item_clicked(self, item: QListWidgetItem):
+        idx = item.data(Qt.ItemDataRole.UserRole)
+        if idx is not None:
+            self._goto_hit(int(idx))
 
     def _hover_on(self, widget):
         """Attach mouse tracking to a toolbar button."""
@@ -578,6 +967,7 @@ class PdfReaderWidget(QWidget):
         self.zoom_edit.setText(str(self._default_zoom_pct))
         self._build_labels()
         self._layout_labels()
+        self._load_outline()
         # Seed only the visible window's 100% base; the rest fills in lazily.
         self._pre_render_100_all()
         self._render_visible_range_async(0)
@@ -585,10 +975,71 @@ class PdfReaderWidget(QWidget):
         self.label_filename.setText(path.name)
         self.label_filename.show()
         self.btn_close.show()
+        self._restore_reading_position(path)
         self.document_changed.emit(str(path))
         self.setFocus()
 
+    # ═══════════ Reading position memory ═══════════
+
+    def _remember_reading_position(self):
+        """Persist the current page + zoom so reopening continues where you left."""
+        if not self._path or not self._total_pages:
+            return
+        try:
+            from PyQt6.QtCore import QSettings
+            settings = QSettings("PDFeverything", "PDFeverything")
+            entries = settings.value("reader_positions", {}) or {}
+            if not isinstance(entries, dict):
+                entries = {}
+            key = str(Path(self._path).resolve())
+            zoom = self._zoom_mode if isinstance(self._zoom_mode, str) else \
+                f"{self._zoom_mode:.3f}"
+            entries[key] = {"page": self._current_page, "zoom": zoom}
+            # Keep the store bounded — most recent 40 documents.
+            if len(entries) > 40:
+                for old in list(entries.keys())[:-40]:
+                    entries.pop(old, None)
+            settings.setValue("reader_positions", entries)
+        except Exception:
+            pass
+
+    def _restore_reading_position(self, path: Path):
+        """Jump back to the remembered page for this document, if any."""
+        try:
+            from PyQt6.QtCore import QSettings
+            settings = QSettings("PDFeverything", "PDFeverything")
+            entries = settings.value("reader_positions", {}) or {}
+            entry = entries.get(str(Path(path).resolve())) if isinstance(entries, dict) else None
+        except Exception:
+            entry = None
+        if not entry:
+            return
+        zoom = entry.get("zoom")
+        if zoom == "fit_width":
+            self._zoom_mode = "fit_width"
+            self.btn_fit_width.setChecked(True)
+            self.btn_fit_height.setChecked(False)
+            self.zoom_edit.setText(str(self._current_zoom_pct()))
+        elif zoom == "fit_height":
+            self._zoom_mode = "fit_height"
+            self.btn_fit_height.setChecked(True)
+            self.zoom_edit.setText(str(self._default_zoom_pct))
+        else:
+            try:
+                self._zoom_mode = max(0.5, min(3.0, float(zoom)))
+                self.zoom_edit.setText(str(int(self._zoom_mode * 100)))
+            except (TypeError, ValueError):
+                pass
+        self._layout_labels()
+        page = int(entry.get("page", 0))
+        if 0 <= page < self._total_pages:
+            self._current_page = page
+            self._pending_scroll_page = page
+            self._apply_pending_scroll()
+            self._update_nav_ui()
+
     def close_document(self):
+        self._remember_reading_position()
         self._cancel_deferred_renders()
         self._grid_geom = None
         self._page_heights = []
@@ -600,6 +1051,9 @@ class PdfReaderWidget(QWidget):
         if self.doc: self.doc.close(); self.doc = None
         self._path = None; self._total_pages = 0; self._current_page = 0
         self._saved_scroll_zoom = None
+        self.clear_search()
+        self._outline_entries = []
+        self.outline_tree.clear()
         # Reset to default Scroll mode
         self._view_mode = ViewMode.SCROLL
         self.btn_scroll.setChecked(True); self.btn_grid.setChecked(False)
@@ -1831,6 +2285,21 @@ class PdfReaderWidget(QWidget):
         return f"z:{self._zoom_mode:.3f}"
 
     @staticmethod
+    def _render_zoom(doc, pi, zk, vw, vh, force_fit=False) -> float:
+        """Zoom factor the renderer uses for this page/cache key."""
+        page = doc[pi]
+        pw, ph = page.rect.width, page.rect.height
+        if zk == "fw":
+            return vw / pw if pw else 1.0
+        if zk == "fh":
+            return vh / ph if ph else 1.0
+        if isinstance(zk, str) and zk.startswith("z:"):
+            return float(zk[2:])
+        if force_fit:
+            return min(vw / pw, vh / ph) if pw and ph else 1.0
+        return vw / pw if pw else 1.0
+
+    @staticmethod
     def _render_page(doc, pi, zk, vw, vh, force_fit=False, dpr=1.0):
         """Render a page at exact target resolution — MuPDF's built-in
         sub-pixel anti-aliasing handles quality at all zoom levels.
@@ -1853,6 +2322,45 @@ class PdfReaderWidget(QWidget):
         if dpr != 1.0:
             pixmap.setDevicePixelRatio(dpr)
         return pixmap
+
+    def _paint_search_highlights(self, pixmap: QPixmap, pi: int, zoom: float,
+                                dpr: float) -> QPixmap:
+        """Draw search hits onto a freshly rendered page pixmap.
+
+        The pixmap is in physical pixels (zoom × dpr), while hit rectangles are in
+        PDF points, so each rect is scaled by zoom × dpr before painting."""
+        rects = self._highlight_rects.get(pi)
+        if not rects:
+            return pixmap
+        painter = QPainter(pixmap)
+        try:
+            scale = zoom * dpr
+            current = (self._search_index >= 0
+                       and self._search_index < len(self._search_hits)
+                       and self._search_hits[self._search_index].page == pi)
+            for i, rect in enumerate(rects):
+                x0, y0, x1, y1 = [v * scale for v in rect]
+                is_current = current and self._is_current_hit(pi, rect)
+                painter.fillRect(
+                    int(x0), int(y0), max(1, int(x1 - x0)), max(1, int(y1 - y0)),
+                    QColor(255, 165, 0, 130) if is_current else QColor(255, 235, 59, 110))
+            if current:
+                painter.setPen(QPen(QColor(255, 120, 0), 2))
+                for rect in rects:
+                    x0, y0, x1, y1 = [v * scale for v in rect]
+                    if self._is_current_hit(pi, rect):
+                        painter.drawRect(int(x0) - 1, int(y0) - 1,
+                                         max(2, int(x1 - x0) + 2),
+                                         max(2, int(y1 - y0) + 2))
+        finally:
+            painter.end()
+        return pixmap
+
+    def _is_current_hit(self, pi: int, rect) -> bool:
+        if not (0 <= self._search_index < len(self._search_hits)):
+            return False
+        hit = self._search_hits[self._search_index]
+        return hit.page == pi and tuple(hit.rect) == tuple(rect)
 
     def _viewport_size(self):
         vp = self.scroll_area.viewport()
@@ -1960,6 +2468,10 @@ class PdfReaderWidget(QWidget):
             return cached
         dpr = self._device_pixel_ratio()
         pix = PdfReaderWidget._render_page(self.doc, pi, key[1], vw, vh, force_fit, dpr=dpr)
+        if self._highlight_rects.get(pi):
+            pix = self._paint_search_highlights(
+                pix, pi, PdfReaderWidget._render_zoom(self.doc, pi, key[1], vw, vh,
+                                                      force_fit), dpr)
         PdfReaderWidget._cache_put(key, pix)
         return pix
 
@@ -2082,6 +2594,37 @@ class PdfReaderWidget(QWidget):
         mods = e.modifiers()
         ctrl = bool(mods & Qt.KeyboardModifier.ControlModifier) or \
                bool(mods & Qt.KeyboardModifier.MetaModifier)
+        shift = bool(mods & Qt.KeyboardModifier.ShiftModifier)
+
+        # Find bar
+        if ctrl and e.key() == Qt.Key.Key_F:
+            self.show_search_bar(True)
+            return
+        if e.key() == Qt.Key.Key_Escape and self.search_bar.isVisible():
+            self.show_search_bar(False)
+            return
+        if ctrl and e.key() == Qt.Key.Key_G:
+            self.find_prev() if shift else self.find_next()
+            return
+        if e.key() in (Qt.Key.Key_F3,):
+            self.find_prev() if shift else self.find_next()
+            return
+        # View shortcuts
+        if ctrl and e.key() == Qt.Key.Key_B:
+            self.toggle_sidebar()
+            return
+        if ctrl and e.key() in (Qt.Key.Key_Plus, Qt.Key.Key_Equal):
+            self._adjust_zoom(+10)
+            return
+        if ctrl and e.key() == Qt.Key.Key_Minus:
+            self._adjust_zoom(-10)
+            return
+        if ctrl and e.key() == Qt.Key.Key_0:
+            self._on_fit_height()
+            return
+        if ctrl and e.key() == Qt.Key.Key_1:
+            self._on_fit_width()
+            return
 
         # Edit mode shortcuts
         if self._edit_mode and self._view_mode == ViewMode.GRID:
@@ -2094,12 +2637,18 @@ class PdfReaderWidget(QWidget):
             if e.key() == Qt.Key.Key_Z and ctrl:
                 self._edit_undo(); return
 
-        # Normal navigation
-        if e.key() == Qt.Key.Key_Left: self.prev_page()
-        elif e.key() == Qt.Key.Key_Right: self.next_page()
-        elif e.key() == Qt.Key.Key_Home: self.first_page()
-        elif e.key() == Qt.Key.Key_End: self.last_page()
-        else: super().keyPressEvent(e)
+        # Normal navigation. PageUp/PageDown/space stay with the scroll area so
+        # they keep their native smooth-scrolling behaviour.
+        if e.key() == Qt.Key.Key_Left:
+            self.prev_page()
+        elif e.key() == Qt.Key.Key_Right:
+            self.next_page()
+        elif e.key() == Qt.Key.Key_Home:
+            self.first_page()
+        elif e.key() == Qt.Key.Key_End:
+            self.last_page()
+        else:
+            super().keyPressEvent(e)
 
     # ═══════════ Touchpad pinch-to-zoom + Ctrl+wheel ═══════════
     #
@@ -2110,6 +2659,16 @@ class PdfReaderWidget(QWidget):
     # produces 2.5% zoom change (= 5% per 120, same ratio as before but
     # twice as responsive).
     # Phase 3 (ScrollEnd) triggers the deferred sharp render.
+
+    def mouseDoubleClickEvent(self, e):
+        """Toggle between fit-width and fit-height zoom (Preview/Acrobat habit)."""
+        if not self.doc or self._edit_mode:
+            super().mouseDoubleClickEvent(e)
+            return
+        if self._zoom_mode == "fit_width":
+            self._on_fit_height()
+        else:
+            self._on_fit_width()
 
     def wheelEvent(self, e):
         if not self.doc or self._view_mode != ViewMode.SCROLL:

@@ -22,7 +22,7 @@ CLI_COMMANDS = {
     "merge", "split", "extract-text", "extract-images",
     "to-images", "from-images", "compress", "watermark",
     "encrypt", "decrypt", "rotate", "info",
-    "to-word", "to-ppt", "to-excel", "mixed-merge",
+    "to-word", "to-ppt", "to-excel", "mixed-merge", "search", "outline",
     "delete-pages", "rotate-pages", "move-pages",
     "extract-pages", "page-undo", "page-redo", "page-history",
     "page-list",
@@ -50,6 +50,11 @@ Commands:
     extract-text   -i <pdf>    -o <txt>      Extract text from PDF
     extract-images -i <pdf>    -o <dir>      Extract embedded images
     to-images      -i <pdf>    -o <dir>      PDF pages to PNG (--dpi 36-1200)
+
+  Inspect
+    search      -i <pdf> -q <text> [-o <file>] [--case] [--whole-word] [--pages <spec>]
+                                             Find text, print hits + context
+    outline     -i <pdf>       [--json]      Dump the bookmark tree
 
   Secure & optimise
     compress    -i <pdf>       -o <pdf>      Compress (--mode lossless|medium|max)
@@ -79,6 +84,7 @@ Commands:
 Examples:
     PDFeverything.exe merge -i a.pdf b.pdf c.pdf -o merged.pdf
     PDFeverything.exe mixed-merge -i report.docx chart.png notes.txt -o bundle.pdf
+    PDFeverything.exe search -i report.pdf -q "invoice" --json
     PDFeverything.exe compress -i big.pdf -o small.pdf --mode medium
     PDFeverything.exe rotate-pages -i doc.pdf -o out.pdf --pages 1-3 --degrees 90
     PDFeverything.exe page-undo -i out.pdf -o reverted.pdf
@@ -89,7 +95,7 @@ Subsequent runs in the same session are instant.
 """
 
 
-VERSION = "1.5.0"
+VERSION = "1.6.0"
 PROJECT_DIR = Path(__file__).parent.resolve()
 _DARK_MODE = False  # set by launch_gui before any GUI widgets are created
 

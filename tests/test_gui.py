@@ -341,6 +341,89 @@ pump(0.3)
 check("close resets the reader", reader.doc is None and not reader._labels)
 
 # ═══════════════════════════════════════════════════════════
+section("═══ 4b. Reader: search, outline, reading position ═══")
+import fitz as _fitz  # noqa: E402
+
+search_doc = TMP / "searchable.pdf"
+_d = _fitz.open()
+for i in range(20):
+    _p = _d.new_page()
+    _p.insert_text((72, 100), f"Chapter {i + 1}", fontsize=18)
+    _p.insert_text((72, 140), "alpha beta gamma PDFeverything", fontsize=11)
+    if i % 5 == 0:
+        _p.insert_text((72, 180), f"KEYWORD marker {i}", fontsize=12)
+_d.set_toc([[1, "Part One", 1], [2, "Chapter 1", 1], [2, "Chapter 2", 2],
+            [1, "Part Two", 11]])
+_d.save(search_doc)
+_d.close()
+
+reader.close_document()
+pump(0.2)
+reader.open_pdf(search_doc)
+pump(0.5)
+check("outline loaded into the sidebar", len(reader._outline_entries) == 2,
+      str(len(reader._outline_entries)))
+check("outline tree shows top-level entries",
+      reader.outline_tree.topLevelItemCount() == 2)
+check("sidebar visible by default", reader.sidebar.isVisible())
+check("find bar starts hidden", reader.search_bar.isHidden())
+
+reader.start_search("KEYWORD")
+pump(0.3)
+check("search finds every hit", len(reader._search_hits) == 4,
+      str(len(reader._search_hits)))
+check("search results listed", reader.search_list.count() == 4,
+      str(reader.search_list.count()))
+check("search jumps to the first hit",
+      reader._current_page == reader._search_hits[0].page,
+      f"{reader._current_page} vs {reader._search_hits[0].page}")
+first_page = reader._current_page
+reader.find_next()
+check("find_next advances to the next hit", reader._current_page != first_page,
+      f"still on page {reader._current_page + 1}")
+reader.find_prev()
+check("find_prev goes back", reader._current_page == first_page)
+
+pix = reader._get_or_render(reader._search_hits[0].page, *reader._viewport_size())
+img = pix.toImage()
+highlighted = any(
+    img.pixelColor(x, y).red() > 200 and img.pixelColor(x, y).green() > 150
+    and img.pixelColor(x, y).blue() < 120
+    for y in range(0, img.height(), 4) for x in range(0, img.width(), 4))
+check("hits are painted into the rendered page", highlighted)
+
+reader.start_search("definitelynotpresent")
+pump(0.2)
+check("no-match search clears the hit list", not reader._search_hits)
+reader.start_search("alpha")
+pump(0.3)
+check("case-insensitive search finds all pages", len(reader._search_hits) == 20,
+      str(len(reader._search_hits)))
+reader.show_search_bar(False)
+pump(0.2)
+check("closing the find bar clears hits", not reader._search_hits)
+
+reader._on_outline_clicked(reader.outline_tree.topLevelItem(1), 0)
+check("outline click navigates", reader._current_page == 10,
+      str(reader._current_page + 1))
+reader.toggle_sidebar(False)
+pump(0.2)
+check("sidebar can be hidden", not reader.sidebar.isVisible())
+reader.toggle_sidebar(True)
+pump(0.3)
+check("sidebar can be restored", reader.sidebar.isVisible())
+
+reader.go_to_page(12)
+reader.close_document()
+pump(0.3)
+reader.open_pdf(search_doc)
+pump(0.5)
+check("reading position is restored on reopen", reader._current_page == 11,
+      f"page {reader._current_page + 1}")
+reader.close_document()
+pump(0.2)
+
+# ═══════════════════════════════════════════════════════════
 section("═══ 5. File list guards ═══")
 flw = FileListWidget()
 flw.MAX_FILES = 3

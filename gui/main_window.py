@@ -48,7 +48,7 @@ from .pdf_reader_widget import PdfReaderWidget
 from .workers import BaseWorker
 
 
-VERSION = "1.5.0"
+VERSION = "1.6.0"
 
 
 def _dc(dark, light):
@@ -203,6 +203,17 @@ class MainWindow(QMainWindow):
         self.reader.btn_zoom_in.setToolTip(tr("reader_zoom_in"))
         self.reader.zoom_edit.setToolTip(tr("reader_zoom_edit"))
         self.reader.btn_close.setToolTip(tr("reader_close"))
+        self.reader.btn_sidebar.setToolTip(tr("reader_sidebar_tip"))
+        self.reader.btn_search.setToolTip(tr("reader_search_tip"))
+        self.reader.btn_tab_outline.setText(tr("reader_tab_outline"))
+        self.reader.btn_tab_search.setText(tr("reader_tab_search"))
+        self.reader.search_edit.setPlaceholderText(tr("reader_search_placeholder"))
+        self.reader.search_check_case.setText(tr("reader_search_case"))
+        self.reader.btn_search_prev.setToolTip(tr("reader_search_prev"))
+        self.reader.btn_search_next.setToolTip(tr("reader_search_next"))
+        self.reader.btn_search_close.setToolTip(tr("reader_search_close"))
+        if not self.reader._outline_entries:
+            self.reader._update_outline_placeholder()
         # Reader edit toolbar
         self.reader.btn_edit.setToolTip(tr("reader_edit"))
         self.reader.btn_edit_sel.setText(tr("reader_edit_select"))

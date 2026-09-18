@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/Lezheng2333/PDFeverything/releases"><img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-blue?style=flat-square" /></a>
-  <a href="https://github.com/Lezheng2333/PDFeverything/releases/latest"><img src="https://img.shields.io/badge/version-v1.5.0-007aff?style=flat-square" /></a>
+  <a href="https://github.com/Lezheng2333/PDFeverything/releases/latest"><img src="https://img.shields.io/badge/version-v1.6.0-007aff?style=flat-square" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" /></a>
 </p>
 
@@ -35,51 +35,28 @@ Drag everything in — any combination of PDFs, Word documents, PowerPoint decks
 
 > 🔗 [**Latest Release →**](https://github.com/Lezheng2333/PDFeverything/releases/latest)
 
-## 🆕 What's New in v1.5.0
+## 🆕 What's New in v1.6.0
 
-**Correctness and speed — a full hardening pass over every layer.**
+**The reader becomes a real reader: search, bookmarks and a place to come back to.**
 
-- 🚀 **Opens any PDF instantly** — a 1000-page document used to render *every* page
-  at 100% before the first pixel appeared (≈2 GB RAM, seconds of CPU). Now only the
-  visible window is rendered, with a bounded look-ahead ring: **120 pages open in
-  27 ms using 8 MB of cache** (was 240 MB).
-- 🔍 **`PDF → Word` no longer loses text** — PyMuPDF's block tuples were unpacked in
-  the wrong order, so every block after the first was rasterised as an image or
-  dropped. A 5-block page produced 1 paragraph; it now produces all 5.
-- 📊 **`PDF → Excel` really extracts tables** — table extraction called a PyMuPDF
-  attribute that no longer exists, so table pages silently vanished from the output.
-- 🀄 **Chinese/Japanese/Korean text is preserved** — text files, Word/PPT/Excel
-  fallbacks and watermarks rendered through Latin-1-only fonts, turning CJK into
-  `·······`. A CJK font is now selected automatically.
-- 🔐 **Working encryption** — `cryptography` is now a declared dependency
-  (AES-256 instead of legacy RC4-128), an empty password is rejected instead of
-  silently producing an unprotected file, and `info` reports encryption status for
-  locked files instead of failing.
-- 🗜️ **Compression modes that do something** — `lossless` / `medium` / `max` now
-  resample and re-encode images instead of all behaving identically.
-- 💧 **Watermarks obey their settings** — opacity is written to the PDF graphics
-  state, the angle is applied as a real rotation (45° used to collapse to 0°), and
-  CJK watermark text renders properly.
-- 🧵 **Cancel actually cancels** — the old `cancel()` blocked the UI thread for 5 s
-  and the 60-minute timeout re-emitted its error on every progress tick. Now the
-  worker cancels cooperatively, never blocks the GUI, and reports exactly once.
-- 🧩 **Batches survive bad files** — one corrupt input used to abort the whole run;
-  failures are now collected per file and reported with the success count.
-- 🔗 **MCP stream is clean** — PyMuPDF's one-time stdout notice desynchronised the
-  JSON-RPC channel, and a blank line killed the server. Both fixed, plus `ping`
-  support and correct notification handling.
-- 🖱️ **Grid selection is instant** — box-select no longer re-renders every
-  thumbnail on every mouse-move (0.87 ms → 0.01 ms per event on a 30-page doc).
-- 🪟 **Window resize re-centres pages** — the layout is recomputed on resize and
-  when the reader tab becomes visible, instead of keeping stale geometry.
-- 🗂️ **Real undo for CLI/MCP page editing** — `page-undo` / `page-redo` /
-  `page-history` used to be stateless no-ops; the history is now persisted per file.
-- ✨ **CLI polish** — new `mixed-merge` command, `--mode` for compression,
-  DPI validation, tolerant page-range parsing (`1-5`, `1–5`, `1,3,5`, `all`,
-  full-width commas) and clear errors instead of silent no-ops.
-- 🧪 **Test suites added** — `tests/test_core.py` (51 checks) and
-  `tests/test_gui.py` (45 checks) plus the reader QA suite (38 checks).
-
+- 🔍 **Full-text search (⌘/Ctrl+F)** — a find bar with match count, next/previous
+  (`⏎` / `⇧⏎` / `⌘G`), case sensitivity, and **highlights painted directly into the
+  page** — including an orange marker on the current hit. Hits are listed in the
+  sidebar with their surrounding context; clicking one jumps straight to it.
+- 📑 **Contents sidebar** — the document's bookmark tree in a collapsible left panel
+  (`⌘/Ctrl+B`), with nesting, page targets and one-click navigation. Documents
+  without bookmarks say so instead of showing an empty box.
+- 🔁 **Reading position memory** — closing and reopening a PDF returns you to the
+  page and zoom level you left, per file.
+- ⌨️ **Reader shortcuts** — `⌘F` find, `⌘B` sidebar, `⌘+`/`⌘−` zoom, `⌘0` fit height,
+  `⌘1` fit width, `←`/`→` pages, `Home`/`End` first/last, `Esc` closes the find bar.
+- 🖱️ **Double-click toggles fit-width ↔ fit-height**, page range navigation stays
+  native (PageUp/PageDown keep smooth scrolling).
+- 🤖 **`pdf_search` and `pdf_outline` MCP tools** (25 total) and matching CLI
+  commands — `search -q "invoice" --json` returns every match with page, rectangle
+  and context; `outline` dumps the bookmark tree.
+- 🧪 Search/outline/navigation are covered by the GUI suite: **62 checks** in
+  `tests/test_gui.py` (134 → 151 across all suites).
 ---
 
 ## 🎯 The Killer Feature: Mixed-File Merge
@@ -177,7 +154,7 @@ A high-performance PDF reader with **vector-grade rendering** — rivaling Acrob
 
 ## 🤖 AI Agent Integration (MCP Server)
 
-PDFeverything comes with a built-in **Model Context Protocol (MCP)** server. Any AI agent (Claude Desktop, Claude Code, Cursor, etc.) can discover all 23 PDF tools and call them directly — **no Python, no install, just the app file**.
+PDFeverything comes with a built-in **Model Context Protocol (MCP)** server. Any AI agent (Claude Desktop, Claude Code, Cursor, etc.) can discover all 25 PDF tools and call them directly — **no Python, no install, just the app file**.
 
 ### How it works
 
@@ -232,7 +209,7 @@ Add to `.claude/settings.json` in your project:
 }
 ```
 
-### What the AI sees (23 tools)
+### What the AI sees (25 tools)
 
 Once connected, the agent automatically discovers these tools — no manual instruction needed:
 
@@ -241,6 +218,8 @@ Once connected, the agent automatically discovers these tools — no manual inst
 | `pdf_merge` | Merge several PDFs into one, in the order you list them |
 | `pdf_split` | Split a PDF into single pages (or by custom ranges) |
 | `pdf_info` | Metadata: page count, size, author, title, encryption status |
+| `pdf_outline` | Bookmark / table-of-contents tree with target pages |
+| `pdf_search` | Find text in a PDF — every match with page, position and context |
 | `pdf_extract_text` | Extract all text from a PDF to a .txt file |
 | `pdf_extract_images` | Extract every embedded image to a folder |
 | `pdf_to_images` | Render each page to a PNG (adjustable DPI) |
@@ -389,39 +368,23 @@ MIT — do whatever you want with it. [LICENSE](resources/LICENSE.txt)
 | 🔄 **旋转** | 旋转页面 90° / 180° / 270° |
 | ℹ️ **信息** | 查看页数、元数据、加密状态 |
 
-### 🆕 v1.5.0 新功能
+### 🆕 v1.6.0 新功能
 
-**一次覆盖全链路的正确性与性能加固。**
+**阅读器升级为真正的阅读器：搜索、目录、以及"上次读到哪"。**
 
-- 🚀 **任意大小的 PDF 秒开** — 以前打开 1000 页文档会先把**每一页**渲染到 100%
-  （约 2GB 内存、数秒 CPU）才显示第一个像素。现在只渲染可见窗口并保留有限的
-  前后缓冲：**120 页 27ms 打开、缓存 8MB**（原来 240MB）。
-- 🔍 **PDF → Word 不再丢内容** — PyMuPDF 的 block 元组字段顺序被读错，导致
-  第一段之后的文字块要么被当成图片，要么被直接丢弃。现在 5 段全部保留。
-- 📊 **PDF → Excel 真的能提取表格** — 旧代码调用了一个在新版 PyMuPDF 中已不
-  存在的属性，表格页会整个从输出里消失。
-- 🀄 **中文内容不再变圆点** — 文本文件、Word/PPT/Excel 回退渲染和水印过去都
-  使用只支持 Latin-1 的内置字体，中文会被替换成 `·······`；现在自动切换 CJK 字体。
-- 🔐 **加密真正生效** — 声明 `cryptography` 依赖（AES-256 取代旧式 RC4-128）、
-  拒绝空密码（旧版会"加密"出一个无需密码就能打开的文件）、`info` 也能正确
-  报告受保护文件的加密状态。
-- 🗜️ **压缩档位有实际差别** — 无损 / 中等 / 最大 现在会真正重采样并重新编码图片。
-- 💧 **水印参数全部生效** — 透明度写入 PDF 图形状态、角度按真实旋转应用
-  （45° 过去会被归零）、中文水印正常渲染。
-- 🧵 **取消就是取消** — 旧的 `cancel()` 会阻塞界面 5 秒，60 分钟超时还会在每个
-  进度回调里重复弹错。现在协作式取消、不阻塞界面、只报告一次。
-- 🧩 **批量不再被单个坏文件中断** — 失败的输入会被逐个收集，并给出成功/失败汇总。
-- 🔗 **MCP 输出流干净** — PyMuPDF 的一次性 stdout 提示会打乱 JSON-RPC 通道，
-  空行还会直接结束服务；均已修复，并补上 `ping` 与通知处理。
-- 🖱️ **网格框选变快** — 拖拽框选不再每次鼠标移动都重绘全部缩略图
-  （30 页文档：0.87ms → 0.01ms / 事件）。
-- 🪟 **窗口缩放后页面重新居中** — 缩放窗口或阅读 Tab 首次显示时会重算布局。
-- 🗂️ **CLI/MCP 页面编辑有真正的撤销** — `page-undo` / `page-redo` /
-  `page-history` 过去是无状态空操作，现在按文件持久化历史。
-- ✨ **CLI 打磨** — 新增 `mixed-merge` 命令、压缩 `--mode`、DPI 校验、
-  容错的页码范围解析（`1-5`、`1–5`、`1,3,5`、`all`、全角逗号）以及明确的报错。
-- 🧪 **新增测试套件** — `tests/test_core.py`（51 项）、`tests/test_gui.py`（45 项）
-  以及阅读器 QA 套件（38 项）。
+- 🔍 **全文搜索（⌘/Ctrl+F）** — 查找栏带命中计数、上/下一个（`⏎` / `⇧⏎` / `⌘G`）、
+  区分大小写，**高亮直接绘制在页面位图上**，当前位置用橙色标记；侧栏列出每处命中
+  及其上下文，点击即跳转。
+- 📑 **目录侧栏** — 可折叠左栏（`⌘/Ctrl+B`）展示书签树，支持层级、目标页码与一键跳转；
+  没有书签的文档会给出说明而不是一片空白。
+- 🔁 **阅读位置记忆** — 关闭再打开同一文件，自动回到上次的页码与缩放级别。
+- ⌨️ **阅读器快捷键** — `⌘F` 查找、`⌘B` 侧栏、`⌘+`/`⌘−` 缩放、`⌘0` 适应高度、
+  `⌘1` 适应宽度、`←`/`→` 翻页、`Home`/`End` 首末页、`Esc` 关闭查找栏。
+- 🖱️ **双击在适应宽度/适应高度之间切换**；PageUp/PageDown 保留原生平滑滚动。
+- 🤖 **新增 `pdf_search` 与 `pdf_outline` MCP 工具**（共 25 个）及对应 CLI 命令 —
+  `search -q "invoice" --json` 返回每处命中的页码、矩形与上下文。
+- 🧪 搜索/目录/导航已纳入 GUI 测试套件：`tests/test_gui.py` 62 项
+  （全部套件 134 → 151 项）。
 
 ### 🖥️ 界面预览
 
@@ -450,7 +413,7 @@ MIT — do whatever you want with it. [LICENSE](resources/LICENSE.txt)
 
 ### 🤖 AI Agent 集成（MCP 服务器）
 
-PDFeverything 内置了 **Model Context Protocol (MCP)** 服务器。任何 AI Agent（Claude Desktop、Claude Code、Cursor 等）都能自动发现全部 23 个 PDF 工具并直接调用——**无需安装 Python、无需额外依赖，只要有这个 app 文件就行**。
+PDFeverything 内置了 **Model Context Protocol (MCP)** 服务器。任何 AI Agent（Claude Desktop、Claude Code、Cursor 等）都能自动发现全部 25 个 PDF 工具并直接调用——**无需安装 Python、无需额外依赖，只要有这个 app 文件就行**。
 
 #### 同一个文件，三种模式
 
@@ -503,7 +466,7 @@ PDFeverything 内置了 **Model Context Protocol (MCP)** 服务器。任何 AI A
 }
 ```
 
-#### AI 能看到的 23 个工具
+#### AI 能看到的 25 个工具
 
 连接后 Agent 会自动发现这些工具——无需手动教它：
 

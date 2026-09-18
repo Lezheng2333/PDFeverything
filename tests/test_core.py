@@ -208,6 +208,50 @@ check("CLI info end-to-end", run.returncode == 0 and "页数" in run.stdout,
       run.stdout[:200] + run.stderr[:200])
 
 # ═══════════════════════════════════════════════════════════
+print("\n═══ 4b. Search + outline (core/search.py) ═══")
+import fitz as _fitz  # noqa: E402
+
+from core.search import get_outline, search_pdf  # noqa: E402
+
+search_src = TMP / "searchable.pdf"
+_sd = _fitz.open()
+for _i in range(12):
+    _p = _sd.new_page()
+    _p.insert_text((72, 100), f"Chapter {_i + 1}", fontsize=18)
+    _p.insert_text((72, 140), "alphabetic beta gamma delta", fontsize=11)
+    if _i % 4 == 0:
+        _p.insert_text((72, 180), f"NEEDLE marker {_i}", fontsize=12)
+_sd.set_toc([[1, "Part One", 1], [2, "Chapter 1", 1], [1, "Part Two", 5]])
+_sd.save(search_src)
+_sd.close()
+
+res = search_pdf(search_src, "NEEDLE")
+check("search finds all occurrences", res.count == 3, str(res.count))
+check("search reports the pages", res.pages_with_hits() == [0, 4, 8],
+      str(res.pages_with_hits()))
+check("search returns rectangles",
+      all(len(h.rect) == 4 and h.rect[2] > h.rect[0] for h in res.hits))
+check("search returns context", all(h.context for h in res.hits))
+check("search is case-insensitive by default", search_pdf(search_src, "needle").count == 3)
+check("search honours case sensitivity", search_pdf(search_src, "needle",
+                                                   case_sensitive=True).count == 0)
+check("search honours page limits",
+      search_pdf(search_src, "NEEDLE", pages=[0]).count == 1)
+check("search truncates at max_hits",
+      search_pdf(search_src, "alphabetic", max_hits=2).truncated)
+check("blank query yields nothing", search_pdf(search_src, "   ").count == 0)
+check("missing text yields nothing", search_pdf(search_src, "zzzz").count == 0)
+check("whole-word filter rejects substrings",
+      search_pdf(search_src, "alp", whole_word=True).count == 0)
+
+outline = get_outline(search_src)
+check("outline parsed", len(outline) == 2, str(len(outline)))
+check("outline nesting", len(outline[0].children) == 1)
+check("outline page targets", outline[1].page == 4, str(outline[1].page))
+check("outline flatten", len([x for e in outline for x in e.flatten()]) == 3)
+check("outline empty for plain pdf", get_outline(SRC) == [])
+
+# ═══════════════════════════════════════════════════════════
 print("\n═══ 5. MCP tool registry ═══")
 sys.path.insert(0, str(ROOT / "mcp"))
 from server import TOOLS, _run_tool  # noqa: E402
@@ -220,6 +264,12 @@ check("every tool has a description", all(t.get("description") for t in TOOLS))
 mcp_out = TMP / "mcp_info.json"
 out = _run_tool("pdf_info", {"input": str(SRC)})
 check("pdf_info callable via MCP", "5" in str(out), str(out)[:200])
+
+mcp_res = _run_tool("pdf_search", {"input": str(search_src), "query": "NEEDLE"})
+check("pdf_search callable via MCP", '"matches": 3' in str(mcp_res), str(mcp_res)[:160])
+mcp_outline = _run_tool("pdf_outline", {"input": str(search_src)})
+check("pdf_outline callable via MCP", '"count": 2' in str(mcp_outline),
+      str(mcp_outline)[:160])
 
 mcp_pages = TMP / "mcp_pages"
 out = _run_tool("pdf_extract_text", {"input": str(SRC), "output": str(TMP / "mcp.txt")})
