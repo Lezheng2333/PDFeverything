@@ -22,7 +22,7 @@ CLI_COMMANDS = {
     "merge", "split", "extract-text", "extract-images",
     "to-images", "from-images", "compress", "watermark",
     "encrypt", "decrypt", "rotate", "info",
-    "to-word", "to-ppt", "to-excel",
+    "to-word", "to-ppt", "to-excel", "mixed-merge",
     "delete-pages", "rotate-pages", "move-pages",
     "extract-pages", "page-undo", "page-redo", "page-history",
     "page-list",
@@ -37,31 +37,51 @@ CLI mode (for AI agents / headless automation):
     PDFeverything.exe <command> [options]
 
 Commands:
+  Convert & combine
     merge       -i <files...>  -o <out>      Merge PDFs into one
-    split       -i <pdf>       -o <dir>       Split PDF into pages
-    extract-text  -i <pdf>     -o <txt>       Extract text from PDF
-    extract-images -i <pdf>    -o <dir>       Extract embedded images
-    to-images   -i <pdf>       -o <dir>  [--dpi 200]  PDF pages to PNG
-    from-images -i <imgs...>   -o <pdf>       Merge images into PDF
-    compress    -i <pdf>       -o <pdf>       Compress PDF
-    watermark   -i <pdf> -w <wmark> -o <pdf>  Add watermark
-    encrypt     -i <pdf>       -o <pdf> --password <pw>   Set password
+    mixed-merge -i <files...>  -o <out>      Merge PDF + images + Office + text
+    split       -i <pdf>       -o <dir>      Split PDF into pages
+    from-images -i <imgs...>   -o <pdf>      Merge images into PDF
+    to-word     -i <pdf>       -o <docx>     Convert PDF to Word
+    to-ppt      -i <pdf>       -o <pptx>     Convert PDF to PowerPoint
+    to-excel    -i <pdf>       -o <xlsx>     Extract PDF tables to Excel
+
+  Extract
+    extract-text   -i <pdf>    -o <txt>      Extract text from PDF
+    extract-images -i <pdf>    -o <dir>      Extract embedded images
+    to-images      -i <pdf>    -o <dir>      PDF pages to PNG (--dpi 36-1200)
+
+  Secure & optimise
+    compress    -i <pdf>       -o <pdf>      Compress (--mode lossless|medium|max)
+    watermark   -i <pdf> -w <wmark> -o <pdf> Add a PDF watermark
+    encrypt     -i <pdf>       -o <pdf> --password <pw>   Set password (AES-256)
     decrypt     -i <pdf>       -o <pdf> --password <pw>   Remove password
     rotate      -i <pdf>       -o <pdf> --angle <90|180|270>  Rotate pages
-    info        -i <pdf>                      Show PDF metadata
-    to-word     -i <pdf>       -o <docx>       Convert PDF to Word
-    to-ppt      -i <pdf>       -o <pptx> [--dpi 200]  PDF to PowerPoint
-    to-excel    -i <pdf>       -o <xlsx>       Extract PDF tables to Excel
+    info        -i <pdf>                     Show PDF metadata
 
-    -h, --help                                Show this help
-    --version                                 Show version
-    --mcp                                     Launch MCP server (for AI agents)
+  Page editing (persistent undo history per file)
+    page-list     -i <pdf>     [--json]                    List pages + rotation
+    delete-pages  -i <pdf> -o <pdf> --pages <spec>         Delete pages
+    rotate-pages  -i <pdf> -o <pdf> --pages <spec> --degrees <90|180|270>
+    move-pages    -i <pdf> -o <pdf> --source <spec> --target <n>
+    extract-pages -i <pdf> -o <pdf> --pages <spec>         Keep only these pages
+    page-undo     -i <pdf> -o <pdf>                        Undo last edit
+    page-redo     -i <pdf> -o <pdf>                        Redo last undone edit
+    page-history  -i <pdf>     [--json]                    Show edit history
+
+    <spec> accepts "all", "3", "1-5", "1-3,7,9-12"
+
+  Other
+    -h, --help                               Show this help
+    --version                                Show version
+    --mcp                                    Launch MCP server (for AI agents)
 
 Examples:
     PDFeverything.exe merge -i a.pdf b.pdf c.pdf -o merged.pdf
-    PDFeverything.exe info -i document.pdf
-    PDFeverything.exe to-word -i report.pdf -o report.docx
-    PDFeverything.exe to-excel -i tables.pdf -o data.xlsx
+    PDFeverything.exe mixed-merge -i report.docx chart.png notes.txt -o bundle.pdf
+    PDFeverything.exe compress -i big.pdf -o small.pdf --mode medium
+    PDFeverything.exe rotate-pages -i doc.pdf -o out.pdf --pages 1-3 --degrees 90
+    PDFeverything.exe page-undo -i out.pdf -o reverted.pdf
     PDFeverything.exe --mcp                  # start AI agent tool server
 
 Note: On first run the self-extracting executable takes a few seconds to unpack.
@@ -69,6 +89,7 @@ Subsequent runs in the same session are instant.
 """
 
 
+VERSION = "1.5.0"
 PROJECT_DIR = Path(__file__).parent.resolve()
 _DARK_MODE = False  # set by launch_gui before any GUI widgets are created
 
@@ -211,7 +232,7 @@ def main():
         print(HELP_TEXT)
         return
     if len(sys.argv) > 1 and sys.argv[1] in ("-v", "--version"):
-        print("PDFeverything v1.4.2")
+        print(f"PDFeverything v{VERSION}")
         return
     if len(sys.argv) > 1 and sys.argv[1] == "--mcp":
         launch_mcp()

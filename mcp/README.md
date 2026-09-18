@@ -55,22 +55,29 @@ The AI agent will see these tools automatically:
 
 | Tool | What it does |
 |---|---|
-| `pdf_merge` | Merge multiple PDFs into one |
-| `pdf_split` | Split PDF into separate pages |
-| `pdf_info` | Get PDF metadata (pages, size, author, etc.) |
-| `pdf_extract_text` | Extract all text from a PDF |
-| `pdf_extract_images` | Extract embedded images from a PDF |
-| `pdf_to_images` | Convert PDF pages to PNG images |
-| `images_to_pdf` | Combine images into a PDF |
-| `pdf_to_word` | Convert PDF to Word (.docx) |
-| `pdf_to_ppt` | Convert PDF to PowerPoint (.pptx) |
-| `pdf_to_excel` | Extract PDF tables to Excel (.xlsx) |
-| `pdf_compress` | Reduce PDF file size |
-| `pdf_watermark` | Add text watermark to every page |
-| `pdf_encrypt` | Set password on a PDF |
-| `pdf_decrypt` | Remove password from a PDF |
-| `pdf_rotate` | Rotate pages 90/180/270 degrees |
-| `pdf_mixed_merge` | 🔥 Merge mixed files (PDF+Word+PPT+Excel+images+text) into one PDF |
+| `pdf_merge` | Merge several PDFs into one, in the order you list them |
+| `pdf_split` | Split a PDF into single pages (or by custom ranges) |
+| `pdf_info` | Metadata: page count, size, author, title, encryption status |
+| `pdf_extract_text` | Extract all text from a PDF to a .txt file |
+| `pdf_extract_images` | Extract every embedded image to a folder |
+| `pdf_to_images` | Render each page to a PNG (adjustable DPI) |
+| `images_to_pdf` | Combine images (PNG/JPG/GIF/…) into one PDF |
+| `pdf_to_word` | Convert a PDF to Word (.docx), keeping text and tables |
+| `pdf_to_ppt` | Convert a PDF to PowerPoint (.pptx), one slide per page |
+| `pdf_to_excel` | Extract PDF tables into Excel sheets (.xlsx) |
+| `pdf_compress` | Shrink a PDF (lossless / medium / max) |
+| `pdf_watermark` | Add a text watermark with real opacity and angle |
+| `pdf_encrypt` | Set an open password (AES-256) |
+| `pdf_decrypt` | Remove the password from a PDF |
+| `pdf_rotate` | Rotate pages 90/180/270° |
+| `pdf_mixed_merge` | 🔥 The killer feature: merge mixed file types into one PDF |
+| `pdf_delete_pages` | Delete pages by 1-based number or range |
+| `pdf_rotate_pages` | Rotate specific pages |
+| `pdf_move_pages` | Reorder pages by moving them before a target position |
+| `pdf_extract_pages` | Extract pages into a new standalone PDF |
+| `pdf_undo` | Undo the last page edit (history persists per file) |
+| `pdf_redo` | Redo the last undone page edit |
+| `pdf_history` | Show the recorded editing history for a file |
 
 ## 🧪 Test It
 

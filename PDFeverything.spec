@@ -33,6 +33,9 @@ hiddenimports = [
     "pypdf.filters",
     "pikepdf",
     "pikepdf._core",
+    "cryptography",
+    "cryptography.hazmat.primitives.ciphers",
+    "cryptography.hazmat.backends.openssl",
     "pikepdf.models",
     "fitz",
     "PIL",
@@ -131,8 +134,8 @@ app = BUNDLE(
         "NSHighResolutionCapable": True,
         "CFBundleName": "PDFeverything",
         "CFBundleDisplayName": "PDFeverything",
-        "CFBundleShortVersionString": "1.4.2",
-        "CFBundleVersion": "1.4.2",
+        "CFBundleShortVersionString": "1.5.0",
+        "CFBundleVersion": "1.5.0",
         "CFBundleDocumentTypes": [
             {
                 "CFBundleTypeName": "PDF Document",

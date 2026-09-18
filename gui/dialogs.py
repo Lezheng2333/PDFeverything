@@ -1,8 +1,9 @@
 """Operation dialogs — encrypt, decrypt, watermark, rotate, compress, split, info."""
 
 from pathlib import Path
+from typing import Optional
 
-from PyQt6.QtCore import QSettings, Qt
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -20,14 +21,11 @@ from PyQt6.QtWidgets import (
     QSpinBox,
     QTextEdit,
     QVBoxLayout,
-    QWidget,
 )
 
-from .i18n import tr
+from core.utils import format_page_ranges, parse_page_ranges
 
-SETTING_OUTPUT_DIR = "output_dir"
-SETTING_DPI = "dpi"
-SETTING_COMPRESSION = "compression_level"
+from .i18n import tr
 
 
 # ── Encrypt ──────────────────────────────────────────────
@@ -132,9 +130,9 @@ class WatermarkDialog(QDialog):
         self.opacity_slider = QSlider(Qt.Orientation.Horizontal)
         self.opacity_slider.setRange(5, 100)
         self.opacity_slider.setValue(30)
-        self.opacity_label = QLabel("30%")
+        self.opacity_label = QLabel(tr("wm_opacity_fmt", v=30))
         self.opacity_slider.valueChanged.connect(
-            lambda v: self.opacity_label.setText(f"{v}%"))
+            lambda v: self.opacity_label.setText(tr("wm_opacity_fmt", v=v)))
         op_layout = QHBoxLayout()
         op_layout.addWidget(self.opacity_slider)
         op_layout.addWidget(self.opacity_label)
@@ -176,7 +174,9 @@ class WatermarkDialog(QDialog):
 
     def _validate(self):
         if self.type_combo.currentIndex() == 1:
-            if not Path(self.wm_path_edit.text()).exists():
+            text = self.wm_path_edit.text().strip()
+            # Path("") is Path("."), which exists — validate the raw text too.
+            if not text or not Path(text).is_file():
                 QMessageBox.warning(self, tr("msg_op_failed"), tr("msg_wm_pdf_invalid"))
                 return
         self.accept()
@@ -230,34 +230,30 @@ class RotateDialog(QDialog):
     def _validate(self):
         if not self.all_pages_check.isChecked():
             try:
-                self._parse_pages()
+                pages = self._parse_pages()
             except ValueError as e:
                 QMessageBox.warning(
                     self, tr("msg_op_failed"), tr("msg_rot_range_invalid", e=str(e)))
                 return
+            if not pages:
+                # An empty selection would make PdfOperator write a copy that is
+                # identical to the input while reporting success.
+                QMessageBox.warning(self, tr("msg_op_failed"), tr("msg_rot_empty"))
+                return
         self.accept()
 
     def get_angle(self) -> int:
+        # 90 CW / 90 CCW / 180 — pypdf only rotates clockwise, so CCW is 270.
         return [90, 270, 180][self.angle_combo.currentIndex()]
 
-    def get_pages(self) -> list:
+    def get_pages(self) -> Optional[list]:
+        """0-based page list, or None for "all pages"."""
         if self.all_pages_check.isChecked():
             return None
         return self._parse_pages()
 
     def _parse_pages(self) -> list:
-        text = self.pages_edit.text().strip()
-        if not text:
-            return []
-        result = []
-        for part in text.split(","):
-            part = part.strip()
-            if "-" in part:
-                a, b = part.split("-", 1)
-                result.extend(range(int(a), int(b) + 1))
-            else:
-                result.append(int(part))
-        return sorted(set(result))
+        return parse_page_ranges(self.pages_edit.text(), one_based=True)
 
 
 # ── Compress ─────────────────────────────────────────────
@@ -317,7 +313,11 @@ class SplitRangeDialog(QDialog):
         self.range_edit = QTextEdit()
         self.range_edit.setPlaceholderText(tr("spl_range_placeholder"))
         self.range_edit.setMaximumHeight(120)
+        self.range_edit.textChanged.connect(self._update_range_hint)
         c_layout.addWidget(self.range_edit)
+        self.range_hint = QLabel("")
+        self.range_hint.setStyleSheet("color:#888;font-size:11px;")
+        c_layout.addWidget(self.range_hint)
         layout.addWidget(self.custom_group)
         # Mode selector
         mode_layout = QHBoxLayout()
@@ -338,6 +338,21 @@ class SplitRangeDialog(QDialog):
         self.n_pages_group.setVisible(idx == 1)
         self.custom_group.setVisible(idx == 2)
 
+    def _update_range_hint(self):
+        """Live preview so the user sees the parsed ranges before clicking OK."""
+        try:
+            ranges = self._parse_ranges(self.range_edit.toPlainText())
+        except ValueError:
+            self.range_hint.setText("")
+            return
+        if ranges:
+            preview = ", ".join(
+                format_page_ranges(list(range(a - 1, b))) for a, b in ranges[:6])
+            more = f" +{len(ranges) - 6}" if len(ranges) > 6 else ""
+            self.range_hint.setText(f"{len(ranges)} → {preview}{more}")
+        else:
+            self.range_hint.setText("")
+
     def _validate(self):
         if self.mode_combo.currentIndex() == 2:
             text = self.range_edit.toPlainText().strip()
@@ -345,21 +360,13 @@ class SplitRangeDialog(QDialog):
                 QMessageBox.warning(self, tr("msg_op_failed"), tr("msg_spl_empty"))
                 return
             try:
-                ranges = []
-                for line in text.split("\n"):
-                    line = line.strip()
-                    if not line:
-                        continue
-                    if "-" in line:
-                        a, b = line.split("-", 1)
-                        ranges.append((int(a), int(b)))
-                    else:
-                        v = int(line)
-                        ranges.append((v, v))
-                if not ranges:
-                    raise ValueError("no valid ranges")
+                self._ranges = self._parse_ranges(text)
             except ValueError as e:
-                QMessageBox.warning(self, tr("msg_op_failed"), tr("msg_spl_invalid", e=str(e)))
+                QMessageBox.warning(
+                    self, tr("msg_op_failed"), tr("msg_spl_invalid", e=str(e)))
+                return
+            if not self._ranges:
+                QMessageBox.warning(self, tr("msg_op_failed"), tr("msg_spl_empty"))
                 return
         self.accept()
 
@@ -370,18 +377,28 @@ class SplitRangeDialog(QDialog):
         return self.n_spin.value()
 
     def get_ranges(self) -> list:
-        text = self.range_edit.toPlainText().strip()
+        """1-based inclusive (start, end) tuples, one per output file.
+
+        Parsed once during validation so a malformed line can never raise out of
+        a dialog accessor."""
+        return list(getattr(self, "_ranges", []))
+
+    @staticmethod
+    def _parse_ranges(text: str) -> list:
         ranges = []
-        for line in text.split("\n"):
-            line = line.strip()
+        normalized = text.replace("，", ",").replace("；", "\n").replace(";", "\n")
+        for line in normalized.splitlines():
+            line = line.strip().strip(",")
             if not line:
                 continue
-            if "-" in line:
-                a, b = line.split("-", 1)
-                ranges.append((int(a), int(b)))
+            pages = parse_page_ranges(line, one_based=True)
+            if not pages:
+                raise ValueError(line)
+            # "1-5" stays one output file; "1,3,5" becomes three.
+            if len(pages) > 1 and pages == list(range(pages[0], pages[-1] + 1)):
+                ranges.append((pages[0] + 1, pages[-1] + 1))
             else:
-                v = int(line)
-                ranges.append((v, v))
+                ranges.extend((p + 1, p + 1) for p in pages)
         return ranges
 
 
@@ -403,7 +420,7 @@ class InfoDialog(QDialog):
         field_map = [
             (tr("info_label_path"), info.get("path", "")),
             (tr("info_label_pages"), str(info.get("pages", 0))),
-            (tr("info_label_size"), format_bytes(int(info.get("size_bytes", 0)))),
+            (tr("info_label_size"), format_bytes(int(info.get("size_bytes") or 0))),
             (tr("info_label_encrypted"), tr("info_yes") if info.get("encrypted") else tr("info_no")),
             (tr("info_label_title"), info.get("title") or tr("info_na")),
             (tr("info_label_author"), info.get("author") or tr("info_na")),
@@ -413,7 +430,7 @@ class InfoDialog(QDialog):
         ]
 
         for label, value in field_map:
-            form.addRow(f"{label}:", QLabel(str(value)))
+            form.addRow(QLabel(label), QLabel(str(value)))
 
         layout.addLayout(form)
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)

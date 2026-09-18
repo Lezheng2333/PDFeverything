@@ -18,6 +18,7 @@ T = {
 
     # ── Operations menu ──
     "menu_operations":        {"zh": "操作(&O)",                                   "en": "&Operations"},
+    "menu_merge":             {"zh": "🔀 合并为统一 PDF",                           "en": "🔀 Merge to Unified PDF"},
     "menu_settings":          {"zh": "设置(&S)",                                   "en": "&Settings"},
     "menu_language":          {"zh": "语言(&L)",                                   "en": "&Language"},
     "menu_lang_zh":           {"zh": "中文",                                       "en": "Chinese"},
@@ -26,6 +27,7 @@ T = {
     # ── Help menu ──
     "menu_help":              {"zh": "帮助(&H)",                                   "en": "&Help"},
     "menu_about":             {"zh": "关于",                                        "en": "About"},
+    "menu_about_qt":          {"zh": "关于 Qt",                                     "en": "About Qt"},
 
     # ── Merge operations (group box) ──
     "group_merge_ops":        {"zh": "📦 合并操作",                                 "en": "📦 Merge Operations"},
@@ -99,9 +101,32 @@ T = {
     "reader_edit_print_tip":  {"zh": "调系统打印对话框打印选中页面",                    "en": "Print selected pages via system dialog"},
     "reader_edit_undo_tip":   {"zh": "撤销上一次操作 (Ctrl+Z)",                         "en": "Undo last operation (Ctrl+Z)"},
     "reader_edit_redo_tip":   {"zh": "重做已撤销的操作 (Ctrl+Shift+Z)",                 "en": "Redo last undone (Ctrl+Shift+Z)"},
-    "reader_cannot_open":     {"zh": "无法打开: {}",                                  "en": "Cannot open: {}"},
+    "reader_cannot_open":     {"zh": "无法打开: {path}",                              "en": "Cannot open: {path}"},
     "reader_encrypted":       {"zh": "此 PDF 受密码保护",                               "en": "This PDF is password-protected"},
     "reader_open_pdf":        {"zh": "打开 PDF...",                                  "en": "Open PDF..."},
+    "reader_unsaved_title":   {"zh": "未保存的修改",                                  "en": "Unsaved changes"},
+    "reader_unsaved_body":    {"zh": "你对这个 PDF 进行了编辑。\n是否保存修改后再关闭？",
+                               "en": "You edited this PDF.\nSave your changes before closing?"},
+    "reader_unsaved_saveas":  {"zh": "另存为...",                                    "en": "Save As..."},
+    "reader_unsaved_discard": {"zh": "不保存",                                       "en": "Don't Save"},
+    "reader_unsaved_cancel":  {"zh": "取消",                                        "en": "Cancel"},
+    "reader_saveas_title":    {"zh": "另存为",                                       "en": "Save As"},
+    "reader_sort_hint_title": {"zh": "排序模式",                                     "en": "Sort mode"},
+    "reader_sort_hint_body":  {"zh": "请先选中要排序的页面（⌘/Ctrl 或 Shift 多选），再点击排序按钮。",
+                               "en": "Select the pages to reorder first (⌘/Ctrl or Shift multi-select), then click Sort."},
+    "reader_delete_title":    {"zh": "删除页面",                                     "en": "Delete pages"},
+    "reader_delete_body":     {"zh": "确定删除 {count} 页吗？",                        "en": "Delete {count} page(s)?"},
+    "reader_extract_title":   {"zh": "提取页面",                                     "en": "Extract pages"},
+    "reader_export_title":    {"zh": "导出所选页面",                                  "en": "Export selected pages"},
+    "reader_done_title":      {"zh": "完成",                                        "en": "Done"},
+    "reader_extracted_body":  {"zh": "已提取到 {path}",                              "en": "Extracted to {path}"},
+    "reader_exported_body":   {"zh": "已导出到 {path}",                              "en": "Exported to {path}"},
+    "reader_print_title":     {"zh": "打印",                                        "en": "Print"},
+    "reader_print_failed":    {"zh": "打印失败: {error}",                            "en": "Print failed: {error}"},
+    "reader_export_pdf":      {"zh": "📄 导出为 PDF",                                "en": "📄 Export as PDF"},
+    "reader_export_jpg":      {"zh": "🖼️ 导出为 JPG 图片",                           "en": "🖼️ Export as JPG images"},
+    "reader_export_word":     {"zh": "📝 导出为 Word (.docx)",                       "en": "📝 Export as Word (.docx)"},
+    "reader_export_ppt":      {"zh": "📊 导出为 PowerPoint (.pptx)",                 "en": "📊 Export as PowerPoint (.pptx)"},
     "reader_file_filter":     {"zh": "PDF 文件 (*.pdf);;所有文件 (*)",                "en": "PDF files (*.pdf);;All files (*)"},
 
     # ── Status bar ──
@@ -112,8 +137,8 @@ T = {
     "btn_cancel":             {"zh": "取消",                                        "en": "Cancel"},
 
     # ── Progress messages ──
-    "progress_merging":       {"zh": "合并中 ({}/{}): {}",                           "en": "Merging ({}/{}): {}"},
-    "progress_converting":    {"zh": "转换中 ({}/{}): {}",                           "en": "Converting ({}/{}): {}"},
+    "progress_merging":       {"zh": "合并中 ({done}/{total}): {name}",               "en": "Merging ({done}/{total}): {name}"},
+    "progress_converting":    {"zh": "转换中 ({done}/{total}): {name}",               "en": "Converting ({done}/{total}): {name}"},
 
     # ── Dialogs: titles ──
     "dlg_encrypt_title":      {"zh": "🔒 加密 PDF",                                 "en": "🔒 Encrypt PDF"},
@@ -143,6 +168,7 @@ T = {
     "wm_font_size":           {"zh": "字体大小:",                                    "en": "Font size:"},
     "wm_opacity":             {"zh": "透明度:",                                      "en": "Opacity:"},
     "wm_rotation":            {"zh": "旋转角度:",                                    "en": "Rotation:"},
+    "wm_opacity_fmt":         {"zh": "{v}%",                                        "en": "{v}%"},
     "wm_placeholder_pdf":     {"zh": "选择水印 PDF 文件...",                          "en": "Select watermark PDF..."},
     "msg_wm_pdf_invalid":     {"zh": "请选择有效的水印 PDF 文件",                      "en": "Please select a valid watermark PDF file"},
 
@@ -154,7 +180,8 @@ T = {
     "rot_all_pages":          {"zh": "所有页面",                                     "en": "All pages"},
     "rot_page_range":         {"zh": "页码范围:",                                    "en": "Page range:"},
     "rot_range_placeholder":  {"zh": "例: 1-5, 8, 10-12",                           "en": "e.g. 1-5, 8, 10-12"},
-    "msg_rot_range_invalid":  {"zh": "页码范围无效: {}",                              "en": "Invalid page range: {}"},
+    "msg_rot_range_invalid":  {"zh": "页码范围无效: {e}",                             "en": "Invalid page range: {e}"},
+    "msg_rot_empty":          {"zh": "请输入要旋转的页码，或勾选「所有页面」",            "en": "Enter page numbers to rotate, or tick \"All pages\""},
 
     # ── Dialogs: compress ──
     "cmp_mode_label":         {"zh": "压缩模式:",                                    "en": "Compression mode:"},
@@ -179,7 +206,7 @@ T = {
     "spl_pages_unit":         {"zh": "页拆分为一个文件",                               "en": "pages per file"},
     "spl_range_placeholder":  {"zh": "每行一个范围，例如:\n1-5\n6-12\n13-20",         "en": "One range per line, e.g.:\n1-5\n6-12\n13-20"},
     "msg_spl_empty":          {"zh": "请输入页码范围",                                 "en": "Please enter page ranges"},
-    "msg_spl_invalid":        {"zh": "范围格式无效: {}",                               "en": "Invalid range format: {}"},
+    "msg_spl_invalid":        {"zh": "范围格式无效: {e}",                             "en": "Invalid range format: {e}"},
 
     # ── Dialogs: info ──
     "info_label_path":        {"zh": "文件路径",                                     "en": "File path"},
@@ -214,10 +241,14 @@ T = {
                                      "*.txt *.md *.log *.py *.json *.xml *.html *.yaml *.ini *.sh);;"
                                      "All files (*)"},
     "fl_msg_skip_title":      {"zh": "提示",                                        "en": "Notice"},
-    "fl_msg_skip_body":       {"zh": "已跳过 {count} 个不支持的文件格式。\n"
+    "fl_msg_skip_body":       {"zh": "已跳过 {count} 个文件。\n"
                                       "支持格式: PDF, 图片, Word, PPT, Excel, 文本文件",
-                               "en": "Skipped {count} unsupported file format(s).\n"
+                               "en": "Skipped {count} file(s).\n"
                                      "Supported: PDF, Images, Word, PPT, Excel, Text files"},
+    "fl_msg_skip_detail":     {"zh": "不支持格式 {unsupported} 个 · 超过 500MB {large} 个 · "
+                                      "空文件 {empty} 个 · 列表已满丢弃 {full} 个",
+                               "en": "{unsupported} unsupported · {large} over 500MB · "
+                                     "{empty} empty · {full} dropped (list full)"},
 
     # ── Main window messages ──
     "msg_no_files":           {"zh": "请先添加文件到列表",                              "en": "Please add files to the list first"},
@@ -234,6 +265,19 @@ T = {
     "msg_done_count":         {"zh": "已成功处理，共 {count} 项。",                     "en": "Processed {count} item(s)."},
     "msg_done_files":         {"zh": "已生成 {count} 个文件。",                         "en": "Generated {count} file(s)."},
     "msg_op_failed":          {"zh": "操作失败",                                      "en": "Operation failed"},
+    "msg_batch_limit_title":  {"zh": "超出批量上限",                                   "en": "Batch limit"},
+    "msg_batch_limit_body":   {"zh": "你选择了 {count} 个文件，批量上限为 {max} 个。\n"
+                                      "将只处理前 {max} 个文件，是否继续？",
+                               "en": "You selected {count} files; the batch limit is {max}.\n"
+                                     "Only the first {max} will be processed. Continue?"},
+    "msg_batch_large_title":  {"zh": "大批量处理",                                     "en": "Large batch"},
+    "msg_batch_large_body":   {"zh": "即将处理 {count} 个文件，可能需要一些时间。\n是否继续？",
+                               "en": "You are about to process {count} files. This may take a while.\nContinue?"},
+    "msg_batch_done":         {"zh": "批量处理完成：成功 {ok} 个，失败 {failed} 个。\n输出目录: {output}",
+                               "en": "Batch finished: {ok} succeeded, {failed} failed.\nOutput: {output}"},
+    "msg_cancelled_body":     {"zh": "操作已取消。",                                    "en": "Operation cancelled."},
+    "msg_oom":                {"zh": "内存不足 — 文件过大，无法处理",                    "en": "Out of memory — file is too large to process"},
+    "msg_timeout":            {"zh": "操作超时 — 请减少文件数量或体积后重试",             "en": "Operation timed out — try again with fewer or smaller files"},
 
     # ── Dialogs: save/select ──
     "dlg_save_pdf":           {"zh": "保存输出文件",                                   "en": "Save output file"},
@@ -247,6 +291,9 @@ T = {
                                       "所有文件 (*)",
                                "en": "Image files (*.png *.jpg *.jpeg *.gif *.bmp *.tiff *.webp);;"
                                      "All files (*)"},
+    "file_filter_word":       {"zh": "Word 文档 (*.docx);;所有文件 (*)",              "en": "Word (*.docx);;All files (*)"},
+    "file_filter_ppt":        {"zh": "PowerPoint 演示文稿 (*.pptx);;所有文件 (*)",     "en": "PowerPoint (*.pptx);;All files (*)"},
+    "file_filter_excel":      {"zh": "Excel 工作簿 (*.xlsx);;所有文件 (*)",            "en": "Excel (*.xlsx);;All files (*)"},
 
     # ── Office status ──
     "office_checking":        {"zh": "检测中...",                                     "en": "Checking..."},
@@ -259,12 +306,12 @@ T = {
 
     # ── About dialog ──
     "about_title":            {"zh": "关于 PDFeverything",                           "en": "About PDFeverything"},
-    "about_text":             {"zh": "PDFeverything v1.4.2\n\n"
+    "about_text":             {"zh": "PDFeverything v{version}\n\n"
                                       "一站式 PDF 处理桌面应用\n"
                                       "支持合并、拆分、格式转换、混合文件合并、PDF 阅读器等\n\n"
                                       "技术栈: Python + PyQt6 + PyMuPDF\n"
                                       "© 2026",
-                               "en": "PDFeverything v1.4.2\n\n"
+                               "en": "PDFeverything v{version}\n\n"
                                      "All-in-one PDF processing desktop app\n"
                                      "Merge, split, convert, mix files, built-in PDF reader and more\n\n"
                                      "Tech: Python + PyQt6 + PyMuPDF\n"
@@ -285,6 +332,7 @@ T = {
     "merge_word_files":       {"zh": "📝 Word → 合并 PDF",                           "en": "📝 Word → Merge PDF"},
     "merge_mixed_files":      {"zh": "🔀 混合文件 → 统一 PDF",                        "en": "🔀 Mixed files → Unified PDF"},
     "merge_as_pdf":           {"zh": "🔀 合并为 PDF",                                 "en": "🔀 Merge as PDF"},
+    "merge_count_fmt":        {"zh": "{label} ({count} 个文件)",                       "en": "{label} ({count} files)"},
 }
 
 # ── Tr helper ──────────────────────────────────────────────
@@ -301,13 +349,25 @@ def _load_lang() -> str:
 
 
 def tr(key: str, lang: str = None, **kwargs) -> str:
-    """Translate a UI key. Falls back to key itself if missing."""
+    """Translate a UI key. Falls back to the key itself if missing.
+
+    Formatting is defensive on purpose: a `{}` placeholder reached with keyword
+    arguments raises IndexError, and an exception inside a Qt slot makes PyQt6
+    abort the whole process. A malformed string must degrade to unformatted text,
+    never take the application down.
+    """
     if lang is None:
         lang = _load_lang()
     entry = T.get(key, {})
     text = entry.get(lang, entry.get("en", key))
     if kwargs:
-        text = text.format(**kwargs)
+        try:
+            text = text.format(**kwargs)
+        except (IndexError, KeyError, ValueError):
+            try:
+                text = text.format(*kwargs.values())
+            except Exception:
+                pass
     return text
 
 

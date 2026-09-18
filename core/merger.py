@@ -8,6 +8,21 @@ from .pdf_ops import PdfOperator
 from .utils import cleanup_temp_files, get_file_category, temp_dir, temp_pdf_path
 
 
+def _is_readable_pdf(path: Path) -> bool:
+    """True when `path` is a PDF that pypdf can actually open and page-count."""
+    try:
+        if path.stat().st_size < 32:
+            return False
+        import fitz
+        doc = fitz.open(path)
+        try:
+            return len(doc) > 0
+        finally:
+            doc.close()
+    except Exception:
+        return False
+
+
 def merge_mixed_files(
     file_paths: List[Path],
     output_path: Path,
@@ -72,12 +87,24 @@ def merge_mixed_files(
         if not temp_pdfs:
             raise RuntimeError("没有文件可以合并（所有文件转换均失败）")
 
+        # 阶段 1.5：逐个校验转换结果。一个 0 字节或损坏的 PDF 会让 pypdf 在
+        # 阶段 2 抛异常并让整次合并彻底失败，所以先剔除掉坏的输入。
+        valid_pdfs = []
+        for tmp_pdf in temp_pdfs:
+            if _is_readable_pdf(tmp_pdf):
+                valid_pdfs.append(tmp_pdf)
+            else:
+                failed.append({"path": str(tmp_pdf),
+                               "reason": "转换结果为空或已损坏，无法合并"})
+        if not valid_pdfs:
+            raise RuntimeError("没有可用的 PDF 可以合并")
+
         # 阶段 2：合并（占 80-100% 进度）
         if progress_callback:
             progress_callback("正在合并 PDF...", 85)
 
         PdfOperator.merge(
-            temp_pdfs, output_path,
+            valid_pdfs, output_path,
             progress_callback=lambda msg, pct: (
                 progress_callback(f"合并中: {msg}", 80 + int(pct * 0.2))
                 if progress_callback else None
@@ -90,7 +117,7 @@ def merge_mixed_files(
         return {
             "success": True,
             "total_files": total,
-            "converted": len(temp_pdfs),
+            "converted": len(valid_pdfs),
             "failed": failed,
             "output": str(output_path),
         }

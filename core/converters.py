@@ -2,6 +2,7 @@
 
 使用 ConverterRegistry 注册表模式：新增格式只需实现 BaseConverter 并注册。"""
 
+import re
 import subprocess
 import sys
 from abc import ABC, abstractmethod
@@ -9,6 +10,44 @@ from pathlib import Path
 from typing import Callable, List, Optional
 
 from .utils import check_input, read_text_file, temp_pdf_path
+
+# ── 字体选择 ───────────────────────────────────────────────
+# PDF 内置的 14 种基础字体只覆盖 Latin-1；用它渲染中文/日文/韩文时每个字形都会
+# 被替换成圆点，用户看到的是一页"·······"。凡是出现非 Latin-1 字符就换用
+# MuPDF 内置的 CJK 字体。
+_NON_LATIN = re.compile(r"[^\x00-\xff]")
+
+
+def _has_cjk(text: str) -> bool:
+    return bool(_NON_LATIN.search(text or ""))
+
+
+def _draw_text_block(page, x: float, y: float, lines, fontsize: float,
+                     mono: bool = False, color=(0, 0, 0)) -> None:
+    """把若干行文字画到 PDF 页面上，自动为 CJK 选择可用字体。"""
+    import fitz
+
+    text = "\n".join(lines)
+    if _has_cjk(text):
+        font = None
+        try:
+            font = fitz.Font("china-s")
+        except Exception:
+            font = None
+        if font is not None:
+            tw = fitz.TextWriter(page.rect, color=color)
+            cursor = y
+            for line in lines:
+                if line:
+                    tw.append((x, cursor), line, font=font, fontsize=fontsize)
+                cursor += fontsize * 1.45
+            tw.write_text(page)
+            return
+    fontname = "Courier" if mono else "Helvetica"
+    for i, line in enumerate(lines):
+        if line:
+            page.insert_text(fitz.Point(x, y + i * fontsize * 1.45), line,
+                             fontsize=fontsize, fontname=fontname, color=color)
 
 
 # ── AppleScript 模板 ───────────────────────────────────────
@@ -220,27 +259,17 @@ class TextConverter(BaseConverter):
 
         y = margin + line_height
         for line in content.split("\n"):
-            # 长行截断
+            # 先按字符宽度折行，再逐行写出
             if len(line) > chars_per_line:
-                # 按宽度折行
-                for chunk_start in range(0, len(line), chars_per_line):
-                    chunk = line[chunk_start:chunk_start + chars_per_line]
-                    if y + line_height > margin + usable_height:
-                        page = doc.new_page()
-                        y = margin + line_height
-                    page.insert_text(
-                        fitz.Point(margin, y), chunk,
-                        fontsize=9, fontname="Courier", color=(0, 0, 0),
-                    )
-                    y += line_height
+                chunks = [line[i:i + chars_per_line]
+                          for i in range(0, len(line), chars_per_line)]
             else:
+                chunks = [line]
+            for chunk in chunks:
                 if y + line_height > margin + usable_height:
                     page = doc.new_page()
                     y = margin + line_height
-                page.insert_text(
-                    fitz.Point(margin, y), line,
-                    fontsize=9, fontname="Courier", color=(0, 0, 0),
-                )
+                _draw_text_block(page, margin, y, [chunk], 9, mono=True)
                 y += line_height
 
         doc.save(out)
@@ -308,9 +337,15 @@ class WordConverter(BaseConverter):
             if y + line_height + 2 > rect.height - margin:
                 new_page()
                 x = margin + indent
-            font = "Helvetica-Bold" if bold else "Helvetica"
             current_page = pdf[-1]
-            current_page.insert_text(fitz.Point(x, y), text, fontsize=fontsize, fontname=font)
+            if _has_cjk(text):
+                # Base-14 fonts cannot encode CJK — use the built-in CJK font so
+                # Chinese/Japanese/Korean text survives instead of becoming dots.
+                _draw_text_block(current_page, x, y, [text], fontsize)
+            else:
+                font = "Helvetica-Bold" if bold else "Helvetica"
+                current_page.insert_text(fitz.Point(x, y), text,
+                                         fontsize=fontsize, fontname=font)
             y += line_height + 2
 
         def insert_image_blob(image_blob, max_width=None, max_height=400):
@@ -481,11 +516,9 @@ class PowerPointConverter(BaseConverter):
                 if title:
                     break
 
-            page.insert_text(
-                fitz.Point(margin, y),
-                f"Slide {slide_idx + 1}: {title}" if title else f"Slide {slide_idx + 1}",
-                fontsize=16, fontname="Helvetica-Bold",
-            )
+            heading = (f"Slide {slide_idx + 1}: {title}" if title
+                       else f"Slide {slide_idx + 1}")
+            _draw_text_block(page, margin, y, [heading], 16)
             y += 30
 
             # 提取所有文字
@@ -503,10 +536,7 @@ class PowerPointConverter(BaseConverter):
                                 y = 50
                             for chunk_start in range(0, len(ln), chars_per_line):
                                 chunk = ln[chunk_start:chunk_start + chars_per_line]
-                                page.insert_text(
-                                    fitz.Point(margin, y), chunk,
-                                    fontsize=10, fontname="Helvetica",
-                                )
+                                _draw_text_block(page, margin, y, [chunk], 10)
                                 y += 14
 
             if progress_callback and slide_idx % 5 == 0:
@@ -568,11 +598,7 @@ class ExcelConverter(BaseConverter):
             usable_width = rect.width - 2 * margin
             max_cols = max(1, int(usable_width / cell_w))
 
-            page.insert_text(
-                fitz.Point(margin, 25),
-                f"工作表: {ws.title}",
-                fontsize=12, fontname="Helvetica-Bold",
-            )
+            _draw_text_block(page, margin, 25, [f"Sheet: {ws.title}"], 12)
             y = 45
 
             row_count = 0
@@ -594,10 +620,7 @@ class ExcelConverter(BaseConverter):
                     # 截断过长单元格
                     max_chars = max(1, int(cell_w / 6))
                     display = val[:max_chars - 1] + "…" if len(val) > max_chars else val
-                    page.insert_text(
-                        fitz.Point(x, y), display,
-                        fontsize=8, fontname="Helvetica",
-                    )
+                    _draw_text_block(page, x, y, [display], 8)
                 y += cell_h
                 row_count += 1
 
@@ -619,6 +642,21 @@ class PdfPassThroughConverter(BaseConverter):
         import shutil
 
         check_input(input_path)
+        # Fail here (so merger records it in `failed`) instead of letting a
+        # 0-byte/corrupt PDF blow up the merge phase for every other file.
+        import fitz
+        try:
+            probe = fitz.open(input_path)
+            try:
+                if len(probe) == 0:
+                    raise ValueError("PDF 没有任何页面")
+            finally:
+                probe.close()
+        except ValueError:
+            raise
+        except Exception as e:
+            raise ValueError(f"无法读取 PDF: {e}") from None
+
         out = output_dir / input_path.name
         shutil.copy2(input_path, out)
         return out

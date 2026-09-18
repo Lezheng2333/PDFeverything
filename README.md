@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/Lezheng2333/PDFeverything/releases"><img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-blue?style=flat-square" /></a>
-  <a href="https://github.com/Lezheng2333/PDFeverything/releases/latest"><img src="https://img.shields.io/badge/version-v1.4.2-007aff?style=flat-square" /></a>
+  <a href="https://github.com/Lezheng2333/PDFeverything/releases/latest"><img src="https://img.shields.io/badge/version-v1.5.0-007aff?style=flat-square" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" /></a>
 </p>
 
@@ -35,11 +35,50 @@ Drag everything in — any combination of PDFs, Word documents, PowerPoint decks
 
 > 🔗 [**Latest Release →**](https://github.com/Lezheng2333/PDFeverything/releases/latest)
 
-## 🆕 What's New in v1.4.2
+## 🆕 What's New in v1.5.0
 
-- 🌗 **System theme auto-adapt** — macOS follows Dark/Light automatically; Windows stays Light
-- 🎨 **Unified palette** — toolbar, edit toolbar, scrollbar, labels, welcome button all adapt
-- 🪟 **Windows build ready** — pywin32 dependency, 12 new hiddenimports for onefile .exe
+**Correctness and speed — a full hardening pass over every layer.**
+
+- 🚀 **Opens any PDF instantly** — a 1000-page document used to render *every* page
+  at 100% before the first pixel appeared (≈2 GB RAM, seconds of CPU). Now only the
+  visible window is rendered, with a bounded look-ahead ring: **120 pages open in
+  27 ms using 8 MB of cache** (was 240 MB).
+- 🔍 **`PDF → Word` no longer loses text** — PyMuPDF's block tuples were unpacked in
+  the wrong order, so every block after the first was rasterised as an image or
+  dropped. A 5-block page produced 1 paragraph; it now produces all 5.
+- 📊 **`PDF → Excel` really extracts tables** — table extraction called a PyMuPDF
+  attribute that no longer exists, so table pages silently vanished from the output.
+- 🀄 **Chinese/Japanese/Korean text is preserved** — text files, Word/PPT/Excel
+  fallbacks and watermarks rendered through Latin-1-only fonts, turning CJK into
+  `·······`. A CJK font is now selected automatically.
+- 🔐 **Working encryption** — `cryptography` is now a declared dependency
+  (AES-256 instead of legacy RC4-128), an empty password is rejected instead of
+  silently producing an unprotected file, and `info` reports encryption status for
+  locked files instead of failing.
+- 🗜️ **Compression modes that do something** — `lossless` / `medium` / `max` now
+  resample and re-encode images instead of all behaving identically.
+- 💧 **Watermarks obey their settings** — opacity is written to the PDF graphics
+  state, the angle is applied as a real rotation (45° used to collapse to 0°), and
+  CJK watermark text renders properly.
+- 🧵 **Cancel actually cancels** — the old `cancel()` blocked the UI thread for 5 s
+  and the 60-minute timeout re-emitted its error on every progress tick. Now the
+  worker cancels cooperatively, never blocks the GUI, and reports exactly once.
+- 🧩 **Batches survive bad files** — one corrupt input used to abort the whole run;
+  failures are now collected per file and reported with the success count.
+- 🔗 **MCP stream is clean** — PyMuPDF's one-time stdout notice desynchronised the
+  JSON-RPC channel, and a blank line killed the server. Both fixed, plus `ping`
+  support and correct notification handling.
+- 🖱️ **Grid selection is instant** — box-select no longer re-renders every
+  thumbnail on every mouse-move (0.87 ms → 0.01 ms per event on a 30-page doc).
+- 🪟 **Window resize re-centres pages** — the layout is recomputed on resize and
+  when the reader tab becomes visible, instead of keeping stale geometry.
+- 🗂️ **Real undo for CLI/MCP page editing** — `page-undo` / `page-redo` /
+  `page-history` used to be stateless no-ops; the history is now persisted per file.
+- ✨ **CLI polish** — new `mixed-merge` command, `--mode` for compression,
+  DPI validation, tolerant page-range parsing (`1-5`, `1–5`, `1,3,5`, `all`,
+  full-width commas) and clear errors instead of silent no-ops.
+- 🧪 **Test suites added** — `tests/test_core.py` (51 checks) and
+  `tests/test_gui.py` (45 checks) plus the reader QA suite (38 checks).
 
 ---
 
@@ -138,7 +177,7 @@ A high-performance PDF reader with **vector-grade rendering** — rivaling Acrob
 
 ## 🤖 AI Agent Integration (MCP Server)
 
-PDFeverything comes with a built-in **Model Context Protocol (MCP)** server. Any AI agent (Claude Desktop, Claude Code, Cursor, etc.) can discover all 16 PDF tools and call them directly — **no Python, no install, just the app file**.
+PDFeverything comes with a built-in **Model Context Protocol (MCP)** server. Any AI agent (Claude Desktop, Claude Code, Cursor, etc.) can discover all 23 PDF tools and call them directly — **no Python, no install, just the app file**.
 
 ### How it works
 
@@ -199,22 +238,29 @@ Once connected, the agent automatically discovers these tools — no manual inst
 
 | Tool | Description |
 |---|---|
-| `pdf_merge` | Merge multiple PDFs into one |
-| `pdf_split` | Split PDF by pages or ranges |
-| `pdf_info` | Get metadata (pages, size, author, etc.) |
-| `pdf_extract_text` | Extract all text from PDF |
-| `pdf_extract_images` | Extract embedded images |
-| `pdf_to_images` | Convert PDF pages to PNG |
-| `images_to_pdf` | Images → single PDF |
-| `pdf_to_word` | Convert PDF to Word (.docx) |
-| `pdf_to_ppt` | Convert PDF to PowerPoint (.pptx) |
-| `pdf_to_excel` | Extract PDF tables to Excel (.xlsx) |
-| `pdf_compress` | Reduce PDF file size |
-| `pdf_watermark` | Add text watermark |
-| `pdf_encrypt` | Set open password |
-| `pdf_decrypt` | Remove password |
+| `pdf_merge` | Merge several PDFs into one, in the order you list them |
+| `pdf_split` | Split a PDF into single pages (or by custom ranges) |
+| `pdf_info` | Metadata: page count, size, author, title, encryption status |
+| `pdf_extract_text` | Extract all text from a PDF to a .txt file |
+| `pdf_extract_images` | Extract every embedded image to a folder |
+| `pdf_to_images` | Render each page to a PNG (adjustable DPI) |
+| `images_to_pdf` | Combine images (PNG/JPG/GIF/…) into one PDF |
+| `pdf_to_word` | Convert a PDF to Word (.docx), keeping text and tables |
+| `pdf_to_ppt` | Convert a PDF to PowerPoint (.pptx), one slide per page |
+| `pdf_to_excel` | Extract PDF tables into Excel sheets (.xlsx) |
+| `pdf_compress` | Shrink a PDF (lossless / medium / max) |
+| `pdf_watermark` | Add a text watermark with real opacity and angle |
+| `pdf_encrypt` | Set an open password (AES-256) |
+| `pdf_decrypt` | Remove the password from a PDF |
 | `pdf_rotate` | Rotate pages 90/180/270° |
-| `pdf_mixed_merge` | 🔥 Mixed files → unified PDF |
+| `pdf_mixed_merge` | 🔥 The killer feature: merge mixed file types into one PDF |
+| `pdf_delete_pages` | Delete pages by 1-based number or range |
+| `pdf_rotate_pages` | Rotate specific pages |
+| `pdf_move_pages` | Reorder pages by moving them before a target position |
+| `pdf_extract_pages` | Extract pages into a new standalone PDF |
+| `pdf_undo` | Undo the last page edit (history persists per file) |
+| `pdf_redo` | Redo the last undone page edit |
+| `pdf_history` | Show the recorded editing history for a file |
 
 ### Direct CLI mode (no MCP needed)
 
@@ -343,11 +389,39 @@ MIT — do whatever you want with it. [LICENSE](resources/LICENSE.txt)
 | 🔄 **旋转** | 旋转页面 90° / 180° / 270° |
 | ℹ️ **信息** | 查看页数、元数据、加密状态 |
 
-### 🆕 v1.4.2 新功能
+### 🆕 v1.5.0 新功能
 
-- 🌗 **系统主题自适应** — macOS 自动跟随暗色/亮色模式；Windows 保持亮色
-- 🎨 **统一调色板** — 工具栏、编辑栏、滚动条、标签、欢迎按钮全量适配
-- 🪟 **Windows 编译就绪** — pywin32 依赖 + 12 个 hiddenimports，单文件 .exe 可直接构建
+**一次覆盖全链路的正确性与性能加固。**
+
+- 🚀 **任意大小的 PDF 秒开** — 以前打开 1000 页文档会先把**每一页**渲染到 100%
+  （约 2GB 内存、数秒 CPU）才显示第一个像素。现在只渲染可见窗口并保留有限的
+  前后缓冲：**120 页 27ms 打开、缓存 8MB**（原来 240MB）。
+- 🔍 **PDF → Word 不再丢内容** — PyMuPDF 的 block 元组字段顺序被读错，导致
+  第一段之后的文字块要么被当成图片，要么被直接丢弃。现在 5 段全部保留。
+- 📊 **PDF → Excel 真的能提取表格** — 旧代码调用了一个在新版 PyMuPDF 中已不
+  存在的属性，表格页会整个从输出里消失。
+- 🀄 **中文内容不再变圆点** — 文本文件、Word/PPT/Excel 回退渲染和水印过去都
+  使用只支持 Latin-1 的内置字体，中文会被替换成 `·······`；现在自动切换 CJK 字体。
+- 🔐 **加密真正生效** — 声明 `cryptography` 依赖（AES-256 取代旧式 RC4-128）、
+  拒绝空密码（旧版会"加密"出一个无需密码就能打开的文件）、`info` 也能正确
+  报告受保护文件的加密状态。
+- 🗜️ **压缩档位有实际差别** — 无损 / 中等 / 最大 现在会真正重采样并重新编码图片。
+- 💧 **水印参数全部生效** — 透明度写入 PDF 图形状态、角度按真实旋转应用
+  （45° 过去会被归零）、中文水印正常渲染。
+- 🧵 **取消就是取消** — 旧的 `cancel()` 会阻塞界面 5 秒，60 分钟超时还会在每个
+  进度回调里重复弹错。现在协作式取消、不阻塞界面、只报告一次。
+- 🧩 **批量不再被单个坏文件中断** — 失败的输入会被逐个收集，并给出成功/失败汇总。
+- 🔗 **MCP 输出流干净** — PyMuPDF 的一次性 stdout 提示会打乱 JSON-RPC 通道，
+  空行还会直接结束服务；均已修复，并补上 `ping` 与通知处理。
+- 🖱️ **网格框选变快** — 拖拽框选不再每次鼠标移动都重绘全部缩略图
+  （30 页文档：0.87ms → 0.01ms / 事件）。
+- 🪟 **窗口缩放后页面重新居中** — 缩放窗口或阅读 Tab 首次显示时会重算布局。
+- 🗂️ **CLI/MCP 页面编辑有真正的撤销** — `page-undo` / `page-redo` /
+  `page-history` 过去是无状态空操作，现在按文件持久化历史。
+- ✨ **CLI 打磨** — 新增 `mixed-merge` 命令、压缩 `--mode`、DPI 校验、
+  容错的页码范围解析（`1-5`、`1–5`、`1,3,5`、`all`、全角逗号）以及明确的报错。
+- 🧪 **新增测试套件** — `tests/test_core.py`（51 项）、`tests/test_gui.py`（45 项）
+  以及阅读器 QA 套件（38 项）。
 
 ### 🖥️ 界面预览
 
@@ -435,22 +509,29 @@ PDFeverything 内置了 **Model Context Protocol (MCP)** 服务器。任何 AI A
 
 | 工具 | 说明 |
 |---|---|
-| `pdf_merge` | 合并多个 PDF |
-| `pdf_split` | 按页或范围拆分 |
-| `pdf_info` | 查看元数据（页数、大小、作者等） |
-| `pdf_extract_text` | 提取全部文字 |
-| `pdf_extract_images` | 提取嵌入的图片 |
-| `pdf_to_images` | PDF 每页 → PNG |
-| `images_to_pdf` | 多张图片 → 一个 PDF |
-| `pdf_to_word` | PDF 转 Word (.docx) |
-| `pdf_to_ppt` | PDF 转 PowerPoint (.pptx) |
-| `pdf_to_excel` | 提取 PDF 表格为 Excel (.xlsx) |
-| `pdf_compress` | 压缩 PDF 体积 |
-| `pdf_watermark` | 添加文字水印 |
-| `pdf_encrypt` | 设置打开密码 |
-| `pdf_decrypt` | 移除密码 |
-| `pdf_rotate` | 旋转页面 90/180/270° |
-| `pdf_mixed_merge` | 🔥 混合文件 → 统一 PDF |
+| `pdf_merge` | Merge multiple PDFs into one |
+| `pdf_split` | Split PDF by pages or custom ranges |
+| `pdf_info` | Metadata: pages, size, author, encryption status |
+| `pdf_extract_text` | Extract all text from a PDF |
+| `pdf_extract_images` | Extract embedded images |
+| `pdf_to_images` | Convert PDF pages to PNG |
+| `images_to_pdf` | Images → single PDF |
+| `pdf_to_word` | PDF → Word (.docx) |
+| `pdf_to_ppt` | PDF → PowerPoint (.pptx) |
+| `pdf_to_excel` | PDF tables → Excel (.xlsx) |
+| `pdf_compress` | Reduce file size (lossless / medium / max) |
+| `pdf_watermark` | Add a text watermark (opacity + angle honoured) |
+| `pdf_encrypt` | Set an open password |
+| `pdf_decrypt` | Remove the password |
+| `pdf_rotate` | Rotate pages 90/180/270° |
+| `pdf_mixed_merge` | 🔥 Mixed files → unified PDF |
+| `pdf_delete_pages` | Delete pages by number |
+| `pdf_rotate_pages` | Rotate specific pages |
+| `pdf_move_pages` | Reorder pages |
+| `pdf_extract_pages` | Extract pages into a new PDF |
+| `pdf_undo` | Undo the last page edit (persistent history) |
+| `pdf_redo` | Redo the last undone edit |
+| `pdf_history` | Show the editing history of a file |
 
 #### 直接 CLI 调用（无需 MCP）
 

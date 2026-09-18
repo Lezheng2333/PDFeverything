@@ -21,7 +21,7 @@ import sys
 from pathlib import Path
 
 from core.pdf_ops import PdfOperator
-from core.utils import format_bytes
+from core.utils import format_bytes, parse_page_ranges
 
 # ── CLI 入口 ────────────────────────────────────────────────
 
@@ -33,6 +33,13 @@ def main():
         epilog=__doc__,
     )
     sub = parser.add_subparsers(dest="command", help="操作命令")
+
+    # --- mixed-merge（混合文件 → 统一 PDF，GUI/ MCP 之外补齐 CLI 通道）---
+    p_mix = sub.add_parser("mixed-merge", help="混合文件（PDF/图片/Office/文本）合并为统一 PDF")
+    p_mix.add_argument("-i", "--input", nargs="+", required=True,
+                       help="输入文件（支持 PDF、图片、Word、PPT、Excel、文本）")
+    p_mix.add_argument("-o", "--output", required=True, help="输出 PDF 文件")
+    p_mix.add_argument("--json", action="store_true", help="JSON 输出")
 
     # --- info ---
     p_info = sub.add_parser("info", help="查看 PDF 信息")
@@ -63,7 +70,8 @@ def main():
     p_ti = sub.add_parser("to-images", help="PDF 每页转图片")
     p_ti.add_argument("-i", "--input", required=True, help="输入 PDF 文件")
     p_ti.add_argument("-o", "--output", required=True, help="输出目录")
-    p_ti.add_argument("--dpi", type=int, default=200, help="图片分辨率 (默认 200)")
+    p_ti.add_argument("--dpi", type=int, default=200,
+                      help="图片分辨率 36-1200 (默认 200)")
 
     # --- from-images ---
     p_fi = sub.add_parser("from-images", help="多张图片合并为 PDF")
@@ -75,6 +83,9 @@ def main():
     p_comp = sub.add_parser("compress", help="压缩 PDF")
     p_comp.add_argument("-i", "--input", required=True, help="输入 PDF 文件")
     p_comp.add_argument("-o", "--output", required=True, help="输出压缩后的 PDF")
+    p_comp.add_argument("--mode", choices=["lossless", "medium", "max"],
+                        default="lossless",
+                        help="压缩档位: lossless 无损 / medium 中等 / max 最大")
 
     # --- watermark ---
     p_wm = sub.add_parser("watermark", help="添加水印")
@@ -112,7 +123,8 @@ def main():
     p_tp = sub.add_parser("to-ppt", help="PDF 转 PowerPoint")
     p_tp.add_argument("-i", "--input", required=True, help="输入 PDF 文件")
     p_tp.add_argument("-o", "--output", required=True, help="输出 .pptx 文件")
-    p_tp.add_argument("--dpi", type=int, default=200, help="图片分辨率 (默认 200)")
+    p_tp.add_argument("--dpi", type=int, default=200,
+                      help="图片分辨率 36-1200 (默认 200)")
 
     # --- to-excel ---
     p_te = sub.add_parser("to-excel", help="PDF 转 Excel（提取表格）")
@@ -170,9 +182,28 @@ def main():
         parser.print_help()
         sys.exit(1)
 
+    def _validate_dpi(value: int) -> int:
+        if not 36 <= value <= 1200:
+            sys.exit(f"❌ 错误: DPI 必须在 36-1200 之间，收到 {value}")
+        return value
+
     # 命令分发 — 全部委托给 PdfOperator
     try:
-        if args.command == "info":
+        if args.command == "mixed-merge":
+            from core.merger import merge_mixed_files
+
+            paths = [Path(p) for p in args.input]
+            result = merge_mixed_files(paths, Path(args.output))
+            if getattr(args, "json", False):
+                import json
+                print(json.dumps(result, ensure_ascii=False))
+            else:
+                print(f"✅ 已合并 {result['converted']}/{result['total_files']} 个文件 "
+                      f"→ {args.output}")
+                for f in result.get("failed", []):
+                    print(f"  ⚠️  {Path(f['path']).name}: {f['reason']}")
+
+        elif args.command == "info":
             info = PdfOperator.get_info(Path(args.input))
             print(f"文件: {info['path']}")
             print(f"页数: {info['pages']}")
@@ -202,7 +233,8 @@ def main():
             print(f"✅ 已提取 {count} 张图片 → {args.output}")
 
         elif args.command == "to-images":
-            count = PdfOperator.to_images(Path(args.input), Path(args.output), dpi=args.dpi)
+            count = PdfOperator.to_images(Path(args.input), Path(args.output),
+                                          dpi=_validate_dpi(args.dpi))
             print(f"✅ 已转换 {count} 页为图片 ({args.dpi} DPI) → {args.output}")
 
         elif args.command == "from-images":
@@ -211,9 +243,11 @@ def main():
             print(f"✅ 已将 {len(paths)} 张图片合并 → {args.output}")
 
         elif args.command == "compress":
-            result = PdfOperator.compress(Path(args.input), Path(args.output))
-            print(f"✅ 压缩完成: {result['before_bytes']:,} → {result['after_bytes']:,} "
-                  f"字节 ({result['ratio']:.1f}% 减小) → {args.output}")
+            result = PdfOperator.compress(Path(args.input), Path(args.output),
+                                          mode=args.mode)
+            print(f"✅ 压缩完成 [{args.mode}]: {result['before_bytes']:,} → "
+                  f"{result['after_bytes']:,} 字节 ({result['ratio']:.1f}% 减小) "
+                  f"→ {args.output}")
 
         elif args.command == "watermark":
             PdfOperator.watermark(Path(args.input), Path(args.watermark), Path(args.output))
@@ -237,7 +271,8 @@ def main():
             print(f"✅ 已转换 {pages} 页 → {args.output}")
 
         elif args.command == "to-ppt":
-            pages = PdfOperator.to_ppt(Path(args.input), Path(args.output), dpi=args.dpi)
+            pages = PdfOperator.to_ppt(Path(args.input), Path(args.output),
+                                       dpi=_validate_dpi(args.dpi))
             print(f"✅ 已转换 {pages} 页 → {args.output}")
 
         elif args.command == "to-excel":
@@ -250,18 +285,11 @@ def main():
             from core.page_editor import PdfPageEditor
 
             def _parse_pages(pages_str: str, total: int) -> list[int]:
-                """Parse page range string to 0-based ordinal list."""
-                if pages_str.lower() == "all":
-                    return list(range(total))
-                result = []
-                for part in pages_str.split(","):
-                    part = part.strip()
-                    if "-" in part:
-                        a, b = part.split("-", 1)
-                        result.extend(range(int(a) - 1, int(b)))
-                    else:
-                        result.append(int(part) - 1)
-                return sorted(set(r for r in result if 0 <= r < total))
+                """页码范围 → 0-based 序号列表（复用 core.utils 的解析器）。"""
+                try:
+                    return parse_page_ranges(pages_str, total=total, one_based=True)
+                except ValueError as e:
+                    sys.exit(f"❌ 错误: {e}")
 
             def _json_output(success: bool, op: str, msg: str, data=None, error=None, code=None):
                 import json
@@ -273,6 +301,9 @@ def main():
             input_path = Path(args.input)
             output_path = Path(args.output) if hasattr(args, 'output') and args.output else None
             editor = PdfPageEditor(input_path)
+            # Continue the session recorded by an earlier CLI call so
+            # page-undo/page-redo/page-history actually have a history.
+            editor.load_journal()
 
             if args.command == "page-list":
                 import json
@@ -293,17 +324,21 @@ def main():
                 return
 
             if args.command == "page-history":
-                history = editor.undo_stack_desc
+                import json
+
+                states = editor.history
+                cursor = editor.history_cursor
                 if getattr(args, "json", False):
-                    import json
                     print(json.dumps({"success": True, "operation": "history",
-                                      "history": history, "count": len(history)},
+                                      "history": [s["desc"] for s in states],
+                                      "cursor": cursor, "count": len(states)},
                                      ensure_ascii=False))
                 else:
-                    for i, h in enumerate(reversed(history), 1):
-                        print(f"  {i}. {h}")
-                    if not history:
-                        print("  (空)")
+                    if not states:
+                        print("  (空 — 还没有记录任何编辑)")
+                    for i, item in enumerate(states):
+                        marker = "  ← 当前" if i == cursor else ""
+                        print(f"  {i + 1}. {item['desc'] or '(初始状态)'}{marker}")
                 editor.close()
                 return
 
@@ -311,10 +346,16 @@ def main():
 
             if args.command == "delete-pages":
                 pages = _parse_pages(args.pages, total)
+                if not pages:
+                    editor.close()
+                    sys.exit(f"❌ 错误: --pages 没有匹配任何页面 (共 {total} 页)")
                 editor.delete_pages(pages)
                 msg = f"已删除 {len(pages)} 页"
             elif args.command == "rotate-pages":
                 pages = _parse_pages(args.pages, total)
+                if not pages:
+                    editor.close()
+                    sys.exit(f"❌ 错误: --pages 没有匹配任何页面 (共 {total} 页)")
                 editor.rotate_pages(pages, args.degrees)
                 msg = f"已旋转 {len(pages)} 页 ({args.degrees}°)"
             elif args.command == "move-pages":
@@ -334,13 +375,23 @@ def main():
                 return
             elif args.command == "page-undo":
                 desc = editor.undo()
-                msg = f"撤销: {desc}" if desc else "无可撤销操作"
+                if not desc:
+                    editor.close()
+                    sys.exit("❌ 错误: 没有可撤销的操作（历史记录为空或已丢失）")
+                msg = f"撤销: {desc}"
             elif args.command == "page-redo":
                 desc = editor.redo()
-                msg = f"重做: {desc}" if desc else "无可重做操作"
+                if not desc:
+                    editor.close()
+                    sys.exit("❌ 错误: 没有可重做的操作")
+                msg = f"重做: {desc}"
 
             if output_path and args.command != "extract-pages":
                 editor.save(output_path)
+            # Persist the stack so the next invocation can undo/redo this step.
+            if args.command in ("delete-pages", "rotate-pages", "move-pages",
+                                "page-undo", "page-redo"):
+                editor.save_journal()
             editor.close()
 
             if getattr(args, "json", False):

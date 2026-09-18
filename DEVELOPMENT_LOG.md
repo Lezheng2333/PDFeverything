@@ -516,3 +516,88 @@ Ver 1.4.0 | 2026-06-27
     - Windows 构建就绪: build_windows.spec 新增12个 hiddenimports
       (core.page_editor/gui全部模块), build_windows.py 补 pywin32 依赖
 
+
+----------------------------------------------------------------
+
+Ver 1.5.0 | 2026-09-18 — 正确性与性能大修（功能 / 性能 / UI 全方位加固）
+----------------------------------------------------------------
+
+  Ver 1.5.0 | 大迭代第一轮：全链路加固
+    - 阅读器改为窗口化渲染：打开 PDF 只渲染可见页 + 前后 3 页缓冲，不再全量预渲染
+      —— 120 页文档打开耗时 60ms→27ms，缓存驻留 240MB→8MB，1000 页文档不再爆内存
+    - 阅读器窗口化重建：窗口尺寸变化时重算布局并重新居中（原来切标签页/缩放窗口后
+      页面停留在旧几何位置）；Grid 模式行高按视口自适应（一屏可见约 2 行缩略图）
+    - Grid 框选重写：拖拽框选只在选区真正变化时刷新受影响的缩略图，
+      不再每次 mousemove 重建整页网格（10 页文档 0.87ms→0.01ms/事件）
+    - Grid 只渲染视口内缩略图（原来一次性渲染全部页），命中检测由 O(n) 扫描改为 O(1)
+    - 框选改为 Finder 式矩形选区 + 蓝色 rubber band 可视化 + 拖拽排序橙色落点提示
+    - 背景基准渲染改为有界环形队列（当前页 ±3），滚动/翻页时自动重新布防
+    - 打开文档默认 fit-height（原来 100% 会裁掉半页），缩放/适应模式切换后保持滚动位置
+    - 缩放提示浮层改挂到滚动视口，位置不再被上下两条工具栏顶偏
+    - BaseWorker 重写：协作式取消（threading.Event + OperationCancelled），
+      cancel() 不再阻塞 GUI 线程 5 秒（原 wait(5000) 直接卡死界面）
+    - BaseWorker 超时逻辑修正：超时即中止操作并只报告一次
+      （原来只发 error 不停任务，每个进度回调重复弹窗，实测 2 秒内 75 个错误弹窗）
+    - 批量处理失败隔离：单个文件失败不再中断整批，结束后汇总成功/失败数量与原因
+    - 结果弹窗改为延迟一个事件循环弹出，消除队列信号处理器内嵌套模态循环导致的死锁
+    - Office 检测移出 GUI 线程（原来构造窗口时同步 osascript 探测最长阻塞 30 秒）
+    - 输出路径父目录自动创建（原来 merge/encrypt/to-word 等直接抛 [Errno 2]）
+    - PDF→Word 修复 block 元组字段顺序错误（原把 block_no 当 block_type，第一段之后
+      的文字块或被当图片渲染、或被静默丢弃；5 段页面只输出 1 段）
+    - PDF→Word 字体大小判断改为每页一次 dict 提取（原来每个 block 重新解析整页，O(n²)）
+    - PDF→Excel 表格提取修复：改用 tab.extract()（原调用已不存在的 TableHeader.explicit_outer，
+      表格页会整个从输出消失）；表格页过多矢量线段时跳过检测（原单页可阻塞 77 秒）
+    - PDF→PPT 临时文件改用 TemporaryDirectory，异常路径不再泄漏；DPI 统一校验 36-1200
+    - CJK 静默损坏修复：文本文件/Word/PPT/Excel 回退渲染与水印改走 MuPDF 内置 CJK 字体
+      （原来中文被 base-14 Latin-1 字体替换成 ·····，混合合并"成功"但内容是垃圾）
+    - 水印重写：透明度真实写入图形状态（原来 opacity 参数被完全忽略）、
+      角度按真实旋转矩阵应用（原来 45° 会被归零成水平）、中文水印正常
+    - 加密加固：空密码直接拒绝（原来会"加密"出无需密码即可打开的文件）、
+      优先 AES-256（新增 cryptography 依赖，原为 RC4-128）、info 可正确报告加密状态
+    - 压缩档位真实生效：lossless/medium/max 分别对应结构优化与图片重采样重编码
+      （原来三档完全相同）；CLI 新增 --mode
+    - extract_text 改用 PyMuPDF 优先（CJK 与版式更好），pypdf 作为回退，
+      去掉未声明依赖 pdfplumber 的死分支；页分隔符不再硬编码中文
+    - from_images 按图片 DPI 换算页面尺寸（原来 3000×2000 图片会生成 41.7 英寸巨页）
+    - 混合合并：转换结果逐个校验可读性后再合并（0 字节/损坏 PDF 不再让整次合并失败）；
+      temp_dir 登记到清理表（原来每次混合合并在系统临时目录留下用户文件副本）
+    - MCP 协议修复：屏蔽 PyMuPDF 一次性 stdout 提示（会污染 JSON-RPC 流导致客户端失步）、
+      tools/call 期间重定向 stdout、空行/坏 JSON 回 -32700 而不是结束服务、
+      遵循通知不应答规则、支持 ping、版本号取自单一常量
+    - MCP pdf_split 描述与实现对齐（去除未实现的 custom ranges 承诺）
+    - 页码解析统一到 core.utils.parse_page_ranges：支持 all / 1-5 / 1–5 / 1,3,5 /
+      全角逗号 / 分号 / 省略号，越界丢弃，非法输入抛可展示的 ValueError
+    - 旋转对话框：空页码范围直接拒绝（原来会输出与输入完全相同的文件却提示"完成"）
+    - 拆分对话框：实时显示解析结果预览，非法行报错，访问器不再抛异常
+    - CLI 新增 mixed-merge（混合文件合并此前只有 GUI/MCP 通道）
+    - CLI 页面编辑历史持久化：page-undo/page-redo/page-history 改为按文件保存线性历史
+      （原来新进程里栈为空，永远返回"无可撤销操作"）
+    - CLI page-edit 参数校验：--pages 无匹配时非零退出并给出页数提示，非法写法友好报错
+    - i18n 加固：tr() 格式化异常不再抛出（原来 {} 占位符配 kwargs 会在 Qt 槽内抛
+      IndexError 并触发 PyQt6 qFatal 直接 Abort）；补齐 menu_merge 等缺失键；
+      预览/关于/批处理/文件过滤/阅读器提示等硬编码文案全部接入 i18n
+    - 语言切换刷新补全：act_merge、tools_group、office 状态、合并按钮计数文案
+    - 合并按钮去掉重复 emoji，计数文案走 i18n（原来中文界面显示"3 files"）
+    - 新增测试套件：tests/test_core.py（51 项，核心/CLI/MCP/i18n）、
+      tests/test_gui.py（45 项，Worker/批量/对话框/阅读器性能/i18n 覆盖）
+    - BUGFIX: 打开 PDF 渲染全部页面 — 移除 _pre_render_100_all 的 eager 全量预渲染
+    - BUGFIX: 窗口缩放后页面不居中 — _on_resize 未调用 _layout_labels
+    - BUGFIX: 从合并标签页打开 PDF 布局按 800×600 固化 — 增加视口变化检测重排
+    - BUGFIX: 网格框选只在首格生效 — _grid_page_at_pos 用整格扫描且首个命中即返回
+    - BUGFIX: 旋转后网格几何未失效 — 增加 _grid_geom 失效与缩略图重绘
+    - BUGFIX: 旋转 90° 后缓存未全失效 — 单次 _invalidate_pages 扫描替代逐页扫描
+    - BUGFIX: 旋转对话框空范围静默输出副本 — 校验改为拒绝空列表
+    - BUGFIX: PdfPageEditor 撤销后文档句柄失效 — 统一通过 editor.doc 属性重读句柄
+    - BUGFIX: page_editor.save 用默认参数保存导致删除的页面仍在 — 加 garbage/clean
+    - BUGFIX: 编辑历史日志键用 1 秒精度 mtime — 同一秒内两次编辑互相覆盖，改用 mtime_ns
+    - BUGFIX: 首次编辑不可撤销 — 历史初始状态在变更后才记录，改为变更前 seed
+    - BUGFIX: 取消后状态栏被队列进度覆盖 — 进度/结果槽校验 sender 是否为当前 worker
+    - BUGFIX: 批量结束仍显示取消按钮 — _set_busy 改用显式 show/hide
+    - BUGFIX: 文件列表跳过提示为硬编码英文且漏统计 — 接入 i18n 并补全各类计数
+    - BUGFIX: 提取文本/图片多文件时连续弹两次目录选择框 — 统一由 _run_batch 负责
+    - BUGFIX: 取消拆分输出目录后写入当前工作目录 — Path("") 为 "." 恒为真，改为先判空串
+    - BUGFIX: 水印 PDF 路径为空时 Path("") 通过校验 — 改为校验原始字符串 + is_file()
+    - BUGFIX: InfoDialog 在 size_bytes=None 时崩溃 — 改为 or 0
+    - BUGFIX: svg/ico 被归类为图片但没有转换器 — 从分类表移除，避免混合合并误报
+    - BUGFIX: 阅读器打印在 Windows 用 shell start 且 Linux 无处理 — 改为 os.startfile/xdg-open
+    - BUGFIX: MainWindow 重复定义 _pick_input_file — 删除死代码

@@ -1,5 +1,6 @@
 """PDF reader — LRU cache, dual-timer pages, on-demand prefetch."""
 
+import os
 from bisect import bisect_right
 from collections import OrderedDict
 from enum import Enum
@@ -12,6 +13,8 @@ from PyQt6.QtWidgets import (
     QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea,
     QVBoxLayout, QWidget, QApplication, QMessageBox, QFileDialog,
 )
+
+from .i18n import tr
 
 
 _DARK = False  # set by main.launch_gui before any widgets are created
@@ -33,9 +36,19 @@ class ViewMode(Enum):
 # filter pass that softens MuPDF's already-perfect anti-aliased output.
 RESIZE_DEBOUNCE = 350
 MAX_CACHE_MB = 400; CACHE_TARGET_MB = 280
-PRE_RENDER_EAGER = 5  # render first N pages eagerly, rest lazily
 PAGE_THROTTLE_MS = 30  # rough page update
 PAGE_DEBOUNCE_MS = 80  # precise bisect calibration + render trigger
+# ── Lazy base-render window ─────────────────────────────────────────
+# Only pages inside a bounded ring around the current page get a 100% base
+# pixmap. Everything else keeps its geometry from PDF page rects, so opening a
+# 1000-page document costs the same as opening a 3-page one.
+PRE_RENDER_LOOKAHEAD = 1   # pages kept warm *above* the current page
+PRE_RENDER_AHEAD = 2       # pages kept warm *below* the current page
+LAZY_RENDER_INTERVAL_MS = 12  # gap between two background base renders
+GRID_COLS = 3              # thumbnail columns in Grid view
+GRID_CELL_RATIO = 1.414    # A4 cell aspect ratio
+GRID_PAGE_LABEL_H = 16     # strip reserved under each thumbnail for its number
+GRID_MIN_CELL_H = 150      # never shrink a grid cell below this
 
 
 class PdfReaderWidget(QWidget):
@@ -54,7 +67,15 @@ class PdfReaderWidget(QWidget):
         self._fw_ratio = self._fh_ratio = 1.0
         self._labels: list[QLabel] = []
         self._page_heights: list[int] = []
+        self._page_geoms: list[tuple] = []
         self._btn_open_source = 'dialog'
+        # Lazy base-render state
+        self._lazy_rendering = False
+        self._lazy_pre_render_index = 0
+        self._lazy_window = (0, 0)
+        # Grid geometry cache (populated by _layout_labels)
+        self._grid_geom = None
+        self._pending_scroll_page = None
 
         self._resize_timer = QTimer(self); self._resize_timer.setSingleShot(True)
         self._resize_timer.setInterval(RESIZE_DEBOUNCE)
@@ -95,8 +116,11 @@ class PdfReaderWidget(QWidget):
         self._original_snapshot = None
         self._page_editor = None     # PdfPageEditor (lazy init on edit)
         self._selected_pages: set[int] = set()
+        self._prev_selected: set[int] = set()
         self._drag_source = None     # page index being dragged
         self._rubber_origin = None   # QPoint of box-select / drag start
+        self._rubber_rect = None     # (x, y, w, h) of the live rubber band
+        self._rubber_band = None     # overlay widget drawing the rubber band
         self._drag_active = False
         self._drag_target = None
         self._saved_scroll_zoom = None  # zoom before entering Grid
@@ -122,6 +146,18 @@ class PdfReaderWidget(QWidget):
         if not self.doc and not self._welcome:
             # Defer to ensure layout is complete
             QTimer.singleShot(100, self._try_show_welcome)
+        # A document opened while this widget's tab was hidden was laid out with
+        # a placeholder viewport size. Re-layout as soon as the real size is known.
+        if self.doc:
+            QTimer.singleShot(0, self._check_viewport_layout)
+
+    def _check_viewport_layout(self):
+        """Re-layout when the viewport width no longer matches the last layout."""
+        if not self.doc or not self._labels:
+            return
+        vw, _ = self._viewport_size()
+        if vw != getattr(self, "_layout_vw", None):
+            self._on_resize()
 
     def _try_show_welcome(self):
         """Safely show welcome. Retries if viewport not yet sized."""
@@ -430,9 +466,14 @@ class PdfReaderWidget(QWidget):
         self.btn_scroll.setChecked(mode == ViewMode.SCROLL)
         self.btn_grid.setChecked(mode == ViewMode.GRID)
         if self.doc:
+            # The container size — and therefore the scrollable range — depends on
+            # the mode, so the scroll target must be re-applied once Qt has
+            # processed the resize; otherwise the stale range clamps it.
+            self._pending_scroll_page = self._current_page
             self._layout_labels()
+            self._deferred_relayout()
             if mode == ViewMode.SCROLL:
-                self._scroll_to_page_top()
+                self._schedule_render_visible(0)
 
     def _on_close(self):
         """Close button handler — warns if unsaved edits exist."""
@@ -448,12 +489,13 @@ class PdfReaderWidget(QWidget):
     def _prompt_save_changes(self) -> str:
         """Show save-before-close dialog. Returns 'save_as', 'discard', or 'cancel'."""
         msg = QMessageBox(self)
-        msg.setWindowTitle("未保存的修改")
-        msg.setText("你对这个 PDF 进行了编辑。\n是否保存修改后再关闭？")
+        msg.setWindowTitle(tr("reader_unsaved_title"))
+        msg.setText(tr("reader_unsaved_body"))
         msg.setIcon(QMessageBox.Icon.Warning)
-        btn_save = msg.addButton("另存为...", QMessageBox.ButtonRole.AcceptRole)
-        btn_discard = msg.addButton("不保存", QMessageBox.ButtonRole.DestructiveRole)
-        btn_cancel = msg.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+        btn_save = msg.addButton(tr("reader_unsaved_saveas"), QMessageBox.ButtonRole.AcceptRole)
+        btn_discard = msg.addButton(tr("reader_unsaved_discard"),
+                                    QMessageBox.ButtonRole.DestructiveRole)
+        btn_cancel = msg.addButton(tr("reader_unsaved_cancel"), QMessageBox.ButtonRole.RejectRole)
         msg.setDefaultButton(btn_cancel)
         msg.exec()
         clicked = msg.clickedButton()
@@ -463,7 +505,8 @@ class PdfReaderWidget(QWidget):
 
     def _save_edited_copy(self):
         """Save the edited document to a new file."""
-        path, _ = QFileDialog.getSaveFileName(self, "另存为", "edited.pdf", "PDF (*.pdf)")
+        path, _ = QFileDialog.getSaveFileName(
+            self, tr("reader_saveas_title"), "edited.pdf", tr("file_filter_pdf"))
         if path:
             self._page_editor.save(Path(path))
             self._unsaved_edits = False
@@ -481,7 +524,7 @@ class PdfReaderWidget(QWidget):
             buf.seek(0)
             self.doc = fitz.open(stream=buf.read(), filetype="pdf")
             if self._page_editor:
-                self._page_editor._doc = self.doc
+                self._page_editor.attach(self.doc)
             self._unsaved_edits = False
             self._total_pages = len(self.doc)
             self._current_page = 0
@@ -518,8 +561,8 @@ class PdfReaderWidget(QWidget):
         self._configure_mupdf_aa()
         self._path = path
         self._total_pages = len(self.doc); self._current_page = 0
-        self._zoom_mode = 1.0              # default: 100%
-        self.btn_fit_width.setChecked(False); self.btn_fit_height.setChecked(False)
+        self._zoom_mode = "fit_height"     # open at page-height fit
+        self.btn_fit_width.setChecked(False); self.btn_fit_height.setChecked(True)
         self._view_mode = ViewMode.SCROLL
         self.btn_scroll.setChecked(True); self.btn_grid.setChecked(False)
         # Pre-compute fit ratios for later use
@@ -528,11 +571,16 @@ class PdfReaderWidget(QWidget):
         self._fw_ratio = vw / pw if pw > 0 else 1.0
         self._fh_ratio = vh / ph if ph > 0 else 1.0
         self._default_zoom_pct = max(50, min(300, int(self._fh_ratio * 100)))
-        self.zoom_edit.setText("100")
+        # Show the first page fitted to the window instead of a 100% crop: a
+        # full A4 page at 100% is taller than a typical viewport, so the reader
+        # would open mid-page. Fit-height makes the first screen readable and
+        # matches what Acrobat/Preview do.
+        self.zoom_edit.setText(str(self._default_zoom_pct))
         self._build_labels()
-        # Pre-render ALL pages at 100% — scale base for future zooms
+        self._layout_labels()
+        # Seed only the visible window's 100% base; the rest fills in lazily.
         self._pre_render_100_all()
-        self._layout_labels(render_missing=True)
+        self._render_visible_range_async(0)
         self._update_nav_ui()
         self.label_filename.setText(path.name)
         self.label_filename.show()
@@ -542,6 +590,8 @@ class PdfReaderWidget(QWidget):
 
     def close_document(self):
         self._cancel_deferred_renders()
+        self._grid_geom = None
+        self._page_heights = []
         if self._edit_mode: self._leave_edit_mode(skip_prompt=True)  # prompt handled by caller
         if self._page_editor:
             # Don't close the editor's doc — it's our shared self.doc. We'll close it below.
@@ -571,7 +621,7 @@ class PdfReaderWidget(QWidget):
     def _cancel_deferred_renders(self):
         """Cancel all pending timers to prevent stale callbacks."""
         self._pending_zoom_pct = None
-        self._lazy_pre_render_index = 999999  # stops _lazy_pre_render loop
+        self._cancel_lazy_pre_render()
         self._resize_timer.stop()
         self._scroll_throttle.stop()
         self._scroll_debounce.stop()
@@ -630,8 +680,9 @@ class PdfReaderWidget(QWidget):
             except Exception: pass
 
         self._show_zoom_popup(pct)
+        self._pending_scroll_page = self._current_page
         self._layout_labels()
-        self._scroll_to_page_top()  # preserve scroll position after zoom
+        self._apply_pending_scroll()  # preserve scroll position after zoom
 
         if not skip_deferred:
             self._pending_zoom_pct = pct
@@ -672,41 +723,84 @@ class PdfReaderWidget(QWidget):
             pass  # best-effort; MuPDF's default AA (8 bits) is already good
 
     def _pre_render_100_all(self):
-        """Render first few pages at 100% eagerly, queue the rest lazily.
-        Creates a high-quality base that all future zooms can scale from."""
-        if not self.doc or not self._labels: return
-        vw, vh = self._viewport_size()
-        # Preserve original zoom_key: use "z:1.000" manually
-        orig_key = self._zoom_key(vw, vh)
-        self._zoom_mode = 1.0  # ensure _zoom_key returns "z:1.000"
-        for pi in range(min(PRE_RENDER_EAGER, self._total_pages)):
-            self._get_or_render(pi, vw, vh)
-        self._zoom_mode = orig_key if isinstance(orig_key, float) else (
-            1.0 if orig_key.startswith("z:") else orig_key)
-        # Queue remaining pages one-by-one with low-priority timers
-        if self._total_pages > PRE_RENDER_EAGER:
-            self._lazy_pre_render_index = PRE_RENDER_EAGER
-            QTimer.singleShot(50, self._lazy_pre_render)
+        """Seed the 100% immortal base for the pages the user can actually see.
 
-    def _lazy_pre_render(self):
-        """Render one more page at 100%, then queue next."""
-        if not self.doc or not self._labels: return
+        Rendering *every* page up front does not scale: a 500-page document would
+        cost ~2s of CPU and ~1GB of RAM before the first pixel is shown. Instead we
+        render the visible window synchronously (so the first screen is sharp) and
+        let _lazy_pre_render walk a bounded ring around the current page while the
+        event loop is idle. Geometry for the remaining pages comes from
+        _layout_labels, which derives sizes from PDF page rects — no pixmap needed.
+        """
+        if not self.doc or not self._labels:
+            return
         vw, vh = self._viewport_size()
-        pi = getattr(self, '_lazy_pre_render_index', 0)
-        if pi >= self._total_pages: return
         old = self._zoom_mode
         self._zoom_mode = 1.0
-        self._get_or_render(pi, vw, vh)
+        first, last = self._render_window()
+        for pi in range(first, last):
+            self._get_or_render(pi, vw, vh)
         self._zoom_mode = old
-        self._lazy_pre_render_index = pi + 1
-        if self._lazy_pre_render_index < self._total_pages:
-            QTimer.singleShot(10, self._lazy_pre_render)
+        self._queue_lazy_pre_render()
+
+    # ── Lazy 100%-base queue (bounded ring around the current page) ──
+
+    def _render_window(self) -> tuple:
+        """(first, last) page indices worth having a base pixmap for."""
+        first = max(0, self._current_page - PRE_RENDER_LOOKAHEAD)
+        last = min(self._total_pages,
+                   self._current_page + PRE_RENDER_LOOKAHEAD + PRE_RENDER_AHEAD + 1)
+        return first, last
+
+    def _queue_lazy_pre_render(self):
+        """(Re)start the background base-render walk for the current window."""
+        if not self.doc or not self._labels:
+            return
+        first, last = self._render_window()
+        self._lazy_window = (first, last)
+        self._lazy_pre_render_index = first
+        self._lazy_rendering = True
+        QTimer.singleShot(LAZY_RENDER_INTERVAL_MS, self._lazy_pre_render)
+
+    def _cancel_lazy_pre_render(self):
+        """Stop the background walk (document closed / replaced)."""
+        self._lazy_rendering = False
+
+    def _lazy_pre_render(self):
+        """Render at most one missing 100% base pixmap, then yield.
+
+        The walk is bounded to the current ± lookahead window, so a 1000-page
+        PDF never renders pages the user will not scroll to. When the window is
+        complete the loop stops until the next navigation restarts it."""
+        if not self.doc or not self._labels or not self._lazy_rendering:
+            return
+        target = self._lazy_pre_render_index
+        first, last = self._lazy_window
+        if target >= last:
+            self._lazy_rendering = False
+            return
+        vw, vh = self._viewport_size()
+        old = self._zoom_mode
+        self._zoom_mode = 1.0
+        try:
+            if target >= first and 0 <= target < len(self._labels):
+                self._get_or_render(target, vw, vh)
+        except Exception:
+            pass
+        finally:
+            self._zoom_mode = old
+        self._lazy_pre_render_index = target + 1
+        QTimer.singleShot(LAZY_RENDER_INTERVAL_MS, self._lazy_pre_render)
 
     def _schedule_render_visible(self, delay_ms: int = 0):
-        """Schedule async visible-range render after delay_ms.
-        All render triggers (zoom, scroll stop, nav) go through here."""
-        if not self.doc: return
-        if delay_ms == 0:
+        """Schedule the visible-range render. Every render trigger (zoom, scroll
+        stop, navigation) funnels through here so there is a single place that
+        re-arms the background base cache."""
+        if not self.doc:
+            return
+        self._cancel_lazy_pre_render()
+        self._queue_lazy_pre_render()
+        if delay_ms <= 0:
             self._render_visible_range_async(0)
         else:
             QTimer.singleShot(delay_ms, lambda: self._render_visible_range_async(0))
@@ -763,13 +857,26 @@ class PdfReaderWidget(QWidget):
             self.zoom_edit.setText(str(self._current_zoom_pct()))
 
     def _show_zoom_popup(self, pct):
-        self._zoom_popup.setText(f"🔍 {pct}%"); self._zoom_popup.adjustSize()
-        r = self.rect(); x = (r.width() - self._zoom_popup.width()) // 2
+        """Flash the zoom level centred over the *page area*.
+
+        The popup is parented to the scroll viewport at creation time so its
+        coordinates are relative to the visible page region; parenting it to the
+        widget would place it too low by the height of the reader toolbars."""
+        self._zoom_popup.setText(f"🔍 {pct}%")
+        self._zoom_popup.adjustSize()
+        host = self.scroll_area.viewport()
+        if self._zoom_popup.parent() is not host:
+            self._zoom_popup.setParent(host)
+        r = host.rect()
+        x = max(0, (r.width() - self._zoom_popup.width()) // 2)
         y = max(0, r.height() // 3)
-        self._zoom_popup.move(x, y); self._zoom_popup.show(); self._zoom_popup.raise_()
+        self._zoom_popup.move(x, y)
+        self._zoom_popup.show()
+        self._zoom_popup.raise_()
         self._zoom_popup_timer.start()
 
-    def _hide_zoom_popup(self): self._zoom_popup.hide()
+    def _hide_zoom_popup(self):
+        self._zoom_popup.hide()
 
     def _on_fit_width(self):
         if not self.doc: return
@@ -821,11 +928,11 @@ class PdfReaderWidget(QWidget):
                 label.setFixedSize(tw, th)
             except Exception: pass
 
+        self._pending_scroll_page = self._current_page
         self._layout_labels()
         self._show_zoom_popup(pct)
         self._pending_zoom_pct = pct
-        # Preserve scroll position: after zoom change, snap to current_page
-        self._scroll_to_page_top()
+        self._apply_pending_scroll()   # keep the reader on the same page
         QTimer.singleShot(40, self._sharp_render)
 
     # ═══════════ Labels ═══════════
@@ -847,132 +954,218 @@ class PdfReaderWidget(QWidget):
         self.scroll_area.verticalScrollBar().blockSignals(False)
 
     def _layout_labels(self, render_missing: bool = False):
-        vw, vh = self._viewport_size(); sp, mg = 16, 20
+        """Recompute the page layout for the active view mode.
 
+        Geometry always comes from PDF page rects × zoom (never from pixmap
+        dimensions, which may be stale) so heights stay consistent and page Y
+        offsets never cascade. Scroll mode is O(1) per page; grid mode pushes
+        thumbnails only for the rows that intersect the viewport.
+        """
+        vw, vh = self._viewport_size()
+        self._layout_vw = vw
         if self._view_mode == ViewMode.SCROLL:
-            self._page_heights = []; y = mg
-            for pi, label in enumerate(self._labels):
-                pix = label.pixmap()
-                # Initial load: render missing pixmaps
-                if render_missing and (pix is None or pix.isNull()):
-                    if self.doc and pi < self._total_pages:
-                        pix = self._get_or_render(pi, vw, vh)
-                        if pix:
-                            label.setPixmap(pix)
-                # Always derive w,h from PDF page geometry × current zoom.
-                # Never use pixmap dimensions — a stale pixmap from a different
-                # zoom level would produce wrong heights and a cascading Y shift.
-                if self.doc and pi < self._total_pages:
-                    pw = self.doc[pi].rect.width
-                    ph = self.doc[pi].rect.height
-                    pct = self._current_zoom_pct()
-                    z = pct / 100.0
-                    w, h = int(pw * z), int(ph * z)
-                else:
-                    w, h = 600, 800
-                label.setFixedSize(w, h)
-                label.setStyleSheet("QLabel{background:white;}")
-                label.setCursor(Qt.CursorShape.ArrowCursor)
-                x = max(0, (vw - w) // 2)
-                label.move(x, y); label.show()
-                self._page_heights.append(y); y += h + sp
-            self.page_container.setFixedSize(vw, y - sp + mg)
-
+            self._layout_scroll(vw)
         elif self._view_mode == ViewMode.GRID:
-            self._page_heights = []
-            COLS = 3; gutter_h = 20; gutter_v = 30; side_margin = 20
-            usable = vw - 2*side_margin - (COLS-1)*gutter_h
-            cell_w = max(140, usable // COLS)
-            cell_h = int(cell_w * 1.414)  # A4 ratio
-            page_label_h = 16  # space for page number below thumbnail
+            self._layout_grid(vw, vh)
 
-            # Pre-compute page dimensions for adaptive fill
-            page_dims = []
-            for pi in range(self._total_pages):
-                if self.doc and pi < len(self.doc):
-                    pw = self.doc[pi].rect.width; ph = self.doc[pi].rect.height
-                else:
-                    pw, ph = 595, 842
-                scale_w = cell_w / pw; scale_h = (cell_h - page_label_h) / ph
-                scale = min(scale_w, scale_h)  # adaptive fill
-                dw = int(pw * scale); dh = int(ph * scale)
-                ox = max(0, (cell_w - dw) // 2)
-                oy = max(0, (cell_h - page_label_h - dh) // 2)
-                page_dims.append((dw, dh, ox, oy))
+    # ── Scroll mode ──────────────────────────────────
 
-            grid_w = COLS*cell_w + (COLS-1)*gutter_h
-            left = (vw - grid_w) // 2
+    def _layout_scroll(self, vw: int):
+        sp, mg = 16, 20
+        z = self._current_zoom_pct() / 100.0
+        heights = self._page_heights = []
+        y = mg
+        visible_y0 = self.scroll_area.verticalScrollBar().value()
+        visible_y1 = visible_y0 + self._viewport_height()
+        for pi, label in enumerate(self._labels):
+            if self.doc and pi < self._total_pages:
+                rect = self.doc[pi].rect
+                w, h = int(rect.width * z), int(rect.height * z)
+            else:
+                w, h = 600, 800
+            label.setFixedSize(w, h)
+            label.move(max(0, (vw - w) // 2), y)
+            self._apply_page_style(label, selected=False, grid=False)
+            # Only materialise widgets that are inside (or near) the viewport.
+            if y + h >= visible_y0 - self._viewport_height() and y <= visible_y1 + self._viewport_height():
+                if not label.isVisible():
+                    label.show()
+            elif label.isVisible():
+                label.hide()
+            heights.append(y)
+            y += h + sp
+        self.page_container.setFixedSize(vw, max(1, y - sp + mg))
 
-            for pi, label in enumerate(self._labels):
-                dw, dh, ox, oy = page_dims[pi]
-                # Render thumbnail at exact page display size (not cell size),
-                # so the pixmap matches label.setFixedSize precisely — no clipping.
+    # ── Grid mode ────────────────────────────────────
+
+    def _grid_geometry(self, vw: int) -> dict:
+        """Cell + per-page thumbnail geometry. Cached so selection changes never
+        touch the document or the layout maths."""
+        cache = self._grid_geom
+        if cache is not None and cache["vw"] == vw and cache["pages"] == self._total_pages:
+            return cache
+        cols = GRID_COLS
+        side_margin, gutter_h, gutter_v, mg = 20, 20, 30, 20
+        usable = vw - 2 * side_margin - (cols - 1) * gutter_h
+        cell_w = max(140, usable // cols)
+        # A full A4 cell is tall enough that barely one row fits on screen; cap the
+        # row height so a tall window always shows ~2 rows (thumbnails stay legible).
+        cell_h = min(int(cell_w * GRID_CELL_RATIO),
+                     max(GRID_MIN_CELL_H, (self._viewport_height() - 2 * mg) // 2))
+        cell_h = max(GRID_MIN_CELL_H, cell_h)
+        label_h = GRID_PAGE_LABEL_H
+        dims = []
+        for pi in range(self._total_pages):
+            if self.doc and pi < len(self.doc):
+                rect = self.doc[pi].rect
+                pw, ph = rect.width, rect.height
+            else:
+                pw, ph = 595, 842
+            scale = min(cell_w / pw if pw else 1.0,
+                        (cell_h - label_h) / ph if ph else 1.0)
+            dw, dh = max(1, int(pw * scale)), max(1, int(ph * scale))
+            dims.append((dw, dh, max(0, (cell_w - dw) // 2),
+                         max(0, (cell_h - label_h - dh) // 2)))
+        grid_w = cols * cell_w + (cols - 1) * gutter_h
+        rows = (self._total_pages + cols - 1) // cols
+        cache = {
+            "vw": vw, "pages": self._total_pages, "cols": cols,
+            "cell_w": cell_w, "cell_h": cell_h, "label_h": label_h,
+            "gutter_h": gutter_h, "gutter_v": gutter_v, "mg": mg,
+            "left": (vw - grid_w) // 2, "dims": dims, "rows": rows,
+        }
+        self._grid_geom = cache
+        return cache
+
+    def _cell_rect(self, pi: int):
+        """Cell rectangle for page index pi (used by hit-testing)."""
+        g = self._grid_geometry(self._viewport_size()[0])
+        col, row = pi % g["cols"], pi // g["cols"]
+        return (g["left"] + col * (g["cell_w"] + g["gutter_h"]),
+                g["mg"] + row * (g["cell_h"] + g["gutter_v"]),
+                g["cell_w"], g["cell_h"])
+
+    def _layout_grid(self, vw: int, vh: int, pixmaps: bool = True):
+        g = self._grid_geometry(vw)
+        cell_w, cell_h, label_h = g["cell_w"], g["cell_h"], g["label_h"]
+        cols, gutter_h, gutter_v, mg, left = (g["cols"], g["gutter_h"],
+                                              g["gutter_v"], g["mg"], g["left"])
+        # Row window that intersects the viewport (±1 row of slack for inertia).
+        sb = self.scroll_area.verticalScrollBar()
+        top = min(sb.value(), max(0, self.page_container.height() - self._viewport_height()))
+        bottom = top + self._viewport_height()
+        row_px = cell_h + gutter_v
+        first_row = max(0, (top - mg) // row_px - 1)
+        last_row = min(g["rows"] - 1, (bottom - mg) // row_px + 1)
+        lo, hi = first_row * cols, min(self._total_pages, (last_row + 1) * cols)
+
+        page_num_style = self._page_num_style()
+        for pi, label in enumerate(self._labels):
+            if pi < lo or pi >= hi:
+                if label.isVisible():
+                    label.hide()
+                pn = getattr(label, "_page_num_label", None)
+                if pn is not None and pn.isVisible():
+                    pn.hide()
+                continue
+            dw, dh, ox, oy = g["dims"][pi]
+            if pixmaps and label.pixmap() is None:
                 pix = self._get_or_render(pi, dw, dh, force_fit=True)
                 if pix:
                     label.setPixmap(pix)
-                    label.setFixedSize(dw, dh)
-                # Selection highlight
-                if self._edit_mode and pi in self._selected_pages:
-                    label.setStyleSheet(
-                        "QLabel{background:white;border:2px solid #007aff;border-radius:4px;}")
-                else:
-                    label.setStyleSheet("QLabel{background:white;border:1px solid #555;}")
-                label.setCursor(Qt.CursorShape.PointingHandCursor)
-                col, row = pi % COLS, pi // COLS
-                cell_x = left + col*(cell_w + gutter_h)
-                cell_y = mg + row*(cell_h + gutter_v)
-                label.move(cell_x + ox, cell_y + oy)
-                label.show()
-                # Page number label
-                page_num = getattr(label, '_page_num_label', None)
-                if page_num is None:
-                    page_num = QLabel(str(pi + 1), self.page_container)
-                    page_num.setStyleSheet("QLabel{color:#666;font-size:10px;background:transparent;}")
-                    page_num.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                    label._page_num_label = page_num
-                page_num.setFixedWidth(cell_w)
-                page_num.move(cell_x, cell_y + cell_h - page_label_h + 2)
-                page_num.show()
-                # Store click handler for edit mode
-                if not hasattr(label, '_grid_click_set'):
-                    label._grid_click_set = True
-                    orig_press = label.mousePressEvent
-                    def make_press(pi=pi):
-                        def handler(e):
-                            if self._edit_mode:
-                                self._on_grid_click(pi, e)
-                            elif orig_press:
-                                orig_press(e)
-                        return handler
-                    label.mousePressEvent = make_press()
-                # Double-click to scroll-view
-                page_idx = pi
-                label.mouseDoubleClickEvent = lambda ev, p=page_idx: self._on_grid_dbl_click(p)
+            label.setFixedSize(dw, dh)
+            self._apply_page_style(
+                label,
+                selected=self._edit_mode and pi in self._selected_pages,
+                grid=True,
+                drop_target=(self._edit_mode and self._drag_target == pi))
+            col, row = pi % cols, pi // cols
+            cell_x = left + col * (cell_w + gutter_h)
+            cell_y = self._page_grid_y(pi, g)
+            label.move(cell_x + ox, cell_y + oy)
+            label.show()
+            page_num = getattr(label, "_page_num_label", None)
+            if page_num is None:
+                page_num = QLabel(str(pi + 1), self.page_container)
+                page_num.setStyleSheet(page_num_style)
+                page_num.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                label._page_num_label = page_num
+            elif page_num.text() != str(pi + 1):
+                page_num.setText(str(pi + 1))
+            page_num.setFixedWidth(cell_w)
+            page_num.move(cell_x, cell_y + cell_h - label_h + 2)
+            page_num.show()
+            if not hasattr(label, "_grid_click_set"):
+                label._grid_click_set = True
+                orig_press = label.mousePressEvent
+                label.mousePressEvent = self._make_grid_press(orig_press)
+                label.mouseDoubleClickEvent = self._grid_dbl_click_handler
 
-            rows = (self._total_pages + COLS - 1) // COLS
-            self.page_container.setFixedSize(vw, 2*mg + rows*cell_h + (rows-1)*gutter_v)
+        self.page_container.setFixedSize(
+            vw, 2 * mg + g["rows"] * cell_h + max(0, g["rows"] - 1) * gutter_v)
+
+    def _make_grid_press(self, orig_press):
+        def handler(e):
+            pi = self._grid_page_at_pos(e.position().toPoint())
+            if self._edit_mode:
+                self._on_grid_click(pi, e)
+                return
+            if pi >= 0:
+                self._grid_last_press = pi
+            if orig_press:
+                orig_press(e)
+        return handler
+
+    def _grid_dbl_click_handler(self, ev):
+        pi = getattr(self, "_grid_last_press", -1)
+        if pi >= 0:
+            self._on_grid_dbl_click(pi)
+
+    def _apply_page_style(self, label, selected: bool, grid: bool,
+                          drop_target: bool = False):
+        """Set a label's frame style, touching the stylesheet only when it changes
+        (a Qt stylesheet assignment forces a full re-polish of the widget)."""
+        state = (selected, grid, drop_target)
+        if getattr(label, "_style_state", None) == state:
+            return
+        label._style_state = state
+        if grid:
+            if drop_target:
+                label.setStyleSheet(
+                    "QLabel{background:white;border:2px dashed #ff9500;border-radius:4px;}")
+            elif selected:
+                label.setStyleSheet(
+                    "QLabel{background:white;border:2px solid #007aff;border-radius:4px;}")
+            else:
+                label.setStyleSheet(
+                    f"QLabel{{background:white;border:1px solid {_dc('#555', '#9a9a9a')};}}")
+            label.setCursor(Qt.CursorShape.PointingHandCursor)
+        else:
+            label.setStyleSheet("QLabel{background:white;}")
+            label.setCursor(Qt.CursorShape.ArrowCursor)
+
+    def _page_num_style(self) -> str:
+        return f"QLabel{{color:{_dc('#888', '#666')};font-size:10px;background:transparent;}}"
 
     def _on_grid_dbl_click(self, page_idx: int):
-        if self._view_mode != ViewMode.GRID: return
-        if self._edit_mode: return
+        if self._view_mode != ViewMode.GRID or self._edit_mode:
+            return
         self._hide_page_numbers()
         self._current_page = page_idx
-        # Switch to Scroll mode and restore saved zoom (or fit_height as fallback)
+        self._pending_scroll_page = page_idx
+        # Switch to Scroll mode and restore the zoom that was active before Grid
         self._view_mode = ViewMode.SCROLL
-        self.btn_scroll.setChecked(True); self.btn_grid.setChecked(False)
-        if self._saved_scroll_zoom is not None:
-            saved = self._saved_scroll_zoom
-            if isinstance(saved, float):
-                self._set_zoom_pct(int(saved * 100))
-            elif saved == "fit_width":
-                self._on_fit_width()
-            elif saved == "fit_height":
-                self._on_fit_height()
-            else:
-                self._on_fit_height()
+        self.btn_scroll.setChecked(True)
+        self.btn_grid.setChecked(False)
+        saved = self._saved_scroll_zoom
+        if isinstance(saved, float):
+            self._set_zoom_pct(int(saved * 100))   # applies the pending scroll
+        elif saved == "fit_width":
+            self._on_fit_width()
         else:
             self._on_fit_height()
-        self._scroll_to_page_top()
+        self._layout_labels()
+        self._apply_pending_scroll()
         self._update_nav_ui()
         self._schedule_render_visible(0)
 
@@ -1030,32 +1223,93 @@ class PdfReaderWidget(QWidget):
 
     # ── Rectangle box-select ──
 
-    def _cell_rect(self, pi: int):
-        """Return the cell rectangle for page index pi on the container."""
-        vw, vh = self._viewport_size()
-        COLS = 3; gutter_h = 20; gutter_v = 30; side_margin = 20; mg = 20
-        usable = vw - 2*side_margin - (COLS-1)*gutter_h
-        cell_w = max(140, usable // COLS); cell_h = int(cell_w * 1.414)
-        grid_w = COLS*cell_w + (COLS-1)*gutter_h
-        left = (vw - grid_w) // 2
-        col, row = pi % COLS, pi // COLS
-        cx = left + col*(cell_w + gutter_h)
-        cy = mg + row*(cell_h + gutter_v)
-        return (cx, cy, cell_w, cell_h)
+    def _page_grid_y(self, pi: int, g: dict = None) -> int:
+        """Container Y of page pi's row in Grid mode."""
+        if g is None:
+            g = self._grid_geometry(self._viewport_size()[0])
+        row = pi // g["cols"]
+        return g["mg"] + row * (g["cell_h"] + g["gutter_v"])
+
+    def _page_scroll_pos(self, pi: int) -> int:
+        """Scrollbar value that puts page pi's row/top inside the viewport."""
+        if not self._total_pages:
+            return 0
+        pi = max(0, min(pi, self._total_pages - 1))
+        if self._view_mode == ViewMode.GRID:
+            return max(0, self._page_grid_y(pi) - 4)
+        if pi < len(self._page_heights):
+            return max(0, self._page_heights[pi])
+        return 0
+
+    def _apply_pending_scroll(self):
+        """Move the viewport to the pending page once the layout it depends on is
+        in place. Setting the value is also re-issued on the next event-loop turn
+        because the scrollbar range only adopts the new container size after Qt
+        has processed the layout request."""
+        pi = self._pending_scroll_page
+        if pi is None:
+            return
+        self._pending_scroll_page = None
+        if pi >= self._total_pages:
+            return
+        target = self._page_scroll_pos(pi)
+        sb = self.scroll_area.verticalScrollBar()
+        sb.setValue(target)
+        QTimer.singleShot(0, lambda t=target: sb.setValue(t))
+
+    def _deferred_relayout(self):
+        """Re-run the layout after the scrollbar range has caught up with the new
+        container size, then apply any scroll target that was waiting on it."""
+        if not self.doc:
+            return
+        self._layout_labels()
+        self._apply_pending_scroll()
+        self._refresh_visible_pixmaps()
+
+    def _refresh_visible_pixmaps(self):
+        """Render pixmaps for the labels that are on screen (grid view renders
+        lazily, so a scroll can reveal labels that have no pixmap yet)."""
+        if self._view_mode != ViewMode.GRID or not self.doc:
+            return
+        sb = self.scroll_area.verticalScrollBar()
+        top, bottom = sb.value(), sb.value() + self._viewport_height()
+        g = self._grid_geometry(self._viewport_size()[0])
+        row_px = g["cell_h"] + g["gutter_v"]
+        first_row = max(0, (top - g["mg"]) // row_px - 1)
+        last_row = min(g["rows"] - 1, (bottom - g["mg"]) // row_px + 1)
+        for pi in range(first_row * g["cols"],
+                        min(self._total_pages, (last_row + 1) * g["cols"])):
+            label = self._labels[pi]
+            dw, dh, _, _ = g["dims"][pi]
+            pix = self._get_or_render(pi, dw, dh, force_fit=True)
+            if pix and label.pixmap() is None:
+                label.setPixmap(pix)
 
     def _grid_page_at_pos(self, pos):
-        """Find which page cell contains the given point, or -1 if none."""
-        for pi in range(self._total_pages):
-            cx, cy, cw, ch = self._cell_rect(pi)
-            if cx <= pos.x() <= cx + cw and cy <= pos.y() <= cy + ch:
-                return pi
+        """Find which page cell contains the given point, or -1 if none.
+        O(1) via the cached grid geometry instead of a scan over all pages."""
+        if self._total_pages <= 0:
+            return -1
+        g = self._grid_geometry(self._viewport_size()[0])
+        col = (pos.x() - g["left"]) // (g["cell_w"] + g["gutter_h"])
+        row = (pos.y() - g["mg"]) // (g["cell_h"] + g["gutter_v"])
+        if col < 0 or col >= g["cols"] or row < 0:
+            return -1
+        pi = int(row) * g["cols"] + int(col)
+        if pi < 0 or pi >= self._total_pages:
+            return -1
+        cx, cy, cw, ch = self._cell_rect(pi)
+        if cx <= pos.x() <= cx + cw and cy <= pos.y() <= cy + ch:
+            return pi
         return -1
 
     def _grid_mouse_press(self, e):
         """Container-level mouse press: selection or start drag-sort."""
-        if not self._edit_mode: return
+        if not self._edit_mode:
+            return
         pos = e.position().toPoint()
         self._rubber_origin = pos
+        self._rubber_rect = None
         pi = self._grid_page_at_pos(pos)
         self._drag_start_page = pi
 
@@ -1072,52 +1326,136 @@ class PdfReaderWidget(QWidget):
 
         if pi >= 0:
             if ctrl:
-                if pi in self._selected_pages: self._selected_pages.discard(pi)
-                else: self._selected_pages.add(pi)
+                if pi in self._selected_pages:
+                    self._selected_pages.discard(pi)
+                else:
+                    self._selected_pages.add(pi)
             elif shift and self._selected_pages:
                 start = min(self._selected_pages)
                 end = pi
-                if end < start: start, end = end, start
+                if end < start:
+                    start, end = end, start
                 self._selected_pages = set(range(start, end + 1))
             else:
                 self._selected_pages = {pi}
             self._drag_active = False
-            self._update_edit_buttons()
-            self._layout_labels()
+            self._refresh_selection_view()
 
     def _grid_mouse_move(self, e):
         """Container-level mouse move: rectangle select or drag-sort tracking."""
-        if not self._edit_mode: return
+        if not self._edit_mode or not self._rubber_origin:
+            return
         pos = e.position().toPoint()
-        if not hasattr(self, '_rubber_origin') or not self._rubber_origin: return
 
         if self._drag_active and self._drag_start_page is not None:
             target = self._grid_page_at_pos(pos)
-            if target >= 0 and target not in self._selected_pages and target != self._drag_target:
-                self._drag_target = target
-                self._layout_labels()  # show insertion highlight
+            new_target = target if target >= 0 else None
+            if new_target != self._drag_target:
+                for pi in (self._drag_target, new_target):
+                    if pi is not None and 0 <= pi < len(self._labels):
+                        self._labels[pi]._style_state = None
+                self._drag_target = new_target
+                self._refresh_selection_view()
             return
 
         # Rectangle select (non-drag mode)
-        if self._drag_active: return  # dragging, don't select
-        dist = (pos - self._rubber_origin).manhattanLength()
-        if dist < 8: return
+        if self._drag_active:
+            return
+        if (pos - self._rubber_origin).manhattanLength() < 8:
+            return
         x1, y1 = self._rubber_origin.x(), self._rubber_origin.y()
         x2, y2 = pos.x(), pos.y()
         rx, ry = min(x1, x2), min(y1, y2)
         rw, rh = abs(x2 - x1), abs(y2 - y1)
-        if rw < 4 and rh < 4: return
-        self._selected_pages.clear()
-        for pi in range(self._total_pages):
-            cx, cy, cw, ch = self._cell_rect(pi)
-            if rx < cx + cw and rx + rw > cx and ry < cy + ch and ry + rh > cy:
-                self._selected_pages.add(pi)
+        if rw < 4 and rh < 4:
+            return
+        self._rubber_rect = (rx, ry, rw, rh)
+        self._update_rubber_band()
+        self._select_pages_in_rect(self._rubber_band_cells())
+
+    def _cell_index_at(self, x: int, y: int):
+        """(row, col) of the grid cell that owns a point, with tiny overshoot
+        clamped into the nearest cell so dragging past an edge still selects."""
+        g = self._grid_geometry(self._viewport_size()[0])
+        col_px, row_px = g["cell_w"] + g["gutter_h"], g["cell_h"] + g["gutter_v"]
+        col = (x - g["left"]) // col_px
+        row = (y - g["mg"]) // row_px
+        col = max(0, min(g["cols"] - 1, int(col)))
+        row = max(0, min(g["rows"] - 1, int(row)))
+        return row, col
+
+    def _rubber_band_cells(self) -> set:
+        """Pages covered by the rubber band, as the full rectangle of grid cells
+        between the drag anchor and the current pointer (Finder-style marquee)."""
+        if not self._rubber_rect or not self._rubber_origin:
+            return set()
+        rx, ry, rw, rh = self._rubber_rect
+        r0, c0 = self._cell_index_at(self._rubber_origin.x(), self._rubber_origin.y())
+        r1, c1 = self._cell_index_at(rx + rw, ry + rh)
+        if r1 < r0:
+            r0, r1 = r1, r0
+        if c1 < c0:
+            c0, c1 = c1, c0
+        g = self._grid_geometry(self._viewport_size()[0])
+        cols = g["cols"]
+        out = set()
+        for row in range(r0, r1 + 1):
+            for col in range(c0, c1 + 1):
+                pi = row * cols + col
+                if 0 <= pi < self._total_pages:
+                    out.add(pi)
+        return out
+
+    def _select_pages_in_rect(self, selected):
+        """Apply a new selection set, repainting only what changed."""
+        if selected != self._selected_pages:
+            self._selected_pages = selected
+            self._refresh_selection_view()
+        else:
+            self._refresh_selection_view(buttons_only=True)
+
+    def _refresh_selection_view(self, buttons_only: bool = False):
+        """Repaint selection without rebuilding the whole grid.
+
+        Older builds called _layout_labels() on every mouse-move, which re-rendered
+        every thumbnail in the document. Here only the pages whose selected state
+        actually changed get a new stylesheet, and the button state is refreshed."""
+        previous = getattr(self, "_prev_selected", set())
+        changed = previous.symmetric_difference(self._selected_pages)
+        self._prev_selected = set(self._selected_pages)
+        if not buttons_only:
+            for pi in changed:
+                if 0 <= pi < len(self._labels):
+                    lbl = self._labels[pi]
+                    lbl._style_state = None
+                    self._apply_page_style(
+                        lbl, selected=self._edit_mode and pi in self._selected_pages,
+                        grid=True)
         self._update_edit_buttons()
-        self._layout_labels()
+
+    def _update_rubber_band(self):
+        """Thin overlay rectangle so box-select gives live feedback."""
+        if not self._rubber_rect:
+            if getattr(self, "_rubber_band", None):
+                self._rubber_band.hide()
+            return
+        band = getattr(self, "_rubber_band", None)
+        if band is None:
+            band = QWidget(self.page_container)
+            band.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+            band.setStyleSheet(
+                "background:rgba(0,122,255,40);"
+                f"border:1px solid {_dc('#4da3ff', '#007aff')};")
+            self._rubber_band = band
+        rx, ry, rw, rh = self._rubber_rect
+        band.setGeometry(rx, ry, rw, rh)
+        band.show()
+        band.raise_()
 
     def _grid_mouse_release(self, e):
         """End selection or complete drag-sort move."""
-        if not self._edit_mode: return
+        if not self._edit_mode:
+            return
         pos = e.position().toPoint()
 
         if self._drag_active and self._selected_pages and self._page_editor:
@@ -1137,6 +1475,8 @@ class PdfReaderWidget(QWidget):
                 self._update_nav_ui()
 
         # Reset drag state
+        self._rubber_rect = None
+        self._update_rubber_band()
         self._rubber_origin = None
         self._drag_active = False
         self._drag_target = None
@@ -1166,8 +1506,7 @@ class PdfReaderWidget(QWidget):
                 self._selected_pages.clear()
             else:
                 self._selected_pages = {pi}
-        self._update_edit_buttons()
-        self._layout_labels()
+        self._refresh_selection_view()
 
     def _update_edit_buttons(self):
         has_sel = len(self._selected_pages) > 0
@@ -1195,7 +1534,8 @@ class PdfReaderWidget(QWidget):
         if self.btn_edit_sort.isChecked():
             if not self._selected_pages:
                 self.btn_edit_sort.setChecked(False)
-                QMessageBox.information(self, "排序模式", "请先选中要排序的页面（Shift键多选），再点击排序按钮。")
+                QMessageBox.information(self, tr("reader_sort_hint_title"),
+                                        tr("reader_sort_hint_body"))
                 return
             self._drag_sort_mode = True
             self._drag_active = False; self._drag_target = None
@@ -1215,33 +1555,44 @@ class PdfReaderWidget(QWidget):
             if sys.platform == "darwin":
                 subprocess.Popen(["open", str(tmp)])
             elif sys.platform == "win32":
-                subprocess.Popen(["start", str(tmp)], shell=True)
+                os.startfile(str(tmp))  # noqa: S606 — Windows shell open
+            else:
+                subprocess.Popen(["xdg-open", str(tmp)])
         except Exception as ex:
-            QMessageBox.warning(self, "打印", f"打印失败: {ex}")
+            QMessageBox.warning(self, tr("reader_print_title"),
+                                tr("reader_print_failed", error=ex))
 
     def _edit_rotate(self):
         if not self._page_editor or not self._selected_pages: return
         self._page_editor.rotate_pages(list(self._selected_pages), 90)
-        self.doc = self._page_editor._doc
+        self.doc = self._page_editor.doc
         self._unsaved_edits = True
-        # Invalidate ALL cached renderings for rotated pages — both thumbnails
-        # and 100% base renders. Rotation changes the page's visual output,
-        # so every cache entry for these pages is stale.
-        vw, vh = self._viewport_size()
+        # Invalidate every cached rendering of the rotated pages — both the grid
+        # thumbnails and the 100% base. Rotation changes the page's visual output,
+        # so all entries for these page indices are stale. One sweep over the cache
+        # instead of one sweep per selected page.
+        PdfReaderWidget._invalidate_pages(self._selected_pages)
+        # Page rects changed (rotation swaps width/height for 90°/270°), so the
+        # grid geometry cache is stale too.
+        self._grid_geom = None
+        if self._view_mode == ViewMode.GRID:
+            self._grid_geometry(self._viewport_size()[0])
         for pi in self._selected_pages:
-            for key in list(PdfReaderWidget._cache.keys()):
-                if key[0] == pi:
-                    PdfReaderWidget._cache_pop(key)
-        self._layout_labels(); self._update_edit_buttons()
+            if 0 <= pi < len(self._labels):
+                self._labels[pi].setPixmap(QPixmap())
+                self._labels[pi]._style_state = None
+        self._layout_labels()
+        self._refresh_visible_pixmaps()
+        self._update_edit_buttons()
 
     def _edit_delete(self):
         if not self._page_editor or not self._selected_pages: return
-        reply = QMessageBox.question(self, "删除页面",
-            f"确定删除 {len(self._selected_pages)} 页吗？",
+        reply = QMessageBox.question(self, tr("reader_delete_title"),
+            tr("reader_delete_body", count=len(self._selected_pages)),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         if reply != QMessageBox.StandardButton.Yes: return
         self._page_editor.delete_pages(list(self._selected_pages))
-        self.doc = self._page_editor._doc  # sync shared doc
+        self.doc = self._page_editor.doc  # undo/redo swap the handle — re-read it
         self._unsaved_edits = True
         self._selected_pages.clear()
         PdfReaderWidget._clear_cache()  # ALL cache is stale after page deletion
@@ -1251,22 +1602,25 @@ class PdfReaderWidget(QWidget):
 
     def _edit_extract(self):
         if not self._page_editor or not self._selected_pages: return
-        path, _ = QFileDialog.getSaveFileName(self, "提取页面", "extracted.pdf",
-                                              "PDF (*.pdf)")
-        if not path: self._layout_labels(); return
+        path, _ = QFileDialog.getSaveFileName(
+            self, tr("reader_extract_title"), "extracted.pdf", tr("file_filter_pdf"))
+        if not path:
+            self._layout_labels()
+            return
         self._page_editor.extract_pages(list(self._selected_pages), Path(path))
         self._layout_labels()
-        QMessageBox.information(self, "完成", f"已提取到 {path}")
+        QMessageBox.information(self, tr("reader_done_title"),
+                                tr("reader_extracted_body", path=path))
 
     def _edit_export_menu(self):
         """Show a popup menu for export file type selection."""
         if not self._selected_pages: return
         from PyQt6.QtWidgets import QMenu
         menu = QMenu(self)
-        act_pdf = menu.addAction("📄 导出为 PDF")
-        act_jpg = menu.addAction("🖼️ 导出为 JPG 图片")
-        act_word = menu.addAction("📝 导出为 Word (.docx)")
-        act_ppt = menu.addAction("📊 导出为 PowerPoint (.pptx)")
+        act_pdf = menu.addAction(tr("reader_export_pdf"))
+        act_jpg = menu.addAction(tr("reader_export_jpg"))
+        act_word = menu.addAction(tr("reader_export_word"))
+        act_ppt = menu.addAction(tr("reader_export_ppt"))
         act = menu.exec(self.btn_edit_export.mapToGlobal(
             self.btn_edit_export.rect().bottomLeft()))
         if act == act_pdf:
@@ -1280,11 +1634,13 @@ class PdfReaderWidget(QWidget):
 
     def _edit_export(self, fmt: str = "pdf"):
         if not self._page_editor or not self._selected_pages: return
-        filters = {"pdf": "PDF (*.pdf)", "jpg": "JPG (*.jpg)", "word": "Word (*.docx)", "ppt": "PowerPoint (*.pptx)"}
+        filters = {"pdf": tr("file_filter_pdf"), "jpg": "JPG (*.jpg)",
+                   "word": tr("file_filter_word"), "ppt": tr("file_filter_ppt")}
         default_ext = {"pdf": ".pdf", "jpg": ".jpg", "word": ".docx", "ppt": ".pptx"}
         filter_str = filters.get(fmt, filters["pdf"])
         ext = default_ext.get(fmt, ".pdf")
-        path, _ = QFileDialog.getSaveFileName(self, "导出所选页面", "exported" + ext, filter_str)
+        path, _ = QFileDialog.getSaveFileName(
+            self, tr("reader_export_title"), "exported" + ext, filter_str)
         if not path: return
         if fmt == "pdf":
             self._page_editor.extract_pages(list(self._selected_pages), Path(path))
@@ -1309,7 +1665,8 @@ class PdfReaderWidget(QWidget):
             from core.pdf_ops import PdfOperator
             PdfOperator.to_ppt(tmp, Path(path))
             tmp.unlink(missing_ok=True)
-        QMessageBox.information(self, "完成", f"已导出到 {path}")
+        QMessageBox.information(self, tr("reader_done_title"),
+                                tr("reader_exported_body", path=path))
 
     @staticmethod
     def _export_pages_to_images(pdf_path: Path, output_dir: Path):
@@ -1328,7 +1685,7 @@ class PdfReaderWidget(QWidget):
         if self._page_editor and self._page_editor.can_undo():
             self._page_editor.undo()
             # Undo restores snapshot → new fitz.Document in editor._doc
-            self.doc = self._page_editor._doc
+            self.doc = self._page_editor.doc
             self._unsaved_edits = self._page_editor.can_undo()  # still unsaved if more undos possible
             self._selected_pages.clear()
             PdfReaderWidget._clear_cache()
@@ -1339,7 +1696,7 @@ class PdfReaderWidget(QWidget):
     def _edit_redo(self):
         if self._page_editor and self._page_editor.can_redo():
             self._page_editor.redo()
-            self.doc = self._page_editor._doc  # sync after snapshot restore
+            self.doc = self._page_editor.doc  # sync after snapshot restore
             self._selected_pages.clear()
             PdfReaderWidget._clear_cache()
             self._rebuild_labels_from_editor()
@@ -1378,11 +1735,16 @@ class PdfReaderWidget(QWidget):
 
     # ═══════════ Scroll tracking (bisect, O(log n)) ═══════════
 
-    def _scroll_to_page_top(self):
-        if not self._page_heights or self._current_page >= len(self._page_heights):
+    def _scroll_to_page_top(self, defer: bool = False):
+        """Bring the current page into view (works in both view modes).
+
+        defer=True records the target and lets the next layout pass apply it,
+        which is required when the container size is about to change."""
+        if not self.doc or not self._total_pages:
             return
-        self.scroll_area.verticalScrollBar().setValue(
-            max(0, self._page_heights[self._current_page]))
+        self._pending_scroll_page = self._current_page
+        if not defer:
+            self._apply_pending_scroll()
 
     def _on_scrollbar_changed(self, value):
         """Scrollbar moved — fire throttle (rough page), debounce (precise+render)."""
@@ -1413,17 +1775,32 @@ class PdfReaderWidget(QWidget):
             if abs(rough - self._throttle_last) > 1:
                 self._current_page = rough
                 self._update_nav_ui()
+                self._queue_lazy_pre_render()
             self._throttle_last = rough
         except Exception: pass
 
     def _do_debounce_calibration(self):
-        """Precise calibration via bisect on _page_heights — O(log n).
-        Always triggers visible-range render regardless of page change,
-        so that stale zoom pixmaps get refreshed on scroll stop."""
+        """Scroll has stopped: recalibrate the current page and refresh pixmaps.
+
+        Scroll mode bisects the cached page offsets (O(log n)). Grid mode derives
+        the row from the scroll offset, then materialises the thumbnails that the
+        new position revealed."""
         try:
-            if not self.doc or not self._page_heights: return
+            if not self.doc:
+                return
             sb = self.scroll_area.verticalScrollBar()
-            if not sb: return
+            if not sb:
+                return
+            if self._view_mode == ViewMode.GRID:
+                idx = self._page_at_scroll_pos(sb.value())
+                if idx != self._current_page:
+                    self._current_page = idx
+                    self._update_nav_ui()
+                self._refresh_visible_pixmaps()
+                self._queue_lazy_pre_render()
+                return
+            if not self._page_heights:
+                return
             mid = max(0, sb.value() + sb.pageStep() // 2)
             idx = bisect_right(self._page_heights, mid) - 1
             if idx < 0: idx = 0
@@ -1432,7 +1809,19 @@ class PdfReaderWidget(QWidget):
                 self._current_page = idx
                 self._update_nav_ui()
             self._schedule_render_visible(50)  # 50ms for inertia to fully stop
-        except Exception: pass
+        except Exception:
+            pass
+
+    def _page_at_scroll_pos(self, y: int) -> int:
+        """Page index visible at container offset y (mode aware)."""
+        if self._view_mode == ViewMode.GRID:
+            g = self._grid_geometry(self._viewport_size()[0])
+            row = max(0, (y - g["mg"])) // (g["cell_h"] + g["gutter_v"])
+            return int(min(self._total_pages - 1, row * g["cols"]))
+        if not self._page_heights:
+            return self._current_page
+        idx = bisect_right(self._page_heights, y + self._viewport_height() // 2) - 1
+        return max(0, min(self._total_pages - 1, idx))
 
     # ═══════════ Render ═══════════
 
@@ -1469,6 +1858,13 @@ class PdfReaderWidget(QWidget):
         vp = self.scroll_area.viewport()
         w, h = max(800, vp.width() - 4), max(600, vp.height() - 4)
         return w, h
+
+    def _viewport_height(self) -> int:
+        """Raw viewport height (no minimum clamp) — used for visibility maths."""
+        try:
+            return max(1, self.scroll_area.viewport().height())
+        except Exception:
+            return 600
 
     def _device_pixel_ratio(self) -> float:
         """Get the device pixel ratio for native-resolution rendering on HiDPI."""
@@ -1538,6 +1934,16 @@ class PdfReaderWidget(QWidget):
             cls._cache_memory_bytes -= mem
 
     @classmethod
+    def _invalidate_pages(cls, ordinals):
+        """Drop every cache entry belonging to the given page indices.
+        One pass over the cache no matter how many pages are affected."""
+        wanted = set(ordinals)
+        if not wanted or not cls._cache:
+            return
+        for key in [k for k in cls._cache if k[0] in wanted]:
+            cls._cache_pop(key)
+
+    @classmethod
     def _clear_cache(cls):
         cls._cache.clear()
         cls._cache_memory_bytes = 0
@@ -1581,6 +1987,9 @@ class PdfReaderWidget(QWidget):
     # ═══════════ Slots ═══════════
 
     def _on_resize(self):
+        """Viewport changed (window resize): re-derive fit ratios, re-lay out and
+        re-render. Without the explicit re-layout the page labels keep their old
+        size and stop being centred in the new viewport."""
         if not self.doc or not self._labels:
             return
         page = self.doc[0]; pw, ph = page.rect.width, page.rect.height
@@ -1588,10 +1997,15 @@ class PdfReaderWidget(QWidget):
         self._fw_ratio = vw / pw if pw > 0 else 1.0
         self._fh_ratio = vh / ph if ph > 0 else 1.0
         self._default_zoom_pct = max(50, min(300, int(self._fh_ratio * 100)))
+        # While a fit mode is active the page size itself tracks the viewport,
+        # so the layout must be recomputed (not just re-rendered).
+        self._layout_labels()
         cur_pct = self._current_zoom_pct()
         self.zoom_edit.setText(str(cur_pct))
         self._pending_zoom_pct = cur_pct
+        self._scroll_to_page_top()
         QTimer.singleShot(40, self._sharp_render)
+        self._schedule_render_visible(0)
 
     def _update_nav_ui(self):
         if self._total_pages == 0:
@@ -1751,4 +2165,7 @@ class PdfReaderWidget(QWidget):
     @opened_from_file_list.setter
     def opened_from_file_list(self, v: bool):
         self._btn_open_source = 'file_list' if v else 'dialog'
-    def retranslate_ui(self): pass
+    def retranslate_ui(self):
+        """Re-read the editable labels after a language switch."""
+        self.btn_edit.setText(self._editing_label if self._edit_mode
+                              else self._normal_label)

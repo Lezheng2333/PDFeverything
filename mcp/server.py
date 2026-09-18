@@ -28,11 +28,33 @@ Connect from Claude Desktop / Claude Code config:
     }
 """
 
+import contextlib
+import io
 import json
+import os
 import sys
 import subprocess
 from pathlib import Path
 from typing import Any
+
+# PyMuPDF prints a one-line recommendation to stdout the first time table
+# detection runs. On a stdio JSON-RPC channel that plain-text line corrupts the
+# stream and the client loses sync with the server, so silence it before any
+# core module gets a chance to call into MuPDF.
+os.environ.setdefault("PYMUPDF_SUGGEST_LAYOUT_ANALYZER", "0")
+try:  # pragma: no cover - depends on the installed PyMuPDF build
+    import pymupdf
+
+    pymupdf.no_recommend_layout()
+except Exception:
+    try:
+        import fitz
+
+        fitz.no_recommend_layout()
+    except Exception:
+        pass
+
+SERVER_VERSION = "1.5.0"
 
 # ── Tool definitions (OpenAI-compatible JSON schemas) ──────
 
@@ -692,7 +714,7 @@ def _run_tool(name: str, args: dict) -> str:
             return json.dumps({"success": False, "error": f"Unknown tool: {name}"})
 
     except Exception as e:
-        return json.dumps({"success": False, "error": str(e)})
+        return json.dumps({"success": False, "error": str(e) or type(e).__name__})
     finally:
         cleanup_temp_files()
 
@@ -701,30 +723,52 @@ def _run_tool(name: str, args: dict) -> str:
 
 def _send(msg: dict) -> None:
     """Write a JSON-RPC message to stdout."""
-    sys.stdout.write(json.dumps(msg) + "\n")
+    sys.stdout.write(json.dumps(msg, ensure_ascii=False) + "\n")
     sys.stdout.flush()
 
 
-def _read() -> dict | None:
-    """Read a JSON-RPC message from stdin."""
+def _read():
+    """Read one JSON-RPC line from stdin.
+
+    Returns ("eof", None) at end of input, ("bad", None) for a malformed line and
+    ("ok", message) for a decoded request. Conflating EOF with a parse error used
+    to make a single blank line terminate the whole server.
+    """
     try:
         line = sys.stdin.readline()
-        if not line:
-            return None
-        return json.loads(line.strip())
-    except (json.JSONDecodeError, EOFError):
-        return None
+    except (EOFError, KeyboardInterrupt):
+        return "eof", None
+    if not line:
+        return "eof", None
+    stripped = line.strip()
+    if not stripped:
+        return "bad", None
+    try:
+        req = json.loads(stripped)
+    except json.JSONDecodeError:
+        return "bad", None
+    if not isinstance(req, dict):
+        return "bad", None
+    return "ok", req
 
 
 def serve() -> None:
     """Main MCP server loop — listens on stdin, responds on stdout."""
     while True:
-        req = _read()
-        if req is None:
+        status, req = _read()
+        if status == "eof":
             break
+        if status == "bad":
+            _send({"jsonrpc": "2.0", "id": None,
+                   "error": {"code": -32700, "message": "Parse error"}})
+            continue
 
         msg_id = req.get("id")
         method = req.get("method", "")
+
+        # JSON-RPC 2.0: notifications (no "id") must never be answered.
+        if "id" not in req and not method.startswith("notifications/"):
+            continue
 
         if method == "initialize":
             _send({
@@ -735,13 +779,16 @@ def serve() -> None:
                     "capabilities": {"tools": {}},
                     "serverInfo": {
                         "name": "pdfeverything",
-                        "version": "1.4.2"
+                        "version": SERVER_VERSION,
                     }
                 }
             })
 
-        elif method == "notifications/initialized":
-            pass  # no response needed for notifications
+        elif method == "notifications/initialized" or method.startswith("notifications/"):
+            pass  # notifications never get a response
+
+        elif method == "ping":
+            _send({"jsonrpc": "2.0", "id": msg_id, "result": {}})
 
         elif method == "tools/list":
             _send({
@@ -751,10 +798,16 @@ def serve() -> None:
             })
 
         elif method == "tools/call":
-            params = req.get("params", {})
+            params = req.get("params") or {}
             tool_name = params.get("name", "")
-            tool_args = params.get("arguments", {})
-            result_text = _run_tool(tool_name, tool_args)
+            tool_args = params.get("arguments") or {}
+            # Nothing must reach stdout except JSON-RPC frames.
+            with contextlib.redirect_stdout(sys.stderr):
+                result_text = _run_tool(tool_name, tool_args)
+            try:
+                is_error = not json.loads(result_text).get("success", False)
+            except json.JSONDecodeError:
+                is_error = True
 
             _send({
                 "jsonrpc": "2.0",
@@ -763,7 +816,7 @@ def serve() -> None:
                     "content": [
                         {"type": "text", "text": result_text}
                     ],
-                    "isError": not json.loads(result_text).get("success", False)
+                    "isError": is_error
                 }
             })
 

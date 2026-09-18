@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import List
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QAction, QDragEnterEvent, QDropEvent
+from PyQt6.QtGui import QDragEnterEvent, QDropEvent
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QFileDialog,
@@ -114,7 +114,7 @@ class FileListWidget(QWidget):
 
     def add_files(self, paths: List[Path]) -> None:
         existing = set(self.get_file_paths())
-        added, skipped_unsupported, skipped_large, skipped_empty = 0, 0, 0, 0
+        added, skipped_unsupported, skipped_large, skipped_empty, skipped_full = 0, 0, 0, 0, 0
         remaining = self.MAX_FILES - self.count()
 
         for p in paths:
@@ -136,7 +136,10 @@ class FileListWidget(QWidget):
                 skipped_large += 1
                 continue
             if remaining <= 0:
-                break
+                # Keep counting instead of breaking, so the report tells the user
+                # exactly how many files were dropped.
+                skipped_full += 1
+                continue
 
             existing.add(p)
             cat = get_file_category(p)
@@ -152,19 +155,14 @@ class FileListWidget(QWidget):
         if added > 0:
             self.files_changed.emit()
 
-        msgs = []
-        if skipped_unsupported:
-            msgs.append(f"{skipped_unsupported} unsupported format(s)")
-        if skipped_large:
-            msgs.append(f"{skipped_large} file(s) >500MB")
-        if skipped_empty:
-            msgs.append(f"{skipped_empty} empty file(s)")
-        if remaining <= 0 and added > 0:
-            msgs.append(f"List full (max {self.MAX_FILES} files)")
-        if msgs:
+        total_skipped = (skipped_unsupported + skipped_large
+                         + skipped_empty + skipped_full)
+        if total_skipped:
+            detail = tr("fl_msg_skip_detail", unsupported=skipped_unsupported,
+                        large=skipped_large, empty=skipped_empty, full=skipped_full)
             QMessageBox.information(
                 self, tr("fl_msg_skip_title"),
-                "Skipped: " + ", ".join(msgs))
+                tr("fl_msg_skip_body", count=total_skipped) + "\n" + detail)
 
     def get_file_paths(self) -> List[Path]:
         paths = []

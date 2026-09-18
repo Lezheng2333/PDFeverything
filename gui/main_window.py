@@ -3,8 +3,8 @@
 from pathlib import Path
 from typing import List, Optional
 
-from PyQt6.QtCore import QSettings, Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QAction, QCloseEvent, QDragEnterEvent, QDropEvent
+from PyQt6.QtCore import QSettings, Qt, QThread, QTimer
+from PyQt6.QtGui import QCloseEvent, QDragEnterEvent, QDropEvent
 from PyQt6.QtWidgets import (
     QFileDialog,
     QGroupBox,
@@ -30,7 +30,7 @@ from core.utils import (
     filter_by_category,
     format_bytes,
     get_file_category,
-    register_temp,
+    parse_page_ranges,
 )
 
 from .dialogs import (
@@ -48,6 +48,9 @@ from .pdf_reader_widget import PdfReaderWidget
 from .workers import BaseWorker
 
 
+VERSION = "1.5.0"
+
+
 def _dc(dark, light):
     from . import pdf_reader_widget as _rw
     return dark if _rw._DARK else light
@@ -59,10 +62,11 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self._worker: Optional[QThread] = None
+        self._office_worker: Optional[QThread] = None
         self._settings = QSettings("PDFeverything", "PDFeverything")
         self._init_ui()
         self._restore_geometry()
-        self._check_office()
+        self._start_office_probe()
 
     # ── UI ───────────────────────────────────────────
 
@@ -104,6 +108,7 @@ class MainWindow(QMainWindow):
         self.menu_op = mb.addMenu(tr("menu_operations"))
         self.act_merge = self.menu_op.addAction(
             tr("menu_merge"), "Ctrl+M", self._on_merge_clicked)
+        self.act_merge.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut)
         self.act_split = self.menu_op.addAction(tr("btn_split"), self._on_split_clicked)
         self.act_compress = self.menu_op.addAction(tr("btn_compress"), self._on_compress_clicked)
         self.act_watermark = self.menu_op.addAction(tr("btn_watermark"), self._on_watermark_clicked)
@@ -123,7 +128,7 @@ class MainWindow(QMainWindow):
         self._update_lang_check()
 
         self.menu_help = mb.addMenu(tr("menu_help"))
-        self.menu_help.addAction(tr("menu_about"), self._on_about)
+        self.act_about = self.menu_help.addAction(tr("menu_about"), self._on_about)
 
     def _switch_language(self, lang: str):
         set_language(lang)
@@ -145,6 +150,7 @@ class MainWindow(QMainWindow):
         self.act_open_reader.setText(tr("reader_open_pdf"))
         self.act_quit.setText(tr("menu_quit"))
         self.menu_op.setTitle(tr("menu_operations"))
+        self.act_merge.setText(tr("menu_merge"))
         self.act_split.setText(tr("btn_split"))
         self.act_compress.setText(tr("btn_compress"))
         self.act_watermark.setText(tr("btn_watermark"))
@@ -156,11 +162,13 @@ class MainWindow(QMainWindow):
         self.act_lang_zh.setText(tr("menu_lang_zh"))
         self.act_lang_en.setText(tr("menu_lang_en"))
         self.menu_help.setTitle(tr("menu_help"))
+        self.act_about.setText(tr("menu_about"))
         # Group boxes
         self.merge_group.setTitle(tr("group_merge_ops"))
         self.single_group.setTitle(tr("group_pdf_ops"))
-        # Buttons
-        self.btn_merge.setText(tr("btn_merge_unified"))
+        self.tools_group.setTitle(tr("group_tools"))
+        # Buttons (the merge button text is derived from the file list, so it is
+        # refreshed at the end of this method instead of being set directly)
         self.btn_split.setText(tr("btn_split"))
         self.btn_compress.setText(tr("btn_compress"))
         self.btn_watermark.setText(tr("btn_watermark"))
@@ -177,8 +185,9 @@ class MainWindow(QMainWindow):
         # Reader edit button labels
         self.reader._normal_label = tr("reader_edit")
         self.reader._editing_label = tr("reader_editing")
-        if not self.reader._edit_mode:
-            self.reader.btn_edit.setText(self.reader._normal_label)
+        self.reader.btn_edit.setText(
+            self.reader._editing_label if self.reader._edit_mode
+            else self.reader._normal_label)
         # Reader toolbar
         self.reader.btn_scroll.setText(tr("reader_scroll"))
         self.reader.btn_scroll.setToolTip(tr("reader_scroll_tip"))
@@ -195,7 +204,6 @@ class MainWindow(QMainWindow):
         self.reader.zoom_edit.setToolTip(tr("reader_zoom_edit"))
         self.reader.btn_close.setToolTip(tr("reader_close"))
         # Reader edit toolbar
-        self.reader.btn_edit.setText(tr("reader_edit"))
         self.reader.btn_edit.setToolTip(tr("reader_edit"))
         self.reader.btn_edit_sel.setText(tr("reader_edit_select"))
         self.reader.btn_edit_sel.setToolTip(tr("reader_edit_sel_tip"))
@@ -235,7 +243,9 @@ class MainWindow(QMainWindow):
             self.status_label.setText(tr("status_ready"))
         # File list
         self.file_list.retranslate_ui()
-        # Office
+        # Derived labels (merge button summary, button enablement)
+        self._update_button_states()
+        # Office (formats the cached probe result; never re-probes)
         self._check_office()
 
     def _init_merge_tab(self):
@@ -444,8 +454,16 @@ class MainWindow(QMainWindow):
                 pass
 
     def _check_office(self):
+        """Render the Office status from the cached probe result.
+
+        The probe itself shells out to osascript/COM (up to 30 s), so it runs on a
+        worker thread started by _start_office_probe; this method only formats the
+        now-known answer and is called from the language switch and the probe."""
+        avail = check_office_availability()
+        if avail is None:
+            self.office_status_label.setText(tr("office_checking"))
+            return
         try:
-            avail = check_office_availability()
             w = tr("office_ok") if avail.get("word") else tr("office_fail")
             p = tr("office_ok") if avail.get("powerpoint") else tr("office_fail")
             e = tr("office_ok") if avail.get("excel") else tr("office_fail")
@@ -454,25 +472,56 @@ class MainWindow(QMainWindow):
         except Exception:
             self.office_status_label.setText(tr("office_checking"))
 
+    def _start_office_probe(self):
+        """Detect Word/PowerPoint/Excel off the GUI thread.
+
+        Previously this ran inline in the constructor and froze the window for up
+        to 30 seconds on machines where the AppleScript probe is slow."""
+        if check_office_availability() is not None:
+            self._check_office()
+            return
+
+        class _ProbeWorker(QThread):
+            done = pyqtSignal(dict)
+
+            def run(self):  # noqa: D102
+                try:
+                    self.done.emit(check_office_availability(use_cache=False))
+                except Exception:
+                    self.done.emit({})
+
+        self._office_worker = _ProbeWorker(self)
+        self._office_worker.done.connect(self._on_office_probed)
+        self._office_worker.start()
+
+    def _on_office_probed(self, avail: dict):
+        global_office_cache = avail
+        import core.utils as _utils
+        _utils._office_cache = global_office_cache
+        self._check_office()
+
     # ── Button state ─────────────────────────────────
 
     def _update_button_states(self):
         paths = self.file_list.get_file_paths()
         has_files = len(paths) > 0
         self.btn_merge.setEnabled(has_files)
-        # Show a hint about what's in the list, but always keep one button
+        # Show a hint about what's in the list, but always keep one button.
+        # The counter text comes from i18n so it follows the UI language, and the
+        # label is used as-is (it already carries its own icon).
         if has_files:
             cats = set(get_file_category(p) for p in paths)
             if len(cats) > 1:
-                self.btn_merge.setText(f"🔀 {tr('merge_mixed_files')} ({len(paths)} files)")
+                label = tr("merge_mixed_files")
             elif cats == {"pdf"}:
-                self.btn_merge.setText(f"🔀 {tr('merge_pdf_files')} ({len(paths)} PDFs)")
+                label = tr("merge_pdf_files")
             elif cats == {"image"}:
-                self.btn_merge.setText(f"🔀 {tr('merge_image_files')} ({len(paths)} images)")
+                label = tr("merge_image_files")
             elif cats == {"word"}:
-                self.btn_merge.setText(f"🔀 {tr('merge_word_files')} ({len(paths)} docs)")
+                label = tr("merge_word_files")
             else:
-                self.btn_merge.setText(f"🔀 {tr('merge_as_pdf')} ({len(paths)} files)")
+                label = tr("merge_as_pdf")
+            self.btn_merge.setText(tr("merge_count_fmt", label=label, count=len(paths)))
         else:
             self.btn_merge.setText(tr("btn_merge_unified"))
 
@@ -506,12 +555,29 @@ class MainWindow(QMainWindow):
         self._worker.progress.connect(self._on_progress)
         self._worker.finished.connect(self._on_finished)
         self._worker.error.connect(self._on_error)
+        self._worker.cancelled.connect(self._on_cancelled)
         self._set_busy(True)
         self._worker.start()
 
+    def _is_current_worker(self) -> bool:
+        """True when the signal we are handling came from the active worker.
+
+        Without this guard a late signal from a cancelled job could clear the busy
+        state of the job that replaced it."""
+        sender = self.sender()
+        if sender is None or self._worker is None:
+            return True  # called directly (tests) rather than through a signal
+        return sender is self._worker
+
     def _set_busy(self, busy: bool):
-        self.progress_bar.setVisible(busy)
-        self.btn_cancel.setVisible(busy)
+        # show()/hide() rather than setVisible(): they are explicit and leave no
+        # ambiguity about a widget's visibility state for tests and for Qt.
+        if busy:
+            self.progress_bar.show()
+            self.btn_cancel.show()
+        else:
+            self.progress_bar.hide()
+            self.btn_cancel.hide()
         self.file_list.setEnabled(not busy)
         for w in [self.btn_merge,
                   self.btn_split, self.btn_compress, self.btn_watermark,
@@ -521,65 +587,90 @@ class MainWindow(QMainWindow):
             self._update_button_states()
 
     def _on_progress(self, msg: str, pct: int):
+        if not self._is_current_worker():
+            return
         self.status_label.setText(msg)
         self.progress_bar.setValue(pct)
 
+    def _show_message(self, kind: str, title: str, text: str):
+        """Open a modal box one event-loop turn later.
+
+        Opening it directly from a queued-signal handler can deadlock: the modal
+        loop runs nested event processing while the original handler is still on
+        the stack, and the dialog never comes back (reproduced as a hard hang).
+        """
+        def show():
+            getattr(QMessageBox, kind)(self, title, text)
+        QTimer.singleShot(0, show)
+
     def _on_finished(self, result):
+        if not self._is_current_worker():
+            return
         self._set_busy(False)
         self.status_label.setText(tr("status_done"))
         self.progress_bar.setValue(100)
         if isinstance(result, dict):
             if "results" in result:
-                info_text = f"Batch: {result['converted']} files\nOutput: {result['output']}\n"
-                for r in result["results"]:
-                    fname = Path(r).name if isinstance(r, str) else r
-                    info_text += f"  • {fname}\n"
-                QMessageBox.information(self, tr("status_done"), info_text)
+                failed = result.get("failed") or []
+                info_text = tr("msg_batch_done", ok=result["converted"],
+                               failed=len(failed), output=result["output"])
+                if failed:
+                    info_text += "\n\n" + "\n".join(
+                        f"• {Path(f['path']).name}: {f['reason']}" for f in failed[:15])
+                    if len(failed) > 15:
+                        info_text += f"\n… +{len(failed) - 15}"
+                self._show_message("warning" if failed else "information",
+                                   tr("status_done"), info_text)
             elif "failed" in result and result["failed"]:
                 failed_list = "\n".join(
                     f"• {f['path']}: {f['reason']}" for f in result["failed"])
-                QMessageBox.warning(
-                    self, tr("msg_op_failed"),
-                    tr("msg_partial_fail",
-                       converted=result["converted"],
-                       total=result["total_files"],
-                       failed_list=failed_list))
+                self._show_message("warning", tr("msg_op_failed"),
+                                   tr("msg_partial_fail",
+                                      converted=result["converted"],
+                                      total=result["total_files"],
+                                      failed_list=failed_list))
             elif "ratio" in result:
-                QMessageBox.information(
-                    self, tr("dlg_compress_title"),
-                    tr("msg_compress_done",
-                       before=format_bytes(result['before_bytes']),
-                       after=format_bytes(result['after_bytes']),
-                       ratio=result['ratio']))
+                self._show_message("information", tr("dlg_compress_title"),
+                                   tr("msg_compress_done",
+                                      before=format_bytes(result['before_bytes']),
+                                      after=format_bytes(result['after_bytes']),
+                                      ratio=result['ratio']))
             else:
-                QMessageBox.information(
-                    self, tr("status_done"),
-                    tr("msg_merge_done",
-                       count=result.get("converted", result.get("total_files", 0)),
-                       output=result.get("output", "")))
+                self._show_message("information", tr("status_done"),
+                                   tr("msg_merge_done",
+                                      count=result.get("converted",
+                                                       result.get("total_files", 0)),
+                                      output=result.get("output", "")))
         elif isinstance(result, int):
-            QMessageBox.information(self, tr("status_done"),
-                                    tr("msg_done_count", count=result))
+            self._show_message("information", tr("status_done"),
+                               tr("msg_done_count", count=result))
         elif isinstance(result, list):
-            QMessageBox.information(self, tr("status_done"),
-                                    tr("msg_done_files", count=len(result)))
+            self._show_message("information", tr("status_done"),
+                               tr("msg_done_files", count=len(result)))
 
     def _on_error(self, msg: str):
+        if not self._is_current_worker():
+            return
         self._set_busy(False)
         self.status_label.setText(tr("status_error"))
-        QMessageBox.critical(self, tr("msg_op_failed"), msg)
+        self._show_message("critical", tr("msg_op_failed"), msg)
+
+    def _on_cancelled(self):
+        if not self._is_current_worker():
+            return
+        self._set_busy(False)
+        self.status_label.setText(tr("status_cancelled"))
 
     def _on_cancel(self):
         if self._worker and self._worker.isRunning():
+            # cancel() returns immediately and arms a delayed force-terminate, so
+            # the window keeps repainting while the operation unwinds.
             self._worker.cancel()
+            self.progress_bar.setVisible(False)
+            self.btn_cancel.setVisible(False)
             self.status_label.setText(tr("status_cancelled"))
 
     # ── Action handlers ──────────────────────────────
-
-    def _pick_input_file(self) -> Optional[Path]:
-        path, _ = QFileDialog.getOpenFileName(
-            self, tr("dlg_select_pdf"), "", tr("file_filter_pdf"))
-        return Path(path) if path else None
 
     def _on_merge_clicked(self):
         paths = self.file_list.get_file_paths()
@@ -595,45 +686,53 @@ class MainWindow(QMainWindow):
         else:
             self._run_worker(merge_mixed_files, paths, out)
 
-    def _run_batch(self, files, suffix, op_func, *extra_args, ext=".pdf"):
-        """Batch helper: process multiple files with same op to an output dir.
-        Asks for confirmation if >20 files, and caps at 200."""
-        MAX_BATCH = 200
-        CONFIRM_THRESHOLD = 20
+    MAX_BATCH = 200
+    BATCH_CONFIRM_THRESHOLD = 20
 
-        if len(files) > MAX_BATCH:
+    def _run_batch(self, files, suffix, op_func, *extra_args, ext=".pdf",
+                   out_dir: Optional[Path] = None):
+        """Batch helper: process multiple files with the same op into a directory.
+
+        Asks for confirmation above BATCH_CONFIRM_THRESHOLD files, caps the run at
+        MAX_BATCH, and keeps going when a single file fails so one bad input no
+        longer aborts the whole batch."""
+        if len(files) > self.MAX_BATCH:
             reply = QMessageBox.question(
-                self, "Batch limit",
-                f"You selected {len(files)} files. Maximum batch size is {MAX_BATCH}.\n"
-                f"Only the first {MAX_BATCH} will be processed. Continue?",
+                self, tr("msg_batch_limit_title"),
+                tr("msg_batch_limit_body", count=len(files), max=self.MAX_BATCH),
                 QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel)
             if reply != QMessageBox.StandardButton.Ok:
                 return
-            files = files[:MAX_BATCH]
-        elif len(files) > 1:
-            if len(files) > CONFIRM_THRESHOLD:
-                reply = QMessageBox.question(
-                    self, "Large batch",
-                    f"You are about to process {len(files)} files. This may take a while.\nContinue?",
-                    QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel)
-                if reply != QMessageBox.StandardButton.Ok:
-                    return
+            files = files[:self.MAX_BATCH]
+        elif len(files) > self.BATCH_CONFIRM_THRESHOLD:
+            reply = QMessageBox.question(
+                self, tr("msg_batch_large_title"),
+                tr("msg_batch_large_body", count=len(files)),
+                QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel)
+            if reply != QMessageBox.StandardButton.Ok:
+                return
 
-        out_dir = self._get_batch_output_dir()
+        if out_dir is None:
+            out_dir = self._get_batch_output_dir()
         if not out_dir:
             return
 
         def batch_fn(progress_callback=None):
-            results = []
+            results, failed = [], []
+            total = len(files)
             for i, fp in enumerate(files):
                 out = self._get_batch_output_path(fp, suffix, out_dir, ext)
                 if progress_callback:
-                    progress_callback(f"{suffix} ({i+1}/{len(files)}): {fp.name}",
-                                      int((i + 1) / len(files) * 100))
-                op_func(fp, out, *extra_args)
-                results.append(str(out))
-            return {"converted": len(results), "total_files": len(files),
-                    "failed": [], "output": str(out_dir), "results": results}
+                    progress_callback(f"{suffix} ({i+1}/{total}): {fp.name}",
+                                      int((i + 1) / total * 100))
+                try:
+                    op_func(fp, out, *extra_args)
+                    results.append(str(out))
+                except Exception as e:      # keep processing the remaining files
+                    failed.append({"path": str(fp),
+                                   "reason": str(e) or type(e).__name__})
+            return {"converted": len(results), "total_files": total,
+                    "failed": failed, "output": str(out_dir), "results": results}
 
         self._run_worker(batch_fn)
 
@@ -662,12 +761,13 @@ class MainWindow(QMainWindow):
         dlg = SplitRangeDialog(self)
         if not dlg.exec():
             return
-        out_dir = Path(self._settings.value(
+        start_dir = Path(self._settings.value(
             "output_dir", str(Path.home() / "Desktop")))
-        out_dir = Path(QFileDialog.getExistingDirectory(
-            self, tr("dlg_select_output_dir"), str(out_dir)))
-        if not out_dir:
+        chosen = QFileDialog.getExistingDirectory(
+            self, tr("dlg_select_output_dir"), str(start_dir))
+        if not chosen:
             return
+        out_dir = Path(chosen)
         mode = dlg.get_mode()
         if mode == 0:
             self._run_worker(PdfOperator.split, ip, out_dir, None)
@@ -758,6 +858,11 @@ class MainWindow(QMainWindow):
         if not dlg.exec():
             return
         angle, pages = dlg.get_angle(), dlg.get_pages()
+        if pages is not None and not pages:
+            # [] means "rotate no page" in PdfOperator — refuse instead of
+            # writing an identical copy and reporting success.
+            QMessageBox.warning(self, tr("msg_op_failed"), tr("msg_rot_empty"))
+            return
         if len(files) == 1:
             out = self._get_output_path(f"{files[0].stem}_rotated.pdf")
             if not out:
@@ -783,9 +888,6 @@ class MainWindow(QMainWindow):
                 return
             self._run_worker(PdfOperator.extract_text, files[0], Path(out))
         else:
-            out_dir = self._get_batch_output_dir()
-            if not out_dir:
-                return
             self._run_batch(files, "text", PdfOperator.extract_text, ext=".txt")
 
     def _on_extract_images(self):
@@ -798,9 +900,6 @@ class MainWindow(QMainWindow):
                 return
             self._run_worker(PdfOperator.extract_images, files[0], Path(out_dir))
         else:
-            out_dir = self._get_batch_output_dir()
-            if not out_dir:
-                return
             self._run_batch(files, "images", PdfOperator.extract_images)
 
     def _on_pdf_to_images(self):
@@ -876,7 +975,7 @@ class MainWindow(QMainWindow):
         if len(files) == 1:
             out, _ = QFileDialog.getSaveFileName(
                 self, tr("dlg_save_text"), f"{files[0].stem}.docx",
-                "Word (*.docx);;All files (*)")
+                tr("file_filter_word"))
             if not out:
                 return
             self._run_worker(PdfOperator.to_word, files[0], Path(out))
@@ -891,7 +990,7 @@ class MainWindow(QMainWindow):
         if len(files) == 1:
             out, _ = QFileDialog.getSaveFileName(
                 self, tr("dlg_save_text"), f"{files[0].stem}.pptx",
-                "PowerPoint (*.pptx);;All files (*)")
+                tr("file_filter_ppt"))
             if not out:
                 return
             self._run_worker(PdfOperator.to_ppt, files[0], Path(out), dpi)
@@ -905,7 +1004,7 @@ class MainWindow(QMainWindow):
         if len(files) == 1:
             out, _ = QFileDialog.getSaveFileName(
                 self, tr("dlg_save_text"), f"{files[0].stem}.xlsx",
-                "Excel (*.xlsx);;All files (*)")
+                tr("file_filter_excel"))
             if not out:
                 return
             self._run_worker(PdfOperator.to_excel, files[0], Path(out))
@@ -913,4 +1012,4 @@ class MainWindow(QMainWindow):
             self._run_batch(files, "excel", PdfOperator.to_excel, ext=".xlsx")
 
     def _on_about(self):
-        QMessageBox.about(self, tr("about_title"), tr("about_text"))
+        QMessageBox.about(self, tr("about_title"), tr("about_text", version=VERSION))
