@@ -7,6 +7,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QDragEnterEvent, QDropEvent
 from PyQt6.QtWidgets import (
     QAbstractItemView,
+    QLabel,
     QFileDialog,
     QHBoxLayout,
     QListWidget,
@@ -20,6 +21,25 @@ from PyQt6.QtWidgets import (
 
 from core.utils import format_bytes, get_file_category
 from .i18n import tr
+
+
+def _pdf_page_count(path: Path):
+    """Page count for a .pdf, or None when it cannot be read.
+
+    Reading this eagerly for every dropped file would open the whole document, so
+    the count is only refreshed for newly added PDFs and cached on the item — the
+    summary line is the one place a user expects a total page count."""
+    if path.suffix.lower() != ".pdf":
+        return None
+    try:
+        import fitz
+        doc = fitz.open(path)
+        try:
+            return len(doc)
+        finally:
+            doc.close()
+    except Exception:
+        return None
 
 FILE_ICONS = {
     "pdf": "\U0001f4c4", "image": "\U0001f5bc", "word": "\U0001f4dd",
@@ -49,6 +69,7 @@ class FileListWidget(QWidget):
     def _init_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        self._summary = None
 
         # Toolbar
         toolbar = QHBoxLayout()
@@ -92,12 +113,20 @@ class FileListWidget(QWidget):
         self.list_widget.setAlternatingRowColors(True)
         self.list_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.list_widget.customContextMenuRequested.connect(self._on_context_menu)
-        self.list_widget.model().rowsMoved.connect(lambda *a: self.files_changed.emit())
+        self.list_widget.model().rowsMoved.connect(self._on_rows_moved)
         self.list_widget.setAcceptDrops(True)
         self.list_widget.dragEnterEvent = self._drag_enter
         self.list_widget.dropEvent = self._drop_event
 
-        layout.addWidget(self.list_widget)
+        layout.addWidget(self.list_widget, 1)
+
+        # Summary line: what is actually in the list, at a glance.
+        self.summary_label = QLabel("")
+        self.summary_label.setObjectName("file_list_summary")
+        self.summary_label.setStyleSheet("font-size:11px;padding:2px 2px;")
+        layout.addWidget(self.summary_label)
+        self._summary = self.summary_label
+        self._update_summary()
 
     def retranslate_ui(self):
         """Refresh all UI strings after language change."""
@@ -106,6 +135,7 @@ class FileListWidget(QWidget):
         self.btn_clear.setText(tr("fl_btn_clear"))
         self.btn_up.setToolTip(tr("fl_btn_up_tip"))
         self.btn_down.setToolTip(tr("fl_btn_down_tip"))
+        self._update_summary()
 
     # ── Public API ────────────────────────────────────
 
@@ -145,14 +175,23 @@ class FileListWidget(QWidget):
             cat = get_file_category(p)
             icon = FILE_ICONS.get(cat, "\U0001f4ce")
             size = format_bytes(fsize)
-            item = QListWidgetItem(f"{icon}  {p.name}  ({size})")
+            pages = _pdf_page_count(p)
+            label = f"{icon}  {p.name}  ({size}"
+            label += f", {pages}p)" if pages else ")"
+            item = QListWidgetItem(label)
             item.setData(Qt.ItemDataRole.UserRole, p)
-            item.setToolTip(str(p))
+            item.setData(Qt.ItemDataRole.UserRole + 1, fsize)
+            item.setData(Qt.ItemDataRole.UserRole + 2, pages)
+            tip = f"{p}\n{size}"
+            if pages:
+                tip += tr("fl_tip_pages", count=pages)
+            item.setToolTip(tip)
             self.list_widget.addItem(item)
             added += 1
             remaining -= 1
 
         if added > 0:
+            self._update_summary()
             self.files_changed.emit()
 
         total_skipped = (skipped_unsupported + skipped_large
@@ -163,6 +202,37 @@ class FileListWidget(QWidget):
             QMessageBox.information(
                 self, tr("fl_msg_skip_title"),
                 tr("fl_msg_skip_body", count=total_skipped) + "\n" + detail)
+
+    def _update_summary(self):
+        """Show file count, total size and total pages under the list."""
+        if self._summary is None:
+            return
+        count = self.count()
+        if count == 0:
+            self._summary.setText(tr("fl_summary_empty"))
+            return
+        total_size = 0
+        total_pages = 0
+        cats = {}
+        for i in range(count):
+            item = self.list_widget.item(i)
+            path = item.data(Qt.ItemDataRole.UserRole)
+            size = item.data(Qt.ItemDataRole.UserRole + 1)
+            pages = item.data(Qt.ItemDataRole.UserRole + 2)
+            if size is None and path:
+                try:
+                    size = path.stat().st_size
+                except OSError:
+                    size = 0
+            total_size += size or 0
+            total_pages += pages or 0
+            if path:
+                cat = get_file_category(path)
+                cats[cat] = cats.get(cat, 0) + 1
+        kind = max(cats.items(), key=lambda kv: kv[1])[0] if cats else "unknown"
+        self._summary.setText(tr(
+            "fl_summary", count=count, size=format_bytes(total_size),
+            pages=total_pages, kind=tr(f"kind_{kind}")))
 
     def get_file_paths(self) -> List[Path]:
         paths = []
@@ -178,6 +248,7 @@ class FileListWidget(QWidget):
 
     def clear(self) -> None:
         self.list_widget.clear()
+        self._update_summary()
         self.files_changed.emit()
 
     # ── Slots ─────────────────────────────────────────
@@ -193,10 +264,19 @@ class FileListWidget(QWidget):
     def _on_remove(self):
         for item in self.list_widget.selectedItems():
             self.list_widget.takeItem(self.list_widget.row(item))
+        self._update_summary()
         self.files_changed.emit()
 
     def _on_clear(self):
         self.clear()
+
+    def total_pages(self) -> int:
+        """Total known page count across the listed PDFs (0 when unknown)."""
+        total = 0
+        for i in range(self.count()):
+            pages = self.list_widget.item(i).data(Qt.ItemDataRole.UserRole + 2)
+            total += pages or 0
+        return total
 
     def _on_move_up(self):
         row = self.list_widget.currentRow()
@@ -213,6 +293,10 @@ class FileListWidget(QWidget):
             self.list_widget.insertItem(row + 1, item)
             self.list_widget.setCurrentRow(row + 1)
             self.files_changed.emit()
+
+    def _on_rows_moved(self, *_args):
+        self._update_summary()
+        self.files_changed.emit()
 
     def _on_context_menu(self, pos):
         menu = QMenu(self)

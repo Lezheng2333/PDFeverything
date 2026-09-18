@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/Lezheng2333/PDFeverything/releases"><img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-blue?style=flat-square" /></a>
-  <a href="https://github.com/Lezheng2333/PDFeverything/releases/latest"><img src="https://img.shields.io/badge/version-v1.7.0-007aff?style=flat-square" /></a>
+  <a href="https://github.com/Lezheng2333/PDFeverything/releases/latest"><img src="https://img.shields.io/badge/version-v1.8.0-007aff?style=flat-square" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" /></a>
 </p>
 
@@ -35,25 +35,23 @@ Drag everything in — any combination of PDFs, Word documents, PowerPoint decks
 
 > 🔗 [**Latest Release →**](https://github.com/Lezheng2333/PDFeverything/releases/latest)
 
-## 🆕 What's New in v1.7.0
+## 🆕 What's New in v1.8.0
 
-**Four new operations — PDFeverything can now finish documents, not just convert them.**
+**Interface polish: the same power, far less noise.**
 
-- 🔢 **Page numbers, headers & footers** — stamp any page with a template
-  (`{n}`, `{total}`, `{page}` or free text), six positions, custom start number and
-  font size, optional page range. CJK templates like `第 {n} 页 / 共 {total} 页`
-  render correctly instead of showing boxes.
-- 🏷️ **Document properties editor** — change title, author, subject, keywords,
-  creator and producer. Only the fields you touch are written.
-- 🧩 **N-up imposition (2/4/6/8/9/16 per sheet)** — halve your paper use. Page
-  content stays vector; landscape sheets are chosen automatically for 4-up and up.
-- ➕ **Insert / append pages** — drop another PDF's pages into the middle of a
-  document (or at the end) while keeping links and annotations.
-- The new operations are available in **all three channels**: GUI *Compose* menu,
-  CLI (`add-page-numbers`, `set-metadata`, `nup`, `insert-pages`,
-  `extract-pages-fitz`, `delete-pages-fitz`) and MCP (**29 tools** now, was 25).
-- 🧪 24 new core checks (page numbers incl. CJK, metadata round-trip, N-up sizes,
-  insertion offsets, guard rails) → **93 core + 62 GUI + 38 reader = 193 checks**.
+- 🧹 **The right-hand panel shrank by half.** The seven format-conversion buttons
+  became a **Convert** menu — every action is still one click away, but the panel
+  now only holds what a file list needs (merge, split, compress, watermark,
+  encrypt, decrypt, rotate, info). Panel buttons: 48 → 41.
+- 📊 **The file list tells you what you have** — rows show name, size **and page
+  count** (`report.pdf (2.4 MB, 18p)`), with a summary line underneath:
+  *"2 files · 16.4 KB · 32 pages · mostly PDF"*. An empty list explains what to do
+  instead of showing nothing.
+- 🧹 **Dead code removed** — 13 unused imports, a duplicate method, a vestigial
+  cache constant, and the awkward `_office_cache` poke replaced by a real
+  `set_office_cache()` API.
+- 🧪 8 more GUI checks (summary line, page counts, menu structure, panel-slimming)
+  → **93 core + 70 GUI + 38 reader = 201 checks**.
 
 
 ---
@@ -371,23 +369,19 @@ MIT — do whatever you want with it. [LICENSE](resources/LICENSE.txt)
 | 🔄 **旋转** | 旋转页面 90° / 180° / 270° |
 | ℹ️ **信息** | 查看页数、元数据、加密状态 |
 
-### 🆕 v1.7.0 新功能
+### 🆕 v1.8.0 新功能
 
-**四个新操作——PDFeverything 现在不只是转换，还能把文档"收尾"。**
+**界面打磨：能力不变，噪音减半。**
 
-- 🔢 **页码 / 页眉页脚** — 支持模板（`{n}`、`{total}`、`{page}` 或任意文字）、
-  六个位置、自定义起始编号与字号，可限定页码范围；中文模板
-  `第 {n} 页 / 共 {total} 页` 正常渲染（不再是方框）。
-- 🏷️ **文档属性编辑** — 修改标题、作者、主题、关键词、创建者、生成工具；
-  只写入你改动过的字段。
-- 🧩 **N-up 拼版（每张 2/4/6/8/9/16 页）** — 直接省一半纸；页面内容保持矢量，
-  4-up 及以上自动改用横向纸张。
-- ➕ **插入 / 追加页面** — 把另一个 PDF 的页面插到文档中间或末尾，保留链接与批注。
-- 新操作在**三个通道**同时可用：GUI「排版与信息」菜单、CLI（`add-page-numbers`、
-  `set-metadata`、`nup`、`insert-pages`、`extract-pages-fitz`、`delete-pages-fitz`）
-  与 MCP（**29 个工具**，此前 25 个）。
-- 🧪 新增 24 项核心测试（页码含中文、元数据往返、拼版尺寸、插入偏移、参数校验）
-  → **93 核心 + 62 GUI + 38 阅读器 = 193 项全部通过**。
+- 🧹 **右侧面板瘦身一半** — 7 个格式转换按钮收进新的「转换」菜单：每个功能仍然
+  一键可达，但面板只保留文件列表真正需要的操作（合并/拆分/压缩/水印/加密/解密/旋转/信息）。
+  面板按钮数 48 → 41。
+- 📊 **文件列表一眼看清内容** — 每行显示名称、大小**和页数**（`report.pdf (2.4 MB, 18p)`），
+  下方汇总行显示"共 2 个文件 · 16.4 KB · 32 页 · 主要是 PDF"；空列表会提示怎么开始。
+- 🧹 **清理死代码** — 移除 13 处未使用导入、重复方法、无用缓存常量，
+  并把别扭的 `_office_cache` 直接赋值改成正式的 `set_office_cache()` 接口。
+- 🧪 新增 8 项 GUI 测试（汇总行、页数、菜单结构、面板瘦身）→
+  **93 核心 + 70 GUI + 38 阅读器 = 201 项全部通过**。
 
 ### 🖥️ 界面预览
 

@@ -3,7 +3,6 @@
 注：EXT_CATEGORY_MAP 只列出真正有转换器的扩展名。之前 svg/ico 被标为 image，
 但 ConverterRegistry 里没有它们的转换器，混合合并会给出"不支持的文件格式"。"""
 
-import os
 import re
 import tempfile
 import uuid
@@ -262,6 +261,12 @@ def _check_office_windows() -> dict:
     except ImportError:
         pass  # pywin32 not installed
     return result
+
+
+def set_office_cache(result: dict) -> None:
+    """Publish a probe result (used by the GUI's background probe thread)."""
+    global _office_cache
+    _office_cache = result
 
 
 def check_office_availability(use_cache: bool = True) -> dict:

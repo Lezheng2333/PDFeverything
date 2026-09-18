@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Callable, List, Optional
 
-from .utils import check_input, read_text_file, temp_pdf_path
+from .utils import check_input, read_text_file
 
 # ── 字体选择 ───────────────────────────────────────────────
 # PDF 内置的 14 种基础字体只覆盖 Latin-1；用它渲染中文/日文/韩文时每个字形都会

@@ -18,6 +18,7 @@ T = {
 
     # ── Operations menu ──
     "menu_operations":        {"zh": "操作(&O)",                                   "en": "&Operations"},
+    "menu_convert":           {"zh": "转换(&T)",                                   "en": "Con&vert"},
     "menu_merge":             {"zh": "🔀 合并为统一 PDF",                           "en": "🔀 Merge to Unified PDF"},
     "menu_settings":          {"zh": "设置(&S)",                                   "en": "&Settings"},
     "menu_language":          {"zh": "语言(&L)",                                   "en": "&Language"},
@@ -252,6 +253,17 @@ T = {
                                      "*.webp *.docx *.doc *.rtf *.pptx *.ppt *.xlsx *.xls *.csv "
                                      "*.txt *.md *.log *.py *.json *.xml *.html *.yaml *.ini *.sh);;"
                                      "All files (*)"},
+    "fl_summary_empty":       {"zh": "还没有添加文件 — 拖进来或点「添加文件」",          "en": "No files yet — drop them here or click Add Files"},
+    "fl_summary":             {"zh": "共 {count} 个文件 · {size} · {pages} 页 · 主要是{kind}",
+                               "en": "{count} file(s) · {size} · {pages} page(s) · mostly {kind}"},
+    "fl_tip_pages":           {"zh": "\n{count} 页",                                 "en": "\n{count} page(s)"},
+    "kind_pdf":               {"zh": "PDF",                                        "en": "PDF"},
+    "kind_image":             {"zh": "图片",                                        "en": "images"},
+    "kind_word":              {"zh": "Word 文档",                                   "en": "Word docs"},
+    "kind_powerpoint":        {"zh": "PPT",                                        "en": "slides"},
+    "kind_excel":             {"zh": "Excel 表格",                                  "en": "spreadsheets"},
+    "kind_text":              {"zh": "文本文件",                                     "en": "text files"},
+    "kind_unknown":           {"zh": "其他文件",                                     "en": "files"},
     "fl_msg_skip_title":      {"zh": "提示",                                        "en": "Notice"},
     "fl_msg_skip_body":       {"zh": "已跳过 {count} 个文件。\n"
                                       "支持格式: PDF, 图片, Word, PPT, Excel, 文本文件",

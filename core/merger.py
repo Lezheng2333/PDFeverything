@@ -5,7 +5,7 @@ from typing import Callable, Dict, List, Optional
 
 from .converters import ConverterRegistry
 from .pdf_ops import PdfOperator
-from .utils import cleanup_temp_files, get_file_category, temp_dir, temp_pdf_path
+from .utils import cleanup_temp_files, temp_dir
 
 
 def _is_readable_pdf(path: Path) -> bool:

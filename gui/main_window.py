@@ -31,7 +31,6 @@ from core.utils import (
     filter_by_category,
     format_bytes,
     get_file_category,
-    parse_page_ranges,
 )
 
 from .dialogs import (
@@ -51,7 +50,7 @@ from .pdf_reader_widget import PdfReaderWidget
 from .workers import BaseWorker
 
 
-VERSION = "1.7.0"
+VERSION = "1.8.0"
 
 
 def _dc(dark, light):
@@ -119,6 +118,26 @@ class MainWindow(QMainWindow):
         self.act_decrypt = self.menu_op.addAction(tr("btn_decrypt"), self._on_decrypt_clicked)
         self.act_rotate = self.menu_op.addAction(tr("btn_rotate"), self._on_rotate_clicked)
 
+        # Convert: the format tools moved out of the right-hand panel so the
+        # panel keeps only what a file list actually needs (see design rule:
+        # fewer buttons, less visual noise).
+        self.menu_convert = mb.addMenu(tr("menu_convert"))
+        self.act_extract_text = self.menu_convert.addAction(
+            tr("tool_extract_text"), self._on_extract_text)
+        self.act_extract_images = self.menu_convert.addAction(
+            tr("tool_extract_images"), self._on_extract_images)
+        self.act_pdf_to_images = self.menu_convert.addAction(
+            tr("tool_pdf_to_images"), self._on_pdf_to_images)
+        self.act_images_to_pdf = self.menu_convert.addAction(
+            tr("tool_images_to_pdf"), self._on_single_images_to_pdf)
+        self.menu_convert.addSeparator()
+        self.act_to_word = self.menu_convert.addAction(
+            tr("tool_to_word"), self._on_to_word)
+        self.act_to_ppt = self.menu_convert.addAction(
+            tr("tool_to_ppt"), self._on_to_ppt)
+        self.act_to_excel = self.menu_convert.addAction(
+            tr("tool_to_excel"), self._on_to_excel)
+
         # Compose: stamping, metadata, imposition, page insertion
         self.menu_compose = mb.addMenu(tr("menu_compose"))
         self.act_page_numbers = self.menu_compose.addAction(
@@ -171,6 +190,15 @@ class MainWindow(QMainWindow):
         self.act_encrypt.setText(tr("btn_encrypt"))
         self.act_decrypt.setText(tr("btn_decrypt"))
         self.act_rotate.setText(tr("btn_rotate"))
+        self.menu_convert.setTitle(tr("menu_convert"))
+        self.act_extract_text.setText(tr("tool_extract_text"))
+        self.act_extract_images.setText(tr("tool_extract_images"))
+        self.act_pdf_to_images.setText(tr("tool_pdf_to_images"))
+        self.act_images_to_pdf.setText(tr("tool_images_to_pdf"))
+        self.act_to_word.setText(tr("tool_to_word"))
+        self.act_to_ppt.setText(tr("tool_to_ppt"))
+        self.act_to_excel.setText(tr("tool_to_excel"))
+        # The panel buttons mirror these actions, so they are refreshed together.
         self.menu_compose.setTitle(tr("menu_compose"))
         self.act_page_numbers.setText(tr("pn_btn"))
         self.act_metadata.setText(tr("meta_btn"))
@@ -185,7 +213,6 @@ class MainWindow(QMainWindow):
         # Group boxes
         self.merge_group.setTitle(tr("group_merge_ops"))
         self.single_group.setTitle(tr("group_pdf_ops"))
-        self.tools_group.setTitle(tr("group_tools"))
         # Buttons (the merge button text is derived from the file list, so it is
         # refreshed at the end of this method instead of being set directly)
         self.btn_split.setText(tr("btn_split"))
@@ -261,13 +288,14 @@ class MainWindow(QMainWindow):
             self.reader._show_welcome(
                 drop_text=tr("reader_drop_here"),
                 load_btn_text=tr("reader_load_file"))
-        # Tool buttons
-        if self._tool_buttons:
-            labels = ["tool_extract_text", "tool_extract_images",
-                      "tool_pdf_to_images", "tool_images_to_pdf",
-                      "tool_to_word", "tool_to_ppt", "tool_to_excel"]
-            for btn, key in zip(self._tool_buttons, labels):
-                btn.setText(tr(key))
+        # Convert menu actions (the panel group was folded into the menu)
+        self.act_extract_text.setText(tr("tool_extract_text"))
+        self.act_extract_images.setText(tr("tool_extract_images"))
+        self.act_pdf_to_images.setText(tr("tool_pdf_to_images"))
+        self.act_images_to_pdf.setText(tr("tool_images_to_pdf"))
+        self.act_to_word.setText(tr("tool_to_word"))
+        self.act_to_ppt.setText(tr("tool_to_ppt"))
+        self.act_to_excel.setText(tr("tool_to_excel"))
         # Status
         if not self._worker or not self._worker.isRunning():
             self.status_label.setText(tr("status_ready"))
@@ -343,26 +371,11 @@ class MainWindow(QMainWindow):
         sg_layout.addWidget(self.btn_info)
         right_layout.addWidget(self.single_group)
 
-        # ── Tools group (formerly tab_tools) ──
-        self.tools_group = QGroupBox(tr("group_tools"))
-        tg_layout = QVBoxLayout(self.tools_group)
-        tool_keys = [
-            ("tool_extract_text", self._on_extract_text),
-            ("tool_extract_images", self._on_extract_images),
-            ("tool_pdf_to_images", self._on_pdf_to_images),
-            ("tool_images_to_pdf", self._on_single_images_to_pdf),
-            ("tool_to_word", self._on_to_word),
-            ("tool_to_ppt", self._on_to_ppt),
-            ("tool_to_excel", self._on_to_excel),
-        ]
+        # The seven format-conversion actions live in the Convert menu; the
+        # right-hand panel keeps only the operations that act on the file list
+        # plus the merge button, so the layout stays quiet.
+        self.tools_group = None
         self._tool_buttons = []
-        for key, slot in tool_keys:
-            btn = QPushButton(tr(key))
-            btn.setMinimumHeight(36)
-            btn.clicked.connect(slot)
-            tg_layout.addWidget(btn)
-            self._tool_buttons.append(btn)
-        right_layout.addWidget(self.tools_group)
 
         self.office_status_label = QLabel(tr("office_checking"))
         self.office_status_label.setStyleSheet(f"color: {_dc('#999','#777')};")
@@ -525,9 +538,8 @@ class MainWindow(QMainWindow):
         self._office_worker.start()
 
     def _on_office_probed(self, avail: dict):
-        global_office_cache = avail
-        import core.utils as _utils
-        _utils._office_cache = global_office_cache
+        import core.utils as utils
+        utils.set_office_cache(avail)
         self._check_office()
 
     # ── Button state ─────────────────────────────────

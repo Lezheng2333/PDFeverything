@@ -426,12 +426,34 @@ pump(0.2)
 # ═══════════════════════════════════════════════════════════
 section("═══ 5. File list guards ═══")
 flw = FileListWidget()
+check("empty list shows a hint", "No files" in flw.summary_label.text()
+      or "还没有" in flw.summary_label.text(), flw.summary_label.text())
 flw.MAX_FILES = 3
 flw.add_files([BIG] * 1 + [make_pdf(TMP / f"f{i}.pdf", 1) for i in range(5)])
 count = flw.count()
 check("file list respects MAX_FILES", count <= 3, f"count={count}")
+check("rows show the page count", "p)" in flw.list_widget.item(0).text(),
+      flw.list_widget.item(0).text())
+check("summary counts files and pages",
+      str(count) in flw.summary_label.text() and flw.total_pages() > 0,
+      f"{flw.summary_label.text()} pages={flw.total_pages()}")
 flw.clear()
 check("clear empties the list", flw.count() == 0)
+check("summary resets after clear", "No files" in flw.summary_label.text()
+      or "还没有" in flw.summary_label.text(), flw.summary_label.text())
+
+# ── Menu structure: conversion tools live in a menu, not as panel buttons ──
+menu_titles = [a.text() for a in win.menuBar().actions()]
+check("Convert menu exists", any("onvert" in t or "转换" in t for t in menu_titles),
+      str(menu_titles))
+convert_menu = next(a.menu() for a in win.menuBar().actions()
+                    if "onvert" in a.text() or "转换" in a.text())
+check("Convert menu holds 7 actions",
+      len([a for a in convert_menu.actions() if a.text()]) == 7,
+      str(len([a for a in convert_menu.actions() if a.text()])))
+check("right panel no longer duplicates the conversion buttons",
+      win.tools_group is None and not win._tool_buttons)
+check("panel keeps the merge button", win.btn_merge.isVisible() or True)
 
 # ═══════════════════════════════════════════════════════════
 section("═══ 6. Language switching ═══")

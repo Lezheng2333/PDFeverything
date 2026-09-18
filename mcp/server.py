@@ -29,13 +29,10 @@ Connect from Claude Desktop / Claude Code config:
 """
 
 import contextlib
-import io
 import json
 import os
 import sys
-import subprocess
 from pathlib import Path
-from typing import Any
 
 # PyMuPDF prints a one-line recommendation to stdout the first time table
 # detection runs. On a stdio JSON-RPC channel that plain-text line corrupts the
@@ -54,7 +51,7 @@ except Exception:
     except Exception:
         pass
 
-SERVER_VERSION = "1.7.0"
+SERVER_VERSION = "1.8.0"
 
 # ── Tool definitions (OpenAI-compatible JSON schemas) ──────
 

@@ -7,8 +7,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QPoint, QMimeData, QEvent
-from PyQt6.QtGui import QImage, QPixmap, QKeyEvent, QWheelEvent, QIntValidator, QDrag, QPainter, QPen, QColor, QFont
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QColor, QImage, QIntValidator, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QCheckBox, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
     QPushButton, QScrollArea, QSplitter, QStackedWidget, QToolButton,
@@ -37,7 +37,7 @@ class ViewMode(Enum):
 # The SSAA→downscale approach is counterproductive: it adds an unnecessary bilinear
 # filter pass that softens MuPDF's already-perfect anti-aliased output.
 RESIZE_DEBOUNCE = 350
-MAX_CACHE_MB = 400; CACHE_TARGET_MB = 280
+MAX_CACHE_MB = 400
 PAGE_THROTTLE_MS = 30  # rough page update
 PAGE_DEBOUNCE_MS = 80  # precise bisect calibration + render trigger
 # ── Lazy base-render window ─────────────────────────────────────────

@@ -8,9 +8,9 @@
 |---|---|---|---|
 | 1 | **清爽** | Clean | 界面零杂乱，按钮数量最小化，视觉噪音最低。阅读模式比操作模式更突出。 |
 | 2 | **简约** | Minimal | 一个按钮能完成的事不用两个。合并面板只有 `[Merge→]` 一个按钮。底栏只在需要时出现。 |
-| 3 | **全面** | Comprehensive | 16 种 PDF 操作、6 种格式互转、3 通道（GUI/CLI/MCP）、3 种阅读模式。不多不少，刚好够用。 |
-| 4 | **速度快** | Fast | 打开 <0.2s，模式切换瞬间（缓存命中小于 5ms），渲染 2x 超采样 + SmoothTransform，滚轮缩放 60fps。 |
-| 5 | **轻量化** | Lightweight | 单 exe 80MB（onefile 压缩），内存 <200MB（含 50 页缓存），不依赖外部运行时。PyMuPDF=C 内核，Qt=C++ 内核。 |
+| 3 | **全面** | Comprehensive | 26 种 PDF 操作、6 种格式互转、3 通道（GUI/CLI/MCP）、2 种阅读模式 + 侧栏（目录/搜索）。不多不少，刚好够用。 |
+| 4 | **速度快** | Fast | 打开 <0.2s（窗口化渲染，与页数无关），模式切换瞬间（缓存命中小于 5ms），滚轮缩放 60fps，网格框选 0.01ms/事件。 |
+| 5 | **轻量化** | Lightweight | 单 exe ~76MB（onefile 压缩），内存 <200MB（缓存按可见窗口增长），不依赖外部运行时。PyMuPDF=C 内核，Qt=C++ 内核。 |
 
 > ⚡ 每次修改前自问：**我是在让软件更清爽、更简约、更全面、更快、更轻吗？** 如果答案是"不是"，换方案。
 
@@ -26,7 +26,8 @@
   python main.py -h                        # 帮助
   python main.py --mcp                     # MCP 服务器
   ```
-- **macOS 打包**：`pyinstaller PDFeverything.spec --noconfirm --clean`
+- **macOS 打包**：`PYINSTALLER_CONFIG_DIR="$PWD/.buildcache" pyinstaller PDFeverything.spec --noconfirm --clean`
+  （沙箱环境无法写入 `~/Library/Application Support/pyinstaller`，必须重定向缓存目录）
 - **Windows 打包**：`python build_windows.py`（在 Windows 上运行）
 - **GitHub 仓库**：`Lezheng2333/PDFeverything`
 
@@ -37,19 +38,19 @@
 
 ## 当前开发状态
 
-### 最新版本：v1.4.2
-- 📖 **PDF 阅读器**：两模式（Scroll 连续滚动 / Grid 3 列缩略图）
-  - **矢量级画质**：精确分辨率渲染（无 SSAA/无 downscale），MuPDF 原生子像素 AA，8 位 AA 最大化
+### 最新版本：v1.8.0
+- 📖 **PDF 阅读器**：两模式（Scroll 连续滚动 / Grid 3 列缩略图）+ 可折叠侧栏（目录 / 搜索结果）
+  - **窗口化渲染**：只渲染可见页 ±3 的环形窗口，1000 页文档与 3 页文档打开成本相同
+  - **矢量级画质**：精确分辨率渲染（无 SSAA/无 downscale），MuPDF 原生子像素 AA
   - **HiDPI 原生**：`devicePixelRatio` 驱动渲染矩阵 + `setDevicePixelRatio` 1:1 像素映射
-  - Immortal 100% base：全部缩放从 100% 渲染基础出发，零累积误差
   - 两阶段缩放：Pass 1 瞬时像素拉伸 (<5ms) + Pass 2 精确分辨率渲染 (40ms)
-  - LRU OrderedDict 缓存，400MB 物理内存硬限制（dpr² 校正），驻留特权保护 base + fit modes
-  - 双 Timer 页码追踪：throttle 30ms 粗略 + debounce 150ms bisect 精确校准
-  - 懒渲染 ±1 页（3 页）；懒预渲染首 5 页 + 10ms 间隔后台排队
-  - 触控板捏合缩放（40ms 高清响应）、拖放打开、欢迎页、✕ 关闭
-  - 默认 100% 缩放打开，缩放/Fit 模式切换后保持滚动位置
+  - LRU OrderedDict 缓存，400MB 内存上限（dpr² 校正），base/fit 模式驻留保护
+  - 🔍 全文搜索：命中高亮绘制进位图、侧栏结果列表、⌘F 查找栏（大小写/整词/上下文）
+  - 📑 目录侧栏 + 🔁 阅读位置记忆（按文件记录页码与缩放）
+  - ⌨️ 快捷键：⌘F 查找 / ⌘B 侧栏 / ⌘+ ⌘− 缩放 / ⌘0 ⌘1 适应 / ⌘G 上下一个 / ←→ 翻页
+  - 触控板捏合缩放、拖放打开、欢迎页、双击切换适应模式
 - GUI 中英文双语切换（Settings → Language）
-- 16 个 PDF 操作（CLI + GUI + MCP 三通道）
+- 26 个 PDF 操作 + 6 种格式转换，三通道（GUI / CLI / MCP）共享同一实现，MCP 暴露 29 个工具
 - macOS + Windows 双平台 onedir/onefile 发布
 - 液态玻璃艺术风格 1024px 应用图标
 
@@ -58,8 +59,31 @@
 ✅ CLI原型 ✅ Core重构 ✅ PyQt6 GUI ✅ macOS/Windows发布
 ✅ i18n双语 ✅ Windows COM ✅ MCP服务器 ✅ PDF反向转换
 ✅ 批量处理 ✅ 鲁棒性加固 ✅ PDF阅读器 ✅ LRU缓存
-✅ Immortal 100% base ✅ 矢量级画质(精确解析度+MuPDF原生AA) => 持续优化
+✅ Immortal 100% base ✅ 矢量级画质(精确解析度+MuPDF原生AA)
+✅ v1.5.0 正确性大修(窗口化渲染/协作取消/CJK/加密/压缩档位) ✅ 回归测试套件
+✅ v1.6.0 阅读器搜索+目录侧栏+阅读位置记忆 ✅ v1.7.0 页码/元数据/N-up/插入页面
+✅ v1.8.0 界面清爽化(转换菜单/文件列表汇总) => 持续优化
 ```
+
+### 测试
+```bash
+.venv/bin/python tests/test_core.py    # 核心 / CLI / MCP / i18n   93 项
+.venv/bin/python tests/test_gui.py     # Worker / 批量 / 对话框 / 阅读器  70 项
+QT_QPA_PLATFORM=offscreen .venv/bin/python tests/qa_reader.py   # 阅读器 QA  38 项
+```
+发布前必须三套全绿（当前 201 项）。
+
+### 已知脆弱点补充（v1.5.0+）
+- **reader 窗口化渲染**：只渲染可见页 ±3，新增页面渲染入口必须走 `_schedule_render_visible`，
+  否则懒渲染环形队列不会重新布防
+- **搜索高亮**：命中矩形是 PDF 坐标，绘制时按 `zoom × dpr` 换算；命中页缓存需先失效
+  （`_invalidate_pages`）再重绘，否则高亮不会出现
+- **page_editor 撤销**：CLI 的撤销依赖 `journal_dir()` 持久化历史，`_journal_init()`
+  必须在**改动之前**调用，否则第一次编辑无法撤销；`save()` 必须带 `garbage/clean`
+- **`to_word` block 元组**：PyMuPDF 返回 `(x0,y0,x1,y1,text,block_no,block_type)`，
+  字段顺序写错会静默丢文字
+- **MCP stdout**：任何 `print()` 都会污染 JSON-RPC 流，已全局屏蔽 PyMuPDF 提示，
+  新增第三方库调用需注意
 
 ### 已知脆弱点（修改前必须理解上下文）
 - **Reader 缓存键**：`z:1.000` 是 immortal base 键，`_cache_put` 中必须跳过淘汰；修改 `_zoom_key` 格式会影响所有缓存命中
@@ -80,21 +104,23 @@ PDFeverything/
 ├── pdf_tool.py              # CLI 子命令解析 + 分发
 ├── core/
 │   ├── __init__.py
-│   ├── utils.py             # 文件分类、编码检测、临时文件、跨平台 Office 检测
-│   ├── pdf_ops.py           # PdfOperator — 16 个 PDF 处理方法（所有通道共享）
-│   ├── converters.py        # ConverterRegistry — 6 种格式→PDF 转换器
+│   ├── utils.py             # 文件分类、编码检测、临时文件、页码范围解析、Office 检测
+│   ├── pdf_ops.py           # PdfOperator — 26 个 PDF 处理方法（所有通道共享）
+│   ├── search.py            # 全文搜索 + 目录(书签)解析（GUI/CLI/MCP 共用）
+│   ├── converters.py        # ConverterRegistry — 6 种格式→PDF 转换器（CJK 字体感知）
+│   ├── page_editor.py       # 页面编辑 + 快照撤销 + 持久化历史日志
 │   └── merger.py            # merge_mixed_files() — 混合文件→统一 PDF 流水线
 ├── gui/
 │   ├── __init__.py
 │   ├── main_window.py       # MainWindow — 双 Tab + 进度条 + 语言切换
 │   ├── file_list_widget.py  # FileListWidget — 拖拽列表 + 工具栏 + 保护层
 │   ├── workers.py           # BaseWorker(QThread) — 60min 超时 + 优雅取消
-│   ├── dialogs.py           # 7 个操作对话框（加密/解密/水印/旋转/压缩/拆分/信息）
+│   ├── dialogs.py           # 9 个操作对话框（加密/解密/水印/旋转/压缩/拆分/信息/页码/属性）
 │   ├── pdf_reader_widget.py  # PdfReaderWidget — PDF 阅读器（LRU 缓存 + 两阶段缩放）
-│   └── i18n.py              # tr() — 170+ 键位中英文翻译表
+│   └── i18n.py              # tr() — 280+ 键位中英文翻译表（格式化异常安全）
 ├── mcp/
 │   ├── __init__.py
-│   ├── server.py            # MCP JSON-RPC stdio 服务器 — 16 tools
+│   ├── server.py            # MCP JSON-RPC stdio 服务器 — 29 tools
 │   └── README.md            # Claude Desktop / Code 配置指南
 ├── resources/
 │   ├── app_icon.icns        # macOS 图标
@@ -153,13 +179,20 @@ PDFeverything/
 ### core
 
 ```
-PdfOperator (static methods)
-  ├── get_info / merge / split
-  ├── extract_text / extract_images
-  ├── to_images / from_images / compress
-  ├── watermark / text_watermark
-  ├── encrypt / decrypt / rotate
-  └── to_word / to_ppt / to_excel
+PdfOperator (static methods, 22 个公开方法)
+  ├── 查看/合并/拆分: get_info / merge / split
+  ├── 提取: extract_text / extract_images
+  ├── 图片互转: to_images / from_images
+  ├── 优化与安全: compress(lossless|medium|max) / encrypt(AES-256) / decrypt
+  ├── 水印: watermark(PDF 叠加) / text_watermark(文字, 支持透明度与角度)
+  ├── 旋转: rotate
+  ├── 排版与信息: add_page_numbers / set_metadata / nup / insert_pages
+  ├── 页面增删: extract_pages / delete_pages（PyMuPDF，保留链接）
+  └── 反向转换: to_word / to_ppt / to_excel
+
+core/search.py
+  ├── search_pdf() — 命中页/矩形/文字/上下文（大小写、整词、范围、上限）
+  └── get_outline() — 书签树（嵌套层级 + 目标页）
 
 BaseConverter (ABC) → ConverterRegistry
   ├── ImageConverter (.png/.jpg/.gif/...)
@@ -188,13 +221,15 @@ MainWindow(QMainWindow)
   ├── RotateDialog — 角度选择 + 页码范围
   ├── CompressDialog — 无损 / 中等 / 最大
   ├── SplitRangeDialog — 每页 / 每N页 / 自定义
-  └── InfoDialog — PDF 元数据显示
+  ├── InfoDialog — PDF 元数据显示
+  ├── PageNumberDialog — 页码/页眉页脚（模板 + 预览）
+  └── MetadataDialog — 文档属性（仅提交改动字段）
 ```
 
 ### mcp
 
 ```
-TOOLS (16 entries) — JSON-RPC tools/list 响应
+TOOLS (29 entries) — JSON-RPC tools/list 响应
 _run_tool(name, args) → JSON result string
 serve() — stdin/stdout JSON-RPC 主循环（initialize / tools/list / tools/call / shutdown）
 ```
