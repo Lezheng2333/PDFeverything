@@ -70,8 +70,10 @@ UninstallDisplayName={#MyAppName} {#MyAppVersion}
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
-; 默认「仅为我安装」，不弹 UAC；用户仍可在向导首屏切换为全机器安装。
-PrivilegesRequired=lowest
+; 默认装进 C:\Program Files\PDFeverything —— README.md（中英两处）和 mcp/README.md
+; 里的 Claude Desktop / Code 配置写死了这个路径，改这里必须同步改那三处。
+; 保留「安装模式」选择页：没有管理员权限的用户仍可改装到 %LOCALAPPDATA%\Programs。
+PrivilegesRequired=admin
 PrivilegesRequiredOverridesAllowed=dialog
 ; x64compatible 是 Inno 6.3+ 的新名字，6.3 之前只认 x64。
 #if VER >= EncodeVer(6,3,0,0)

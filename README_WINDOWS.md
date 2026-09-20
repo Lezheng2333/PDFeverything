@@ -33,8 +33,9 @@ python build_windows.py --exe-only     # no-install exe only, skip the installer
 
 The installer is defined in `installer_windows.iss` (Inno Setup 6): bilingual wizard
 (中文 / English), licence page, optional desktop shortcut, Start Menu entry, and a
-standard uninstaller. It installs per-user by default (no UAC prompt); the first
-wizard page lets the user switch to an all-users install.
+standard uninstaller. It installs to `C:\Program Files\PDFeverything` by default —
+that is the path the MCP setup in `README.md` and `mcp/README.md` expects. The first
+wizard page still lets the user switch to a per-user install.
 
 ## Build Steps (automatic)
 
@@ -113,8 +114,9 @@ python build_windows.py --exe-only     # 只要免安装 exe，不生成安装�
 | `dist\PDFeverything.exe` | 单文件免安装版；它就是安装包的载荷 |
 
 安装包由 `installer_windows.iss` 定义（Inno Setup 6)：中英双语向导、许可协议页、
-可选桌面快捷方式、开始菜单项、标准卸载程序。默认**仅为我安装**（不弹 UAC），
-向导首页可切换成全机器安装。
+可选桌面快捷方式、开始菜单项、标准卸载程序。默认装到
+`C:\Program Files\PDFeverything` —— 这正是 `README.md` 和 `mcp/README.md` 里
+MCP 配置所写的路径。向导首页仍可切换成「仅为我安装」。
 
 ## 构建步骤（自动）
 

@@ -31,9 +31,12 @@ Drag everything in — any combination of PDFs, Word documents, PowerPoint decks
 | Platform | Download |
 |---|---|
 | 🍎 macOS (Apple Silicon) | [`PDFeverything_macOS.zip`](https://github.com/Lezheng2333/PDFeverything/releases/latest) |
-| 🪟 Windows 10/11 (64-bit) | [`PDFeverything.exe`](https://github.com/Lezheng2333/PDFeverything/releases/latest) |
+| 🪟 Windows 10/11 (64-bit) | [`PDFeverything_Setup_v1.9.0.exe`](https://github.com/Lezheng2333/PDFeverything/releases/latest) |
 
 > 🔗 [**Latest Release →**](https://github.com/Lezheng2333/PDFeverything/releases/latest)
+>
+> 🪟 The Windows download is an **installer** — bilingual wizard, licence page, Start Menu
+> entry, optional desktop shortcut and a standard uninstaller. No Python required.
 
 ## 🆕 What's New in v1.9.0
 
@@ -328,10 +331,11 @@ python mcp/server.py
 
 ### Build from Source
 
-**Windows** (one-file portable exe):
+**Windows** (installer + portable exe, needs [Inno Setup 6](https://jrsoftware.org/isdl.php)):
 ```bash
-pyinstaller build_windows.spec --noconfirm --clean
-# → dist/PDFeverything.exe
+python build_windows.py
+# → PDFeverything_Setup_v1.9.0.exe   installer (copied to the project root)
+# → dist/PDFeverything.exe           portable payload, no install
 ```
 
 **macOS** (app bundle):
@@ -631,11 +635,11 @@ python pdf_tool.py info -i document.pdf   # CLI 模式
 
 ### 📦 从源码构建
 
-**Windows**（单文件便携版）:
+**Windows**（安装包 + 便携版 exe，需要 [Inno Setup 6](https://jrsoftware.org/isdl.php)）:
 ```bash
-pip install pywin32   # Windows Office COM 支持
-pyinstaller build_windows.spec --noconfirm --clean
-# → dist/PDFeverything.exe
+python build_windows.py
+# → PDFeverything_Setup_v1.9.0.exe   安装包（同时复制到项目根目录）
+# → dist/PDFeverything.exe           便携版载荷，免安装
 ```
 
 **macOS**（App Bundle）:
