@@ -28,7 +28,11 @@
   ```
 - **macOS 打包**：`PYINSTALLER_CONFIG_DIR="$PWD/.buildcache" pyinstaller PDFeverything.spec --noconfirm --clean`
   （沙箱环境无法写入 `~/Library/Application Support/pyinstaller`，必须重定向缓存目录）
-- **Windows 打包**：`python build_windows.py`（在 Windows 上运行）
+- **Windows 打包**：`python build_windows.py`（在 Windows 上运行，产出免安装 exe + 安装包）
+  没装 Inno Setup 6 时自动跳过安装包那步；`--skip-deps` / `--exe-only` 见 `README_WINDOWS.md`
+- **Windows 安装包**：`installer_windows.iss`（Inno Setup 6），本机无法交叉编译——
+  PyInstaller 不支持从 macOS 构建 Windows 产物，只能用
+  `.github/workflows/build-windows-installer.yml`（windows-latest，`gh workflow run` 触发）
 - **GitHub 仓库**：`Lezheng2333/PDFeverything`
 
 ## 上下文恢复
@@ -159,8 +163,13 @@ PDFeverything/
 │   └── LICENSE.txt          # MIT
 ├── PDFeverything.spec       # PyInstaller macOS 构建配置
 ├── build_windows.spec       # PyInstaller Windows onefile 构建配置
-├── build_windows.py         # Windows 一键构建脚本
+├── build_windows.py         # Windows 一键构建脚本（exe + 安装包）
 ├── build_windows.bat        # Windows 双击启动器
+├── installer_windows.iss    # Inno Setup 6 安装包定义（中英双语向导）
+├── README_WINDOWS.md        # Windows 构建指南（双语）
+├── .github/
+│   └── workflows/
+│       └── build-windows-installer.yml  # windows-latest CI，产出安装包产物
 ├── .claude/
 │   └── RELEASE_CHECKLIST.md # 预发布检查清单（本地）
 ├── CLAUDE.md                # 本文件
@@ -301,8 +310,12 @@ serve() — stdin/stdout JSON-RPC 主循环（initialize / tools/list / tools/ca
    gh release create vX.Y.Z /tmp/PDFeverything_macOS_vX.Y.Z.zip \
      --title "PDFeverything vX.Y.Z" --notes "..."
    ```
-6. **Windows 构建**（在 Windows 上）：
+6. **Windows 安装包**（不需要 Windows 机器，走 CI）：
    ```bash
-   python build_windows.py
-   gh release upload vX.Y.Z dist/PDFeverything.exe
+   gh workflow run build-windows-installer.yml
+   gh run watch
+   gh run download <run-id> -n PDFeverything-Setup -D /tmp/win
+   gh release upload vX.Y.Z /tmp/win/PDFeverything_Setup_vX.Y.Z.exe
    ```
+   （也可以在 Windows 上本地构建：`python build_windows.py`，产物同样是
+   `PDFeverything_Setup_vX.Y.Z.exe`；推 `v*` 标签会自动触发 CI）
