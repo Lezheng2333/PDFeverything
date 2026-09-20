@@ -97,8 +97,12 @@ def run(cmd, timeout=600, cwd=None):
         for line in proc.stdout:
             line = line.rstrip()
             now = time.time()
-            if now - last_print > 2 or "error" in line.lower() or "warning" in line.lower():
-                print(f"      {line[:120]}")
+            important = "error" in line.lower() or "warning" in line.lower()
+            if important or now - last_print > 2:
+                # 报错/告警行绝不截断：上次 Inno Setup 的失败信息被这里的 [:120]
+                # 切掉，只看到 'Couldn\'t open include file "c:\program files'，
+                # 白跑一轮 CI 才知道缺的是哪个文件。
+                print(f"      {line if important else line[:120]}")
                 last_print = now
         proc.wait(timeout=timeout)
         return proc.returncode

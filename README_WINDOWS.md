@@ -37,6 +37,12 @@ standard uninstaller. It installs to `C:\Program Files\PDFeverything` by default
 that is the path the MCP setup in `README.md` and `mcp/README.md` expects. The first
 wizard page still lets the user switch to a per-user install.
 
+The Chinese wizard messages come from the compiler's own `ChineseSimplified.isl` when
+it has one (Inno Setup 6.7 keeps it under `Languages\Unofficial\`, and some trimmed
+installs ship none at all), otherwise from `resources\ChineseSimplified.isl`, which is
+vendored in this repo and matches Inno Setup 6.7.1. If neither is present the wizard
+falls back to English instead of failing the build.
+
 ## Build Steps (automatic)
 
 ```
@@ -117,6 +123,11 @@ python build_windows.py --exe-only     # 只要免安装 exe，不生成安装�
 可选桌面快捷方式、开始菜单项、标准卸载程序。默认装到
 `C:\Program Files\PDFeverything` —— 这正是 `README.md` 和 `mcp/README.md` 里
 MCP 配置所写的路径。向导首页仍可切换成「仅为我安装」。
+
+中文向导文案优先取编译器自带的 `ChineseSimplified.isl`（Inno Setup 6.7 把这份放在
+`Languages\Unofficial\` 下，而某些精简安装一份都不带），取不到就用仓库里
+`resources\ChineseSimplified.isl`（对应 Inno Setup 6.7.1）。两者都没有时退化为
+纯英文向导，而不是让构建失败。
 
 ## 构建步骤（自动）
 

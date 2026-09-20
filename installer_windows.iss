@@ -7,10 +7,12 @@
 ;
 ;  全部路径由本文件用 SourcePath 自行推导（= 本脚本所在目录），因此无论从哪个
 ;  工作目录调用 ISCC 都能正确找到资源，无需传路径参数。
-;  可覆盖的宏：MyAppVersion / MySourceExe / MyOutputDir / MyLicenseFile / MyIconFile
+;  可覆盖的宏：MyAppVersion / MySourceExe / MyOutputDir / MyLicenseFile /
+;             MyIconFile / MyChineseMessages
 ;
-;  要求：Inno Setup 6.0+（中文向导需要 Languages\ChineseSimplified.isl，
-;        该文件随 Inno Setup 6 官方安装包一起分发）。
+;  要求：Inno Setup 6.0+。中文向导依赖 ChineseSimplified.isl，见下方探测逻辑：
+;        编译器自带就用自带的，否则用 resources\ChineseSimplified.isl（随仓库分发），
+;        都没有则退化为纯英文向导。
 ;
 ;  产物：dist\PDFeverything_Setup_v<version>.exe
 ; ============================================================================
@@ -36,6 +38,27 @@
 #endif
 #ifndef MyIconFile
   #define MyIconFile MyProjectRootDir + "resources\app_icon.ico"
+#endif
+
+;  中文向导的翻译文件按「编译器自带 → 仓库里 vendors 的那份 → 放弃中文」三级降级：
+;    * Inno Setup 6.7.x 把 ChineseSimplified.isl 放在 Languages\Unofficial\ 下
+;    * 更早的版本放在 Languages\ 下
+;    * 有些精简安装（CI 上 Chocolatey 装的就是）干脆两个都没有 —— 上次构建就是
+;      因此报 "Couldn't open include file ... ChineseSimplified.isl"
+;  探测顺序保证本地装任何版本的 Inno Setup 都用它自带的那份（版本必然匹配），
+;  探测不到才退回仓库里这份（对应 6.7.1），全都没有就只出英文向导，绝不失败。
+#ifndef MyChineseMessages
+  #if FileExists(AddBackslash(CompilerPath) + "Languages\ChineseSimplified.isl")
+    #define MyChineseMessages AddBackslash(CompilerPath) + "Languages\ChineseSimplified.isl"
+  #else
+    #if FileExists(AddBackslash(CompilerPath) + "Languages\Unofficial\ChineseSimplified.isl")
+      #define MyChineseMessages AddBackslash(CompilerPath) + "Languages\Unofficial\ChineseSimplified.isl"
+    #else
+      #if FileExists(MyProjectRootDir + "resources\ChineseSimplified.isl")
+        #define MyChineseMessages MyProjectRootDir + "resources\ChineseSimplified.isl"
+      #endif
+    #endif
+  #endif
 #endif
 
 #define MyAppName "PDFeverything"
@@ -85,7 +108,9 @@ ArchitecturesInstallIn64BitMode=x64
 #endif
 
 [Languages]
-Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+#ifdef MyChineseMessages
+Name: "chinesesimplified"; MessagesFile: "{#MyChineseMessages}"
+#endif
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
