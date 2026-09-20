@@ -118,6 +118,13 @@ tests/qa_reader_defects.py 中每项都对应 v1.9.0 的一个已修缺陷，修
 - **`_pixmap_bytes`**：Qt6 的 `QPixmap.width()` 已是设备像素，绝不能再乘 dpr²
 - **加密 PDF**：新增操作入口必须调用 `_reject_if_encrypted()`，否则会泄漏
   pypdf/MuPDF/pikepdf 的内部错误文本
+- **Windows CLI 输出编码**：onefile + GUI 子系统（console=False）的 exe 里 stdout 用的是
+  本地代码页（英文系统 cp1252/cp437），打印中文会 `UnicodeEncodeError`，而 windowed 模式
+  把未捕获异常变成报错弹窗 → 进程卡死（`PDFeverything.exe -h` 就是这样）；
+  靠 `core.utils.make_output_encoding_safe()` 降级为 "?"，`main.py` / `pdf_tool.py`
+  两个入口都在打印前调用它——新增入口必须照做，新增中文 print 也要注意
+- **Windows 安装包路径**：`installer_windows.iss` 默认装到 `C:\Program Files\PDFeverything`，
+  README.md（中英两处）+ mcp/README.md 的 MCP 配置写死了这个路径，改安装目录要同步改三处
 
 ### 已知脆弱点（修改前必须理解上下文）
 - **Reader 缓存键**：`z:1.000` 是 100% base 键，`_cache_put` 的两级淘汰必须**最后**才丢它（v1.9.0 起不再是「永不淘汰」——那会导致缓存无上限增长）；修改 `_zoom_key` 格式会影响所有缓存命中

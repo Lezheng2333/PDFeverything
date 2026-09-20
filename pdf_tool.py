@@ -21,12 +21,16 @@ import sys
 from pathlib import Path
 
 from core.pdf_ops import PdfOperator
-from core.utils import format_bytes, parse_page_ranges
+from core.utils import format_bytes, make_output_encoding_safe, parse_page_ranges
 
 # ── CLI 入口 ────────────────────────────────────────────────
 
 
 def main():
+    # 打印中文进度/报错前先把 stdout 的错误处理降到 replace，否则 Windows 的
+    # GUI 子系统 exe 在英文代码页下会 UnicodeEncodeError 崩掉（见 core/utils.py）。
+    make_output_encoding_safe()
+
     parser = argparse.ArgumentParser(
         description="PDFeverything — 合并/拆分/提取/转换/压缩/水印/加密",
         formatter_class=argparse.RawDescriptionHelpFormatter,

@@ -298,3 +298,26 @@ def check_office_availability(use_cache: bool = True) -> dict:
     if use_cache:
         _office_cache = result
     return result
+
+
+# ── 控制台输出编码 ────────────────────────────────────────
+
+
+def make_output_encoding_safe() -> None:
+    """让 CLI 在旧代码页的控制台上不会因为打印非 ASCII 而崩掉。
+
+    Windows 上 onefile + GUI 子系统（console=False）的 exe 没有真正的控制台，
+    Python 给 sys.stdout 装的是本地代码页的编码器 —— 英文系统上是 cp1252/cp437。
+    此时 print() 中文帮助文本会抛 UnicodeEncodeError；而 windowed 模式下未捕获的
+    异常会变成一个报错弹窗，命令行就此卡死。v1.9.0 的 Windows exe 跑
+    `PDFeverything.exe -h` 正是如此（CI 冒烟测试里 180 秒被 kill 掉）。
+
+    这里保留控制台原有的编码 —— 中文 Windows 的 cp936 本来就能正确显示中文 ——
+    只把编不出来的字符降级成 "?"，把"崩溃 + 弹窗"换成"可读但不完整的输出"。
+    """
+    import sys
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass

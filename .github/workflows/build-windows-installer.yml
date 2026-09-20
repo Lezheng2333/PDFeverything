@@ -95,11 +95,24 @@ jobs:
           $exe = "dist\PDFeverything.exe"
           if (-not (Test-Path $exe)) { throw "missing $exe" }
           Write-Host "payload: $([math]::Round((Get-Item $exe).Length / 1MB, 1)) MB"
-          # console=False 的 GUI 子系统程序，PowerShell 不会自动等待，必须显式 WaitForExit
-          $p = Start-Process -FilePath $exe -ArgumentList "-h" -NoNewWindow -PassThru
-          if (-not $p.WaitForExit(180000)) { $p.Kill(); throw "packaged exe did not exit within 180s" }
-          if ($p.ExitCode -ne 0) { throw "packaged exe exited with code $($p.ExitCode)" }
-          Write-Host "packaged exe ran and exited cleanly"
+
+          function Invoke-Pdfe([string]$path, [string[]]$exeArgs, [string]$label) {
+            Write-Host "--- $label ---"
+            # console=False 的 GUI 子系统程序，PowerShell 不会自动等待，必须显式 WaitForExit
+            $p = Start-Process -FilePath $path -ArgumentList $exeArgs -NoNewWindow -PassThru
+            if (-not $p.WaitForExit(180000)) { $p.Kill(); throw "$label did not exit within 180s" }
+            if ($p.ExitCode -ne 0) { throw "$label exited with code $($p.ExitCode)" }
+            Write-Host "$label ok"
+          }
+
+          # 1) 帮助文本：v1.9.0 的 exe 在这里抛过 UnicodeEncodeError —— 英文代码页的
+          #    stdout 印不出中文帮助，windowed 模式把异常变成弹窗，进程就此卡死。
+          Invoke-Pdfe $exe @("-h") "help"
+
+          # 2) 真跑一次 PDF 操作，确认冻结后的二进制不只是"能启动"（hiddenimports 漏了
+          #    的话只有到这里才会暴露）
+          python -c "import fitz; d = fitz.open(); d.new_page(); d.save('ci_fixture.pdf')"
+          Invoke-Pdfe $exe @("info", "-i", "ci_fixture.pdf") "pdf info"
 
       - name: Verify installer
         shell: pwsh

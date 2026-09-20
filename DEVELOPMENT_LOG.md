@@ -746,8 +746,24 @@ Ver 1.9.0 | 2026-09-18 — QA 加固：19 个缺陷修复 + 热点路径提速�
     - 新增 tests/qa_reader_defects.py：37 项阅读器缺陷回归，每项都对应上面一个修复
     - 全套件：493 项（93 核心 + 70 GUI + 38 阅读器 + 85 阅读器综合 +
       37 阅读器缺陷 + 170 对抗），全部通过
+    - Windows 改发安装包：新增 installer_windows.iss（Inno Setup 6，中英双语向导、
+      许可协议页、开始菜单、可选桌面快捷方式、标准卸载程序），默认装到
+      C:\Program Files\PDFeverything —— 与 README / mcp/README 的 MCP 配置路径一致
+    - build_windows.py 增加第 5 步编译安装包并复制到项目根目录，新增 --skip-deps /
+      --exe-only；ISCC 缺省时跳过安装包而不是让构建失败
+    - 新增 .github/workflows/build-windows-installer.yml：在 windows-latest 上跑
+      核心套件 → PyInstaller → Inno Setup，再对打包后的 exe 做冒烟测试（帮助文本 +
+      真实 PDF 操作）后上传安装包产物（PyInstaller 无法从 macOS 交叉编译 Windows 产物）
+    - resources/ChineseSimplified.isl：vendored 中文翻译（取自 issrc 的 is-6_7_1 标签，
+      对应 CI 装的 Inno Setup 6.7.1；6.7.x 已把它挪到 Languages\Unofficial\ 下）
     - BUGFIX: tests/test_reader.py 中 3 项断言仍停留在 v1.6 之前（默认缩放 100%、
       全部页面都有 100% base），与"打开即适应页高 + 窗口化渲染"的既定设计冲突，
       已改为验证实际设计；同时清空 QSettings 的 reader_positions，避免跨次运行残留
       的阅读位置影响默认缩放断言
     - BUGFIX: journal_dir 在 core/page_editor.py 中重复定义两次，删除冗余定义
+    - BUGFIX: Windows exe 执行 `PDFeverything.exe -h` 直接崩死 —— onefile + GUI 子系统
+      （console=False）下 stdout 用的是本地代码页（英文系统 cp1252/cp437），
+      print() 中文帮助文本抛 UnicodeEncodeError，而 windowed 模式把未捕获异常变成
+      报错弹窗，命令行就此卡住（CI 冒烟测试里 180 秒被 kill）；
+      新增 core.utils.make_output_encoding_safe()，保留控制台原编码、只把编不出的
+      字符降级为 "?"，main.py / pdf_tool.py 两个入口在打印前调用

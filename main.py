@@ -262,6 +262,11 @@ def _looks_like_path(arg: str) -> bool:
 
 
 def main():
+    # 必须在任何 print 之前：Windows 的 exe 是 GUI 子系统，stdout 用的是本地代码页，
+    # 打印中文帮助文本会抛 UnicodeEncodeError（详见 core/utils.py 的说明）。
+    from core.utils import make_output_encoding_safe
+    make_output_encoding_safe()
+
     if len(sys.argv) > 1 and sys.argv[1] in ("-h", "--help"):
         print(HELP_TEXT)
         return
