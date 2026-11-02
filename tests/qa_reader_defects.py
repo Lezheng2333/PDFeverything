@@ -11,6 +11,8 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent))
+import settings_isolation  # noqa: F401  (isolates QSettings before GUI imports)
 
 import fitz  # noqa: E402
 from PyQt6.QtCore import QEvent, QPoint, QPointF, Qt  # noqa: E402

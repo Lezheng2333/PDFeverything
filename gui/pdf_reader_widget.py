@@ -16,7 +16,8 @@ from PyQt6.QtWidgets import (
     QMessageBox, QFileDialog, QInputDialog,
 )
 
-from .i18n import tr
+from .i18n import tr, app_settings
+from .theme import colors
 
 
 _DARK = False  # set by main.launch_gui before any widgets are created
@@ -90,6 +91,8 @@ class PdfReaderWidget(QWidget):
         self._search_index = -1         # current hit
         self._search_query = ""
         self._search_case = False
+        self._search_error = ""
+        self._search_truncated = False
         self._highlight_rects = {}      # {page: [fitz.Rect]}
         self._sidebar_visible = True
 
@@ -301,11 +304,12 @@ class PdfReaderWidget(QWidget):
         tbhv = _dc("#444", "#ddd"); tdst = _dc("#555", "#bbb"); tdbg = _dc("#2a2a2a", "#eee")
         itxt = _dc("#fff", "#333"); ibg = _dc("#2a2a2a", "#fff"); ibrd = _dc("#555", "#bbb")
         lt = _dc("#999", "#666"); bct = _dc("#ccc", "#333"); bcthv = _dc("#fff", "#fff")
+        tc = colors(_DARK)
         self.toolbar.setStyleSheet(
             f"QWidget#reader_toolbar{{background:{tbg};border-top:1px solid {tbrd}}}"
             f"QPushButton{{color:{tct};background:{tbtn};border:1px solid {tbdr};border-radius:4px;padding:5px 12px;font-size:13px}}"
             f"QPushButton:hover{{background:{tbhv}}}"
-            f"QPushButton:checked{{background:#007aff;color:#fff;border-color:#007aff}}"
+            f"QPushButton:checked{{background:{tc['accent']};color:{tc['on_accent']};border-color:{tc['accent']}}}"
             f"QPushButton:disabled{{color:{tdst};background:{tdbg}}}"
             f"QLineEdit{{color:{itxt};background:{ibg};border:1px solid {ibrd};border-radius:4px;padding:4px 6px;font-size:13px}}"
             f"QLabel{{color:{lt};font-size:13px}}"
@@ -443,6 +447,7 @@ class PdfReaderWidget(QWidget):
         sb_bg = _dc("#252525", "#efefef")
         sb_brd = _dc("#3a3a3a", "#d0d0d0")
         sb_fg = _dc("#ccc", "#333")
+        tc = colors(_DARK)
         panel.setStyleSheet(
             f"QWidget#reader_sidebar{{background:{sb_bg};"
             f"border-right:1px solid {sb_brd};}}"
@@ -451,7 +456,7 @@ class PdfReaderWidget(QWidget):
             f"color:{sb_fg};font-size:12px;outline:none;}}"
             f"QTreeWidget::item,QListWidget::item{{padding:3px 2px;}}"
             f"QTreeWidget::item:selected,QListWidget::item:selected"
-            f"{{background:#007aff;color:#fff;border-radius:3px;}}"
+            f"{{background:{tc['accent']};color:{tc['on_accent']};border-radius:3px;}}"
             f"QCheckBox{{color:{sb_fg};font-size:11px;}}")
 
         layout = QVBoxLayout(panel)
@@ -553,10 +558,15 @@ class PdfReaderWidget(QWidget):
         return item
 
     def _update_outline_placeholder(self):
-        """Explain an empty outline instead of showing a blank panel."""
+        """Explain an empty outline instead of showing a blank panel.
+
+        Called on every language switch, so it must be idempotent: appending a
+        fresh row each time used to leave a pile of mixed-language placeholders.
+        """
         if self._outline_entries:
             self.outline_tree.setHeaderHidden(True)
             return
+        self.outline_tree.clear()
         placeholder = QTreeWidgetItem([tr("reader_no_outline")])
         placeholder.setFlags(Qt.ItemFlag.NoItemFlags)
         self.outline_tree.addTopLevelItem(placeholder)
@@ -657,6 +667,8 @@ class PdfReaderWidget(QWidget):
         self._search_case = self.search_check_case.isChecked()
         self._search_hits = []
         self._search_index = -1
+        self._search_error = ""
+        self._search_truncated = False
         self._highlight_rects = {}
         self.search_list.clear()
         if not query or not self.doc or not self._path:
@@ -673,9 +685,11 @@ class PdfReaderWidget(QWidget):
                                 case_sensitive=self._search_case,
                                 max_hits=SEARCH_MAX_HITS)
         except Exception as ex:
+            self._search_error = str(ex)
             self.search_status.setText(str(ex))
             return
         self._search_hits = result.hits
+        self._search_truncated = result.truncated
         for i, hit in enumerate(result.hits):
             text = hit.context or hit.text
             item = QListWidgetItem(f"p.{hit.page + 1}  {text[:60]}")
@@ -711,6 +725,8 @@ class PdfReaderWidget(QWidget):
         self._search_hits = []
         self._search_index = -1
         self._search_query = ""
+        self._search_error = ""
+        self._search_truncated = False
         self._highlight_rects = {}
         self.search_list.clear()
         self.search_count_label.setText("")
@@ -718,6 +734,19 @@ class PdfReaderWidget(QWidget):
         if self.doc:
             PdfReaderWidget._invalidate_pages(range(self._total_pages))
             self._repaint_highlights()
+
+    def refresh_search_status(self):
+        """Re-render the search summary after a language switch."""
+        if self._search_error:
+            self.search_status.setText(self._search_error)
+        elif not self._search_query:
+            self.search_status.setText("")
+        elif self._search_hits:
+            pages = len({h.page for h in self._search_hits})
+            self.search_status.setText(
+                tr("reader_search_found", count=len(self._search_hits), pages=pages))
+        else:
+            self.search_status.setText(tr("reader_search_none"))
 
     def find_next(self):
         self._step_search(1)
@@ -1071,8 +1100,7 @@ class PdfReaderWidget(QWidget):
         if not self._path or not self._total_pages:
             return
         try:
-            from PyQt6.QtCore import QSettings
-            settings = QSettings("PDFeverything", "PDFeverything")
+            settings = app_settings()
             entries = settings.value("reader_positions", {}) or {}
             if not isinstance(entries, dict):
                 entries = {}
@@ -1091,8 +1119,7 @@ class PdfReaderWidget(QWidget):
     def _restore_reading_position(self, path: Path):
         """Jump back to the remembered page for this document, if any."""
         try:
-            from PyQt6.QtCore import QSettings
-            settings = QSettings("PDFeverything", "PDFeverything")
+            settings = app_settings()
             entries = settings.value("reader_positions", {}) or {}
             entry = entries.get(str(Path(path).resolve())) if isinstance(entries, dict) else None
         except Exception:
@@ -1701,23 +1728,39 @@ class PdfReaderWidget(QWidget):
         if getattr(label, "_style_state", None) == state:
             return
         label._style_state = state
+        c = colors(_DARK)
         if grid:
             if drop_target:
                 label.setStyleSheet(
-                    "QLabel{background:white;border:2px dashed #ff9500;border-radius:4px;}")
+                    f"QLabel{{background:{c['surface']};border:2px dashed {c['accent_hover']};border-radius:4px;}}")
             elif selected:
                 label.setStyleSheet(
-                    "QLabel{background:white;border:2px solid #007aff;border-radius:4px;}")
+                    f"QLabel{{background:{c['surface']};border:2px solid {c['accent']};border-radius:4px;}}")
             else:
                 label.setStyleSheet(
-                    f"QLabel{{background:white;border:1px solid {_dc('#555', '#9a9a9a')};}}")
+                    f"QLabel{{background:{c['surface']};border:1px solid {c['border']};}}")
             label.setCursor(Qt.CursorShape.PointingHandCursor)
         else:
-            label.setStyleSheet("QLabel{background:white;}")
+            label.setStyleSheet(f"QLabel{{background:{c['surface']};}}")
             label.setCursor(Qt.CursorShape.ArrowCursor)
 
     def _page_num_style(self) -> str:
-        return f"QLabel{{color:{_dc('#888', '#666')};font-size:10px;background:transparent;}}"
+        return f"QLabel{{color:{colors(_DARK)['muted']};font-size:10px;background:transparent;}}"
+
+    def refresh_theme(self):
+        """Re-derive cached reader styles after a light/dark or scheme switch."""
+        if not self._labels:
+            return
+        for label in self._labels:
+            label._style_state = None
+            page_num = getattr(label, "_page_num_label", None)
+            if page_num is not None:
+                page_num.setStyleSheet(self._page_num_style())
+        if self._view_mode == ViewMode.GRID:
+            self._layout_labels()
+        else:
+            for label in self._labels:
+                self._apply_page_style(label, False, False)
 
     def _on_grid_dbl_click(self, page_idx: int):
         if self._view_mode != ViewMode.GRID or self._edit_mode:
@@ -2015,9 +2058,10 @@ class PdfReaderWidget(QWidget):
         if band is None:
             band = QWidget(self.page_container)
             band.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+            accent = QColor(colors(_DARK)["accent"])
             band.setStyleSheet(
-                "background:rgba(0,122,255,40);"
-                f"border:1px solid {_dc('#4da3ff', '#007aff')};")
+                f"background:rgba({accent.red()},{accent.green()},{accent.blue()},40);"
+                f"border:1px solid {accent.name()};")
             self._rubber_band = band
         rx, ry, rw, rh = self._rubber_rect
         band.setGeometry(rx, ry, rw, rh)
@@ -2133,7 +2177,7 @@ class PdfReaderWidget(QWidget):
             printer.setDocName(self._path.name if self._path else "PDFeverything")
             dialog = QPrintDialog(printer, self)
             if dialog.exec():
-                print_pages(self.doc, self._selected_pages, printer)
+                print_pages(self.doc, sorted(self._selected_pages), printer)
         except Exception as ex:
             QMessageBox.warning(self, tr("reader_print_title"),
                                 tr("reader_print_failed", error=ex))
@@ -2758,22 +2802,25 @@ class PdfReaderWidget(QWidget):
             self._welcome.setParent(None); self._welcome.deleteLater(); self._welcome = None
 
     def _record_recent(self, path):
-        from PyQt6.QtCore import QSettings
-        settings = QSettings("PDFeverything", "PDFeverything")
+        settings = app_settings()
         entries = settings.value("studio_recent", []) or []
         if not isinstance(entries, list): entries = []
         resolved = str(Path(path).resolve())
         settings.setValue("studio_recent", [resolved] + [p for p in entries if p != resolved][:7])
 
     def _recent_documents(self):
-        from PyQt6.QtCore import QSettings
-        entries = QSettings("PDFeverything", "PDFeverything").value("studio_recent", []) or []
+        settings = app_settings()
+        entries = settings.value("studio_recent", []) or []
         if not isinstance(entries, list): return []
-        return [Path(p) for p in entries if isinstance(p, str) and Path(p).is_file()][:3]
+        valid = [p for p in entries if isinstance(p, str) and Path(p).is_file()]
+        # Prune deleted files instead of leaving invisible dead entries that
+        # keep the Clear button permanently hidden.
+        if len(valid) != len(entries):
+            settings.setValue("studio_recent", valid)
+        return [Path(p) for p in valid][:3]
 
     def _clear_recent(self):
-        from PyQt6.QtCore import QSettings
-        QSettings("PDFeverything", "PDFeverything").remove("studio_recent")
+        app_settings().remove("studio_recent")
         self._show_welcome()
 
     def _show_welcome(self, drop_text=None, load_btn_text=None):
@@ -2792,9 +2839,9 @@ class PdfReaderWidget(QWidget):
         c.setFixedWidth(min(580, max(320, vp.width() - 40)))
         cl = QVBoxLayout(c); cl.setContentsMargins(20, 12, 20, 12); cl.setSpacing(12)
         art = DocumentArt(); art.setFixedSize(260, 150)
-        # A dark canvas keeps the artwork crisp in both application themes.
+        # A themed canvas keeps the artwork crisp in every palette.
         art.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        art.setStyleSheet("background:#203f2e;border-radius:16px;")
+        art.setStyleSheet(f"background:{colors(_DARK)['hero']};border-radius:16px;")
         cl.addWidget(art, alignment=Qt.AlignmentFlag.AlignCenter)
         title = QLabel(tr("studio_reader_title")); title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet("font-size:25px;font-weight:600;background:transparent;")

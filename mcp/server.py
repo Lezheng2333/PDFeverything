@@ -51,7 +51,7 @@ except Exception:
     except Exception:
         pass
 
-SERVER_VERSION = "2.0.0"
+SERVER_VERSION = "2.0.1"
 
 # ── Tool definitions (OpenAI-compatible JSON schemas) ──────
 
@@ -696,7 +696,8 @@ def _run_tool(name: str, args: dict) -> str:
             from core.utils import parse_page_ranges
 
             pages = (parse_page_ranges(args["pages"], one_based=True)
-                     if args.get("pages") else None)
+                     if args.get("pages") and str(args["pages"]).strip().lower()
+                     not in ("all", "*", "全部", "所有") else None)
             count = PdfOperator.add_page_numbers(
                 Path(args["input"]), Path(args["output"]),
                 position=args.get("position", "bottom-center"),
@@ -737,7 +738,7 @@ def _run_tool(name: str, args: dict) -> str:
 
             spec = args.get("pages")
             pages = None
-            if spec:
+            if spec and str(spec).strip().lower() not in ("all", "*", "全部", "所有"):
                 from core.utils import parse_page_ranges
                 pages = parse_page_ranges(spec, one_based=True)
             result = search_pdf(
@@ -762,7 +763,7 @@ def _run_tool(name: str, args: dict) -> str:
         elif name == "pdf_info":
             info = PdfOperator.get_info(Path(args["input"]))
             info["size_human"] = format_bytes(info["size_bytes"])
-            info["success"] = True
+            info["success"] = bool(info.get("readable", True))
             return json.dumps(info, ensure_ascii=False)
 
         elif name == "pdf_extract_text":
@@ -881,6 +882,7 @@ def _run_tool(name: str, args: dict) -> str:
         elif name == "pdf_delete_pages":
             from core.page_editor import PdfPageEditor as PE
             editor = PE(Path(args["input"]))
+            editor.load_journal()
             total = editor.page_count
             pages = _require_pages(_parse_page_list(args["pages"], total), total)
             if len(pages) >= total:
@@ -888,25 +890,30 @@ def _run_tool(name: str, args: dict) -> str:
                 return json.dumps({"success": False,
                                    "error": "不能删除全部页面"})
             editor.delete_pages(pages)
+            editor.save_journal()
             editor.save(Path(args["output"])); editor.close()
             return json.dumps({"success": True, "deleted": len(pages), "remaining": total - len(pages)})
 
         elif name == "pdf_rotate_pages":
             from core.page_editor import PdfPageEditor as PE
             editor = PE(Path(args["input"]))
+            editor.load_journal()
             total = editor.page_count
             pages = _require_pages(_parse_page_list(args["pages"], total), total)
             editor.rotate_pages(pages, args["degrees"])
+            editor.save_journal()
             editor.save(Path(args["output"])); editor.close()
             return json.dumps({"success": True, "rotated": len(pages), "degrees": args["degrees"]})
 
         elif name == "pdf_move_pages":
             from core.page_editor import PdfPageEditor as PE
             editor = PE(Path(args["input"]))
+            editor.load_journal()
             total = editor.page_count
             source = _require_pages(_parse_page_list(args["source"], total), total, "source")
             target = args["target"] - 1  # 1-based to 0-based
             editor.move_pages(source, target)
+            editor.save_journal()
             editor.save(Path(args["output"])); editor.close()
             return json.dumps({"success": True, "moved": len(source), "to": args["target"]})
 
@@ -925,6 +932,7 @@ def _run_tool(name: str, args: dict) -> str:
             editor.load_journal()
             desc = editor.undo()
             if desc:
+                editor.save_journal()
                 editor.save(Path(args["output"]))
             editor.close()
             return json.dumps({"success": desc is not None, "undo": desc or "nothing to undo"})
@@ -935,6 +943,7 @@ def _run_tool(name: str, args: dict) -> str:
             editor.load_journal()
             desc = editor.redo()
             if desc:
+                editor.save_journal()
                 editor.save(Path(args["output"]))
             editor.close()
             return json.dumps({"success": desc is not None, "redo": desc or "nothing to redo"})
@@ -962,8 +971,14 @@ def _run_tool(name: str, args: dict) -> str:
 # ── JSON-RPC / MCP transport ──────────────────────────────
 
 def _send(msg: dict) -> None:
-    """Write a JSON-RPC message to stdout."""
-    sys.stdout.write(json.dumps(msg, ensure_ascii=False) + "\n")
+    """Write a JSON-RPC message to stdout.
+
+    JSON-RPC is a UTF-8 protocol, but a Windows pipe can hand us a cp1252
+    stdout. ``ensure_ascii=True`` keeps the frame ASCII-only so a Chinese
+    query/result can never crash the server; clients decode the escapes back to
+    the original text. ``serve`` also tries to reconfigure the streams to UTF-8.
+    """
+    sys.stdout.write(json.dumps(msg, ensure_ascii=True) + "\n")
     sys.stdout.flush()
 
 
@@ -992,8 +1007,23 @@ def _read():
     return "ok", req
 
 
+def _configure_stdio() -> None:
+    """Prefer UTF-8 on pipe/console streams; ignore platforms that refuse it."""
+    for stream in (sys.stdin, sys.stdout):
+        try:
+            stream.reconfigure(encoding="utf-8")
+        except (AttributeError, OSError, ValueError):
+            pass
+
+
 def serve() -> None:
     """Main MCP server loop — listens on stdin, responds on stdout."""
+    _configure_stdio()
+    try:
+        from core.page_editor import PdfPageEditor
+        PdfPageEditor.sweep_stale_journals()
+    except Exception:
+        pass
     while True:
         status, req = _read()
         if status == "eof":

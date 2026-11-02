@@ -13,6 +13,8 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "tests"))
+import settings_isolation  # noqa: F401  (isolates QSettings before GUI imports)
 
 import fitz  # noqa: E402
 from PyQt6.QtCore import QPointF, Qt  # noqa: E402

@@ -30,6 +30,11 @@ class PdfPageEditor:
             self._path = doc_or_path
             self._doc = fitz.open(doc_or_path)
             self._own_doc = True
+        if self._doc.needs_pass:
+            name = Path(self._path).name if self._path else "PDF"
+            if self._own_doc:
+                self._doc.close()
+            raise ValueError(f"PDF 受密码保护，请先用 decrypt 移除密码: {name}")
         self._journal_key_path = None   # pinned once a journal is adopted
         self._journal_dir = None        # resolved once, then kept stable
         self._undo_stack: list[tuple[str, bytes]] = []
@@ -382,16 +387,9 @@ class PdfPageEditor:
         keep = [i for i in range(total) if i not in source_ordinals]
         target = max(0, min(target, len(keep)))
         new_order = keep[:target] + source_ordinals + keep[target:]
-        # Rebuild doc in new order
-        writer = pypdf.PdfWriter()
-        buf = io.BytesIO(); self._doc.save(buf)
-        reader = pypdf.PdfReader(io.BytesIO(buf.getvalue()))
-        for idx in new_order:
-            if idx < len(reader.pages):
-                writer.add_page(reader.pages[idx])
-        buf2 = io.BytesIO(); writer.write(buf2)
-        self._doc.close()
-        self._doc = fitz.open(stream=buf2.getvalue(), filetype="pdf")
+        # Mutate the existing fitz document instead of rebuilding it with pypdf:
+        # select() keeps metadata, bookmarks, links and the live handle.
+        self._doc.select(new_order)
         self._journal_record(f"移动 {len(source_ordinals)} 页")
         self._emit("changed")
 
@@ -479,13 +477,21 @@ class PdfPageEditor:
             return
 
         import os
+        import stat
         import tempfile
 
+        original_mode = None
+        try:
+            original_mode = stat.S_IMODE(output_path.stat().st_mode)
+        except OSError:
+            pass
         fd, tmp_name = tempfile.mkstemp(suffix=".pdf", dir=str(output_path.parent))
         os.close(fd)
         tmp = Path(tmp_name)
         try:
             self._doc.save(str(tmp), garbage=4, deflate=True, clean=True)
+            if original_mode is not None:
+                os.chmod(tmp, original_mode)
             os.replace(tmp, output_path)     # atomic: never a half-written PDF
         except Exception:
             tmp.unlink(missing_ok=True)

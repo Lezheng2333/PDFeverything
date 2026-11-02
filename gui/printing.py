@@ -5,7 +5,9 @@ from PyQt6.QtGui import QImage, QPainter
 
 
 def print_pages(doc, pages, printer):
-    pages = sorted(set(p for p in pages if 0 <= p < len(doc)))
+    # Preserve the caller's order while deduplicating; the UI passes pages in
+    # document order, and callers that intentionally choose an order keep it.
+    pages = list(dict.fromkeys(p for p in pages if 0 <= p < len(doc)))
     if not pages:
         raise ValueError("No pages selected")
     painter = QPainter()

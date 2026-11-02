@@ -9,7 +9,38 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Callable, List, Optional
 
-from .utils import check_input, read_text_file
+from .utils import check_input, get_office_cache, read_text_file
+
+
+class ConversionDependencyError(RuntimeError):
+    """A legacy binary Office format needs native Office automation."""
+
+
+_LEGACY_OFFICE = {
+    ".doc": ("Microsoft Word", ".docx"),
+    ".rtf": ("Microsoft Word", ".docx"),
+    ".ppt": ("Microsoft PowerPoint", ".pptx"),
+    ".xls": ("Microsoft Excel", ".xlsx"),
+}
+
+
+def _raise_legacy_office(input_path: Path) -> None:
+    suffix = input_path.suffix.lower()
+    app, target = _LEGACY_OFFICE[suffix]
+    raise ConversionDependencyError(
+        f"Legacy {suffix} files require {app} automation. Install Microsoft Office "
+        f"and allow automation, or save the file as {target} and try again.")
+
+
+def _office_ready(key: str) -> bool:
+    """Skip native automation when the GUI probe already knows it is absent.
+
+    A missing cache (None) means "unknown" — CLI should still try, matching the
+    pre-2.0.1 behaviour. An explicit False from the background probe avoids a
+    pointless 300 s osascript/COM timeout.
+    """
+    cache = get_office_cache()
+    return cache is None or bool(cache.get(key, False))
 
 # ── 字体选择 ───────────────────────────────────────────────
 # PDF 内置的 14 种基础字体只覆盖 Latin-1；用它渲染中文/日文/韩文时每个字形都会
@@ -93,31 +124,43 @@ def _draw_text_block(page, x: float, y: float, lines, fontsize: float,
 
 # ── AppleScript 模板 ───────────────────────────────────────
 
-_WORD_APPLESCRIPT = '''tell application "Microsoft Word"
-    open POSIX file "{input_path}"
-    set theDoc to active document
-    set pdfPath to POSIX file "{output_path}"
-    save as theDoc file name pdfPath file format format PDF
-    close theDoc saving no
-end tell'''
-
-_PPT_APPLESCRIPT = '''tell application "Microsoft PowerPoint"
-    open POSIX file "{input_path}"
-    set thePres to active presentation
-    save thePres in POSIX file "{output_path}" as save as PDF
-    close thePres saving no
-end tell'''
-
-_EXCEL_APPLESCRIPT = '''tell application "Microsoft Excel"
-    open POSIX file "{input_path}"
-    set wb to active workbook
-    set ws to active sheet of wb
-    tell ws
-        set printArea to used range
+_WORD_APPLESCRIPT = '''on run argv
+    set inputPath to item 1 of argv
+    set outputPath to item 2 of argv
+    tell application "Microsoft Word"
+        open POSIX file inputPath
+        set theDoc to active document
+        set pdfPath to POSIX file outputPath
+        save as theDoc file name pdfPath file format format PDF
+        close theDoc saving no
     end tell
-    save wb in POSIX file "{output_path}" as PDF file format
-    close wb saving no
-end tell'''
+end run'''
+
+_PPT_APPLESCRIPT = '''on run argv
+    set inputPath to item 1 of argv
+    set outputPath to item 2 of argv
+    tell application "Microsoft PowerPoint"
+        open POSIX file inputPath
+        set thePres to active presentation
+        save thePres in (POSIX file outputPath) as save as PDF
+        close thePres saving no
+    end tell
+end run'''
+
+_EXCEL_APPLESCRIPT = '''on run argv
+    set inputPath to item 1 of argv
+    set outputPath to item 2 of argv
+    tell application "Microsoft Excel"
+        open POSIX file inputPath
+        set wb to active workbook
+        set ws to active sheet of wb
+        tell ws
+            set printArea to used range
+        end tell
+        save wb in (POSIX file outputPath) as PDF file format
+        close wb saving no
+    end tell
+end run'''
 
 
 def _verify_pdf(path: Path) -> bool:
@@ -134,13 +177,16 @@ def _verify_pdf(path: Path) -> bool:
 
 def _applescript_convert(app_name: str, script: str, input_path: Path,
                          output_path: Path, timeout: int = 300) -> bool:
-    """Convert via AppleScript (macOS). Returns True on success."""
+    """Convert via AppleScript (macOS). Returns True on success.
+
+    Paths go through ``argv`` instead of being interpolated into the script:
+    a filename containing ``"`` (or AppleScript code) must never be able to
+    execute a shell command.
+    """
     try:
         r = subprocess.run(
-            ["osascript", "-e", script.format(
-                input_path=str(input_path.resolve()),
-                output_path=str(output_path.resolve()),
-            )],
+            ["osascript", "-e", script, "--",
+             str(input_path.resolve()), str(output_path.resolve())],
             capture_output=True, text=True, timeout=timeout,
         )
         return r.returncode == 0 and output_path.exists() and _verify_pdf(output_path)
@@ -158,7 +204,10 @@ def _windows_com_convert(app_name: str, file_format: int,
 
         pythoncom.CoInitialize()
         try:
-            app = win32com.client.Dispatch(prog_id)
+            # DispatchEx creates our own automation instance. Dispatch() would
+            # attach to the user's running Word/PowerPoint/Excel and calling
+            # Quit() afterwards could close their unsaved documents.
+            app = win32com.client.DispatchEx(prog_id)
             app.Visible = False
             app.DisplayAlerts = 0
 
@@ -330,19 +379,25 @@ class WordConverter(BaseConverter):
         if progress_callback:
             progress_callback(f"Converting Word: {input_path.name}", 30)
 
-        # Platform-specific Office automation
-        if sys.platform == "win32":
-            if _windows_com_convert("word", 17, input_path, out,
-                                    "Word.Application", timeout=300):
-                if progress_callback:
-                    progress_callback(f"Word done (COM): {input_path.name}", 100)
-                return out
-        else:
-            if _applescript_convert("Microsoft Word", _WORD_APPLESCRIPT,
-                                    input_path, out, timeout=300):
-                if progress_callback:
-                    progress_callback(f"Word done (AppleScript): {input_path.name}", 100)
-                return out
+        # Platform-specific Office automation. Skip it when the GUI probe
+        # already proved Office is unavailable — a 300 s osascript/COM timeout
+        # per file is far worse than falling back immediately.
+        if _office_ready("word"):
+            if sys.platform == "win32":
+                if _windows_com_convert("word", 17, input_path, out,
+                                        "Word.Application", timeout=300):
+                    if progress_callback:
+                        progress_callback(f"Word done (COM): {input_path.name}", 100)
+                    return out
+            else:
+                if _applescript_convert("Microsoft Word", _WORD_APPLESCRIPT,
+                                        input_path, out, timeout=300):
+                    if progress_callback:
+                        progress_callback(f"Word done (AppleScript): {input_path.name}", 100)
+                    return out
+
+        if input_path.suffix.lower() in (".doc", ".rtf"):
+            _raise_legacy_office(input_path)
 
         if progress_callback:
             progress_callback(f"Office unavailable, fallback render: {input_path.name}", 30)
@@ -504,18 +559,22 @@ class PowerPointConverter(BaseConverter):
         if progress_callback:
             progress_callback(f"Converting PPT: {input_path.name}", 30)
 
-        if sys.platform == "win32":
-            if _windows_com_convert("powerpoint", 32, input_path, out,
-                                    "PowerPoint.Application", timeout=300):
-                if progress_callback:
-                    progress_callback(f"PPT done (COM): {input_path.name}", 100)
-                return out
-        else:
-            if _applescript_convert("Microsoft PowerPoint", _PPT_APPLESCRIPT,
-                                    input_path, out, timeout=300):
-                if progress_callback:
-                    progress_callback(f"PPT done (AppleScript): {input_path.name}", 100)
-                return out
+        if _office_ready("powerpoint"):
+            if sys.platform == "win32":
+                if _windows_com_convert("powerpoint", 32, input_path, out,
+                                        "PowerPoint.Application", timeout=300):
+                    if progress_callback:
+                        progress_callback(f"PPT done (COM): {input_path.name}", 100)
+                    return out
+            else:
+                if _applescript_convert("Microsoft PowerPoint", _PPT_APPLESCRIPT,
+                                        input_path, out, timeout=300):
+                    if progress_callback:
+                        progress_callback(f"PPT done (AppleScript): {input_path.name}", 100)
+                    return out
+
+        if input_path.suffix.lower() == ".ppt":
+            _raise_legacy_office(input_path)
 
         if progress_callback:
             progress_callback(f"Office unavailable, fallback: {input_path.name}", 30)
@@ -594,18 +653,22 @@ class ExcelConverter(BaseConverter):
         if progress_callback:
             progress_callback(f"Converting Excel: {input_path.name}", 30)
 
-        if sys.platform == "win32":
-            if _windows_com_convert("excel", 0, input_path, out,
-                                    "Excel.Application", timeout=300):
-                if progress_callback:
-                    progress_callback(f"Excel done (COM): {input_path.name}", 100)
-                return out
-        else:
-            if _applescript_convert("Microsoft Excel", _EXCEL_APPLESCRIPT,
-                                    input_path, out, timeout=300):
-                if progress_callback:
-                    progress_callback(f"Excel done (AppleScript): {input_path.name}", 100)
-                return out
+        if _office_ready("excel"):
+            if sys.platform == "win32":
+                if _windows_com_convert("excel", 0, input_path, out,
+                                        "Excel.Application", timeout=300):
+                    if progress_callback:
+                        progress_callback(f"Excel done (COM): {input_path.name}", 100)
+                    return out
+            else:
+                if _applescript_convert("Microsoft Excel", _EXCEL_APPLESCRIPT,
+                                        input_path, out, timeout=300):
+                    if progress_callback:
+                        progress_callback(f"Excel done (AppleScript): {input_path.name}", 100)
+                    return out
+
+        if input_path.suffix.lower() == ".xls":
+            _raise_legacy_office(input_path)
 
         if progress_callback:
             progress_callback(f"Office unavailable, fallback: {input_path.name}", 30)

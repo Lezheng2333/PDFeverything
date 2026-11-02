@@ -143,6 +143,40 @@ res = PdfOperator.compress(SRC, small)
 check("compress returns metrics", {"before_bytes", "after_bytes", "ratio"} <= set(res))
 check("compress output readable", len(fitz.open(small)) == 5)
 
+# medium/max used to write zlib bytes behind a /DCTDecode filter: the stream
+# looked compressed but no decoder could read it. Verify an RGB and a grayscale
+# JPEG survive a real recompression.
+import io  # noqa: E402
+from PIL import Image as PILImage  # noqa: E402
+
+for mode, label in (("RGB", "RGB"), ("L", "gray")):
+    im = PILImage.new(mode, (600, 600))
+    px = im.load()
+    for y in range(600):
+        for x in range(600):
+            px[x, y] = ((x * 7 + y * 3) % 256 if mode == "L"
+                        else ((x * 7 + y * 3) % 256,
+                              (x * 5 + y * 11) % 256,
+                              (x * 13 + y * 17) % 256))
+    jpg = TMP / f"noise_{label}.jpg"
+    im.save(jpg, "JPEG", quality=95)
+    src_img = TMP / f"img_{label}.pdf"
+    img_doc = fitz.open(); img_page = img_doc.new_page(width=612, height=792)
+    img_page.insert_image(fitz.Rect(20, 20, 580, 580), filename=str(jpg))
+    img_doc.save(src_img); img_doc.close()
+    out_img = TMP / f"img_{label}_small.pdf"
+    PdfOperator.compress(src_img, out_img, mode="medium")
+    with fitz.open(out_img) as packed:
+        xref = packed[0].get_images(full=True)[0][0]
+        raw = packed.extract_image(xref)["image"]
+        filt = packed.xref_get_key(xref, "Filter")
+    try:
+        decoded = PILImage.open(io.BytesIO(raw)); decoded.load()
+        ok = decoded.size == (600, 600)
+    except Exception:
+        ok = False
+    check(f"compressed {label} image decodes", ok, f"{len(raw)} bytes filter={filt}")
+
 docx = TMP / "out.docx"
 pages = PdfOperator.to_word(SRC, docx)
 check("to_word produces docx", docx.exists() and pages == 5)
@@ -157,6 +191,36 @@ check("to_excel produces xlsx", xlsx.exists() and sheets >= 1)
 
 check("format_bytes", format_bytes(1536) == "1.5 KB", format_bytes(1536))
 check("category pdf", get_file_category(Path("a.PDF")) == "pdf")
+
+# ═══════════════════════════════════════════════════════════
+print("\n═══ 2c. Converter safety ═══")
+from unittest.mock import patch  # noqa: E402
+import core.converters as converters  # noqa: E402
+from core.converters import ConversionDependencyError, WordConverter  # noqa: E402
+from core.utils import set_office_cache  # noqa: E402
+
+rtf = TMP / "legacy.rtf"
+rtf.write_text(r"{\rtf1\ansi legacy text}", encoding="utf-8")
+set_office_cache({"word": False, "powerpoint": False, "excel": False})
+try:
+    WordConverter().convert(rtf, TMP)
+    check("legacy RTF raises actionable error", False, "no exception")
+except ConversionDependencyError as exc:
+    check("legacy RTF raises actionable error",
+          ".docx" in str(exc) and "Office" in str(exc), str(exc))
+except Exception as exc:  # noqa: BLE001
+    check("legacy RTF raises actionable error", False, f"{type(exc).__name__}: {exc}")
+set_office_cache(None)
+
+bad_name = TMP / 'inj" & (do shell script "touch PWNED") & ".rtf'
+with patch.object(converters.subprocess, "run") as run:
+    run.return_value.returncode = 1
+    converters._applescript_convert("Word", "SCRIPT", bad_name, TMP / "out.pdf")
+    cmd = run.call_args.args[0]
+check("AppleScript passes paths as argv",
+      cmd[:4] == ["osascript", "-e", "SCRIPT", "--"]
+      and cmd[4] == str(bad_name.resolve()) and 'do shell script' not in cmd[2],
+      str(cmd[:5]))
 
 # ═══════════════════════════════════════════════════════════
 print("\n═══ 3. i18n invariants ═══")

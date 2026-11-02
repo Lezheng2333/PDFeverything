@@ -121,6 +121,12 @@ jobs:
           Invoke-Pdfe $exe @("merge", "-i", "ci_fixture.pdf", "ci_fixture.pdf", "-o", "ci_merged.pdf") "pdf merge"
           python -c "import fitz; d=fitz.open('ci_merged.pdf'); assert len(d)==2, len(d); d.close()"
 
+          # 3) 加密/解密：验证冻结后的 cryptography 后端确实可用，而不只是能启动
+          Invoke-Pdfe $exe @("encrypt", "-i", "ci_fixture.pdf", "-o", "ci_enc.pdf", "--password", "ci-pass-201") "pdf encrypt"
+          python -c "import fitz; d=fitz.open('ci_enc.pdf'); assert d.needs_pass, 'encrypted output is not locked'; d.close()"
+          Invoke-Pdfe $exe @("decrypt", "-i", "ci_enc.pdf", "-o", "ci_dec.pdf", "--password", "ci-pass-201") "pdf decrypt"
+          python -c "import fitz; d=fitz.open('ci_dec.pdf'); assert len(d)==1, len(d); d.close()"
+
       - name: Verify installer
         shell: pwsh
         run: |

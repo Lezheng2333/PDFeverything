@@ -291,6 +291,8 @@ def get_outline(input_path: Path) -> List[OutlineEntry]:
     check_input(input_path)
     doc = fitz.open(input_path)
     try:
+        if doc.needs_pass:
+            raise ValueError("PDF 受密码保护，无法读取目录")
         raw = doc.get_toc(simple=False) or []
         if not raw:
             return []
@@ -312,6 +314,8 @@ def get_outline(input_path: Path) -> List[OutlineEntry]:
                 entries.append(entry)
             stack.append(entry)
         return entries
+    except ValueError:
+        raise
     except Exception:
         return []
     finally:

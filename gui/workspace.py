@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
 )
 
 from .i18n import tr
-from .theme import file_icon
+from .theme import colors, file_icon
 
 
 def label(text, name="muted"):
@@ -28,25 +28,28 @@ class DocumentArt(QWidget):
 
     def paintEvent(self, event):
         p = QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        c = colors()
         p.translate(self.width() / 2, self.height() / 2)
-        p.setPen(QPen(QColor("#375d45"), 1)); p.setBrush(Qt.BrushStyle.NoBrush)
+        p.setPen(QPen(QColor(c["hero_muted"]), 1)); p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawEllipse(QRectF(-128, -128, 256, 256))
         p.drawEllipse(QRectF(-95, -95, 190, 190))
-        for angle, x, y, fill, text in [(-16, -78, -50, "#73967a", "DOC"),
-                                         (12, 4, -57, "#d9b68b", "IMG"),
-                                         (0, -42, -45, "#e9f1db", "PDF")]:
+        cards = [(-16, -78, -50, c["hero_muted"], "DOC", c["hero"]),
+                 (12, 4, -57, c["accent"], "IMG", c["on_accent"]),
+                 (0, -42, -45, c["hero_text"], "PDF", c["hero"])]
+        for angle, x, y, fill, text, ink in cards:
             p.save(); p.rotate(angle); p.translate(x, y)
             p.setPen(Qt.PenStyle.NoPen); p.setBrush(QColor(fill))
             p.drawRoundedRect(QRectF(0, 0, 83, 109), 8, 8)
-            p.setPen(QColor("#24452f")); p.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+            p.setPen(QColor(ink)); p.setFont(QFont("Arial", 12, QFont.Weight.Bold))
             p.drawText(QRectF(13, 14, 60, 26), text)
-            p.setPen(QPen(QColor("#9eaf99"), 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+            line = QColor(c["hero"]); line.setAlpha(110)
+            p.setPen(QPen(line, 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
             for yy, ww in [(56, 49), (66, 49), (76, 32)]:
                 p.drawLine(15, yy, 15 + ww, yy)
             p.restore()
-        p.setPen(Qt.PenStyle.NoPen); p.setBrush(QColor("#c4e1ac"))
+        p.setPen(Qt.PenStyle.NoPen); p.setBrush(QColor(c["accent"]))
         p.drawEllipse(QRectF(57, 40, 36, 36))
-        p.setPen(QColor("#23462e")); p.setFont(QFont("Arial", 19))
+        p.setPen(QColor(c["on_accent"])); p.setFont(QFont("Arial", 19))
         p.drawText(QRectF(57, 37, 36, 36), Qt.AlignmentFlag.AlignCenter, "↗")
         p.end()
 
@@ -56,19 +59,27 @@ class WorkspaceHero(QWidget):
         super().__init__(parent)
         self.setObjectName("workspace_hero")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setStyleSheet("QWidget#workspace_hero{background:#203f2e;border-radius:18px;}"
-                           "QWidget#workspace_hero QLabel{color:#edf4e5;background:transparent;}")
         row = QHBoxLayout(self); row.setContentsMargins(28, 8, 20, 8)
         words = QVBoxLayout(); words.setSpacing(8)
         self.overline = QLabel("D O C U M E N T   S T U D I O  /  2.0")
-        self.overline.setStyleSheet("font-size:10px;color:#bad4ac;")
         self.title = QLabel(); self.title.setStyleSheet("font-size:29px;font-weight:600;")
         self.title.setWordWrap(True)
-        self.desc = QLabel(); self.desc.setStyleSheet("font-size:12px;color:#c0d2bc;")
+        self.desc = QLabel()
         self.desc.setWordWrap(True)
         words.addWidget(self.overline); words.addWidget(self.title); words.addWidget(self.desc)
-        row.addLayout(words, 3); row.addWidget(DocumentArt(), 2)
+        self.art = DocumentArt()
+        row.addLayout(words, 3); row.addWidget(self.art, 2)
         self.retranslate_ui()
+        self.apply_theme()
+
+    def apply_theme(self):
+        c = colors()
+        self.setStyleSheet(
+            f"QWidget#workspace_hero{{background:{c['hero']};border-radius:18px;}}"
+            f"QWidget#workspace_hero QLabel{{color:{c['hero_text']};background:transparent;}}")
+        self.overline.setStyleSheet(f"font-size:10px;color:{c['hero_muted']};")
+        self.desc.setStyleSheet(f"font-size:12px;color:{c['hero_muted']};")
+        self.art.update()
 
     def retranslate_ui(self):
         self.title.setText(tr("studio_hero"))
@@ -147,8 +158,6 @@ class ToolLibrary(QWidget):
         for i, tool in enumerate(TOOLS):
             key, action, category, stamp, aliases = tool
             b = ToolCard(); b.setMinimumHeight(108)
-            b.setIcon(file_icon(stamp, {"organize": "#286344", "convert": "#4774a1",
-                                      "extract": "#897345", "secure": "#a26756"}[category]))
             b.setIconSize(QSize(40, 40)); b.setCursor(Qt.CursorShape.PointingHandCursor)
             b.clicked.connect(lambda checked=False, attr=action: getattr(window, attr).trigger())
             self.cards.append((b, tool)); grid.addWidget(b, i // 3, i % 3)
@@ -156,6 +165,15 @@ class ToolLibrary(QWidget):
         scroll.setWidget(content); root.addWidget(scroll, 1)
         self.empty = label(""); root.addWidget(self.empty)
         self.retranslate_ui()
+        self.apply_theme()
+
+    def apply_theme(self):
+        """Repaint the tool badges when the color scheme changes."""
+        accent = colors()["accent"]
+        for b, (_key, _action, category, stamp, _aliases) in self.cards:
+            ink = {"organize": accent, "convert": "#4774a1",
+                   "extract": "#897345", "secure": "#a26756"}[category]
+            b.setIcon(file_icon(stamp, ink))
 
     def set_category(self, category):
         self.category = category; self.filter_tools()

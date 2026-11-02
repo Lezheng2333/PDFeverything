@@ -13,15 +13,14 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import settings_isolation  # noqa: F401  (isolates QSettings before GUI imports)
 
 import fitz
-from PyQt6.QtCore import QSettings, Qt
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction, QCloseEvent
 from PyQt6.QtWidgets import QApplication, QFileDialog, QListWidget
 
-SETTINGS = tempfile.TemporaryDirectory(prefix="pdfeverything-studio-settings-")
-QSettings.setDefaultFormat(QSettings.Format.IniFormat)
-QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, SETTINGS.name)
 app = QApplication.instance() or QApplication([])
 app.setStyle("Fusion")
 
@@ -194,6 +193,72 @@ class StudioTests(unittest.TestCase):
             pix = printed[0].get_pixmap()
             rgb = pix.pixel(pix.width // 2, pix.height // 2)
             self.assertGreater(rgb[2], 240); self.assertLess(rgb[0], 20)
+
+    def test_color_schemes_switch_and_persist(self):
+        from gui.theme import colors
+        try:
+            self.window._switch_scheme("cherry")
+            self.assertEqual(self.window._scheme, "cherry")
+            self.assertTrue(self.window.scheme_actions["cherry"].isChecked())
+            self.assertEqual(self.window._settings.value("studio_scheme"), "cherry")
+            self.assertNotEqual(colors(self.window._dark, "cherry")["accent"],
+                                colors(self.window._dark, "forest")["accent"])
+            self.window._switch_scheme("florence")
+            self.assertEqual(self.window._scheme, "florence")
+            self.assertTrue(self.window.scheme_actions["florence"].isChecked())
+        finally:
+            self.window._switch_scheme("forest")
+
+    def test_merge_respects_queue_selection(self):
+        self.window.file_list.add_files(self.pdfs)
+        self.window.file_list.list_widget.setCurrentRow(1)
+        with patch.object(self.window, "_get_output_path",
+                          return_value=self.root / "merge-selected.pdf"), \
+             patch.object(self.window, "_run_worker") as run:
+            self.window._on_merge_clicked()
+        self.assertEqual(run.call_args.args[1], [self.pdfs[1]])
+
+    def test_sort_preserves_selection(self):
+        paths = [self.root / "b.pdf", self.root / "a.pdf", self.root / "c.pdf"]
+        for path in paths:
+            doc = fitz.open(); doc.new_page(); doc.save(path); doc.close()
+        self.window.file_list.add_files(paths)
+        queue = self.window.file_list.list_widget
+        queue.setCurrentRow(0)
+        selected = queue.selectedItems()[0].data(Qt.ItemDataRole.UserRole)
+        self.window.file_list.sort_by_name()
+        self.assertEqual([x.data(Qt.ItemDataRole.UserRole)
+                          for x in queue.selectedItems()], [selected])
+
+    def test_reader_outline_and_search_status_follow_language(self):
+        reader = self.window.reader
+        reader.open_pdf(self.pdfs[0])
+        self.window._switch_language("en"); app.processEvents()
+        self.window._switch_language("zh"); app.processEvents()
+        self.assertEqual(reader.outline_tree.topLevelItemCount(), 1)
+        reader.start_search("report"); app.processEvents()
+        self.assertIn("找到", reader.search_status.text())
+        self.window._switch_language("en"); app.processEvents()
+        self.assertIn("matches", reader.search_status.text())
+        self.window._switch_language("zh")
+
+    def test_print_preserves_caller_page_order(self):
+        from PyQt6.QtPrintSupport import QPrinter
+        from gui.printing import print_pages
+        doc = fitz.open()
+        for color in ((1, 0, 0), (0, 1, 0), (0, 0, 1)):
+            page = doc.new_page(); page.draw_rect(page.rect, color=None, fill=color)
+        output = self.root / "print-order.pdf"
+        printer = QPrinter(); printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
+        printer.setOutputFileName(str(output)); print_pages(doc, [2, 0], printer)
+        doc.close()
+        with fitz.open(output) as printed:
+            first = printed[0].get_pixmap()
+            second = printed[1].get_pixmap()
+            c1 = first.pixel(first.width // 2, first.height // 2)
+            c2 = second.pixel(second.width // 2, second.height // 2)
+            self.assertGreater(c1[2], 240); self.assertLess(c1[0], 20)
+            self.assertGreater(c2[0], 240); self.assertLess(c2[2], 20)
 
     def test_history_is_bounded_and_reopenable(self):
         import json

@@ -3,6 +3,8 @@ import sys, time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent))
+import settings_isolation  # noqa: F401  (isolates QSettings before GUI imports)
 
 from PyQt6.QtWidgets import QApplication
 import fitz
@@ -10,6 +12,7 @@ import fitz
 app = QApplication(sys.argv)
 
 from gui.pdf_reader_widget import PdfReaderWidget, ViewMode
+from gui.i18n import app_settings
 
 passed, failed = 0, 0
 
@@ -47,8 +50,7 @@ print("\n═══ Test 1: Open & Render ═══")
 # The reader remembers the last page + zoom per file (v1.6 "reading position
 # memory"), and /tmp/test_reader_3p.pdf persists between runs, so a stale
 # remembered zoom would otherwise decide what "default zoom" means here.
-from PyQt6.QtCore import QSettings
-_settings = QSettings("PDFeverything", "PDFeverything")
+_settings = app_settings()
 _settings.remove("reader_positions")
 _settings.sync()
 

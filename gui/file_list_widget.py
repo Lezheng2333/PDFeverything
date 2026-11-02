@@ -393,9 +393,18 @@ class FileListWidget(QWidget):
                 for token in re.split(r"(\d+)", path.name)]
 
     def sort_by_name(self):
+        selected_paths = {
+            item.data(Qt.ItemDataRole.UserRole)
+            for item in self.list_widget.selectedItems()
+        }
+        self.list_widget.blockSignals(True)
         items = [self.list_widget.takeItem(0) for _ in range(self.count())]
         for item in sorted(items, key=lambda i: self._name_key(i.data(Qt.ItemDataRole.UserRole))):
             self.list_widget.addItem(item)
+            if item.data(Qt.ItemDataRole.UserRole) in selected_paths:
+                item.setSelected(True)
+        self.list_widget.blockSignals(False)
+        self._update_selection()
         self._update_summary(); self.files_changed.emit()
 
     def add_folder(self, folder):

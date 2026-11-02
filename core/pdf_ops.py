@@ -112,6 +112,8 @@ class PdfOperator:
         encrypted = False
         pages = 0
         info = {}
+        readable = True
+        error = ""
         try:
             reader = PdfReader(input_path)
             encrypted = bool(reader.is_encrypted)
@@ -121,13 +123,30 @@ class PdfOperator:
             else:
                 pages = _encrypted_page_count(input_path)
         except Exception:
-            info = {}
-            pages = _encrypted_page_count(input_path)
+            # A corrupt file used to be reported as "0 pages" because every
+            # exception was swallowed. Try MuPDF once; if that also fails, report
+            # the damage instead of pretending this is an empty document.
+            try:
+                import fitz
+                doc = fitz.open(input_path)
+                try:
+                    encrypted = bool(doc.needs_pass)
+                    pages = len(doc)
+                    info = doc.metadata or {}
+                finally:
+                    doc.close()
+            except Exception as exc:
+                readable = False
+                error = f"无法读取 PDF: {input_path.name}"
+                info = {}
+                pages = 0
 
         return {
             "path": str(input_path),
             "pages": pages,
             "encrypted": encrypted,
+            "readable": readable,
+            "error": error,
             "size_bytes": size,
             "title": (info.title or "") if info else "",
             "author": (info.author or "") if info else "",
@@ -477,15 +496,19 @@ class PdfOperator:
                                 height = max(1, int(height * scale))
                             if im.mode not in ("RGB", "L"):
                                 im = im.convert("RGB")
+                            color_space = "/DeviceGray" if im.mode == "L" else "/DeviceRGB"
                             if (width, height) != im.size:
                                 im = im.resize((width, height), PILImage.LANCZOS)
                             buf = io.BytesIO()
                             im.save(buf, "JPEG", quality=quality, optimize=True)
                         new_bytes = buf.getvalue()
                         if len(new_bytes) < len(raw):
-                            doc.update_stream(xref, new_bytes, compress=True)
+                            # The bytes are already a complete JPEG. Letting
+                            # update_stream() deflate them produced zlib data
+                            # behind a /DCTDecode filter (unreadable image).
+                            doc.update_stream(xref, new_bytes, compress=False)
                             doc.xref_set_key(xref, "Filter", "/DCTDecode")
-                            doc.xref_set_key(xref, "ColorSpace", "/DeviceRGB")
+                            doc.xref_set_key(xref, "ColorSpace", color_space)
                             doc.xref_set_key(xref, "Width", str(width))
                             doc.xref_set_key(xref, "Height", str(height))
                             doc.xref_set_key(xref, "BitsPerComponent", "8")
@@ -515,12 +538,11 @@ class PdfOperator:
         reader = PdfReader(input_path)
         watermark_reader = PdfReader(watermark_path)
         watermark_page = watermark_reader.pages[0]
-        writer = PdfWriter()
-        total = len(reader.pages)
+        writer = PdfWriter(clone_from=reader)
+        total = len(writer.pages)
 
-        for i, page in enumerate(reader.pages):
+        for i, page in enumerate(writer.pages):
             page.merge_page(watermark_page)
-            writer.add_page(page)
             if progress_callback:
                 progress_callback(f"加水印 ({i+1}/{total})", int((i+1)/total*100))
 
@@ -543,14 +565,19 @@ class PdfOperator:
         if not password or not password.strip():
             raise ValueError("密码不能为空")
         check_input(input_path)
+        _reject_if_encrypted(input_path)
         _prepare_output(output_path)
         if progress_callback:
             progress_callback("正在加密...", 50)
 
         reader = PdfReader(input_path)
-        writer = PdfWriter()
-        for page in reader.pages:
-            writer.add_page(page)
+
+        def build_writer():
+            # Clone (instead of add_page in a loop) so metadata and the bookmark
+            # outline survive an encryption/decryption round-trip.
+            return PdfWriter(clone_from=reader)
+
+        writer = build_writer()
         with open(output_path, "wb") as f:
             # AES-256 when the `cryptography` backend is available; the fallback
             # to RC4-128 must happen around BOTH the setup and the write, because
@@ -563,9 +590,7 @@ class PdfOperator:
                 if f.tell():
                     f.seek(0)
                     f.truncate()
-                writer = PdfWriter()
-                for page in reader.pages:
-                    writer.add_page(page)
+                writer = build_writer()
                 writer.encrypt(password)
                 writer.write(f)
 
@@ -595,10 +620,9 @@ class PdfOperator:
             if result == 0:
                 raise ValueError("密码不正确，无法解密")
 
-        writer = PdfWriter()
-        total = len(reader.pages)
-        for i, page in enumerate(reader.pages):
-            writer.add_page(page)
+        writer = PdfWriter(clone_from=reader)
+        total = len(writer.pages)
+        for i, _page in enumerate(writer.pages):
             if progress_callback:
                 progress_callback(f"解密中 ({i+1}/{total})", 30 + int((i+1)/total*70))
 
@@ -628,14 +652,13 @@ class PdfOperator:
         _prepare_output(output_path)
         _reject_if_encrypted(input_path)
         reader = PdfReader(input_path)
-        writer = PdfWriter()
-        total = len(reader.pages)
+        writer = PdfWriter(clone_from=reader)
+        total = len(writer.pages)
 
-        for i, page in enumerate(reader.pages):
+        for i, page in enumerate(writer.pages):
             pnum = i + 1
             if pages is None or pnum in pages:
                 page.rotate(angle)
-            writer.add_page(page)
             if progress_callback:
                 progress_callback(f"旋转中 ({pnum}/{total})", int(pnum/total*100))
 

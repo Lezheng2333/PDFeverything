@@ -1,12 +1,45 @@
 # PDFeverything MCP Server — AI Agent Integration Guide
 
-This MCP server lets any AI agent (Claude Desktop, Claude Code, Cursor, etc.) discover and call PDFeverything tools directly — no Python, no dependencies, just the compiled `.exe` or `.app`.
+Current server version: **2.0.1** · **29 tools**
+
+This MCP server lets any AI agent (Claude Desktop, Claude Code, Cursor, etc.) discover and call PDFeverything tools directly. The compiled `.exe` / `.app` needs no Python; running from source needs the project dependencies.
 
 ## 🚀 Quick Setup
 
 ### Claude Desktop
 
-Add to `~/.claude/claude_desktop_config.json`:
+Add the server to the Claude Desktop config file, then restart the app:
+
+- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+
+Compiled macOS app:
+
+```json
+{
+  "mcpServers": {
+    "pdfeverything": {
+      "command": "/Applications/PDFeverything.app/Contents/MacOS/PDFeverything",
+      "args": ["--mcp"]
+    }
+  }
+}
+```
+
+Compiled Windows app:
+
+```json
+{
+  "mcpServers": {
+    "pdfeverything": {
+      "command": "C:\\Program Files\\PDFeverything\\PDFeverything.exe",
+      "args": ["--mcp"]
+    }
+  }
+}
+```
+
+Running from source (development):
 
 ```json
 {
@@ -20,34 +53,32 @@ Add to `~/.claude/claude_desktop_config.json`:
 }
 ```
 
-Or using the compiled exe (no Python needed):
-
-```json
-{
-  "mcpServers": {
-    "pdfeverything": {
-      "command": "C:\\Program Files\\PDFeverything\\PDFeverything.exe",
-      "args": ["--mcp"]
-    }
-  }
-}
-```
-
 ### Claude Code
 
-Add to `.claude/settings.json` in your project:
+Add to `.mcp.json` in the project root (the file Claude Code reads for
+project-scoped MCP servers):
 
 ```json
 {
   "mcpServers": {
     "pdfeverything": {
       "type": "stdio",
-      "command": "PDFeverything",
+      "command": "/Applications/PDFeverything.app/Contents/MacOS/PDFeverything",
       "args": ["--mcp"]
     }
   }
 }
 ```
+
+Or register it from the CLI:
+
+```bash
+claude mcp add --transport stdio pdfeverything -- \
+  /Applications/PDFeverything.app/Contents/MacOS/PDFeverything --mcp
+```
+
+On Windows, use the full path to `PDFeverything.exe` in `command` (for example
+`C:\\Program Files\\PDFeverything\\PDFeverything.exe`).
 
 ## 🔧 Available Tools (29 tools)
 
@@ -85,14 +116,20 @@ The AI agent will see these tools automatically:
 | `pdf_redo` | Redo the last undone page edit |
 | `pdf_history` | Show the recorded editing history for a file |
 
+Page-range arguments accept `all`, `3`, `1-5`, `1-3,7,9-12`; page numbers are 1-based.
+Most operations reject encrypted inputs with an actionable message; the password-related
+tools (`pdf_encrypt`, `pdf_decrypt`) take an explicit password argument.
+
 ## 🧪 Test It
 
 ```bash
-# Start the MCP server directly:
+# Start the MCP server from source:
 python mcp/server.py
 
-# Or from compiled exe:
+# Or from the compiled app:
 PDFeverything.exe --mcp
+# macOS:
+/Applications/PDFeverything.app/Contents/MacOS/PDFeverything --mcp
 
 # Send a test request (type this into the running server):
 {"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}
@@ -117,4 +154,12 @@ AI Agent                          PDFeverything MCP Server
    │     "{'pages':5,'title':'Report'}"}]}}
 ```
 
-No setup required — the agent calls `pdfeverything --mcp`, the server starts, and all 23 tools appear in its toolbox automatically.
+No separate install is required for the compiled app: the agent starts
+`PDFeverything --mcp`, and all 29 tools appear in its toolbox automatically.
+
+## Notes
+
+- All MCP tools call the same `core/` implementation as the GUI and CLI.
+- stdout is reserved for JSON-RPC; diagnostics go to stderr, so keep ad-hoc
+  `print()` calls out of the server path.
+- The server reports its version in the `initialize` response (`2.0.1`).

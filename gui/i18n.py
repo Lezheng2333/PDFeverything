@@ -1,6 +1,22 @@
 """i18n — translation dict for PDFeverything GUI. All UI strings go through `tr()`."""
 
+import os
+
 from PyQt6.QtCore import QSettings
+
+
+def app_settings() -> QSettings:
+    """The single QSettings entry point.
+
+    Production keeps the platform-native store. Tests set
+    ``PDFEVERYTHING_SETTINGS_INI=1`` and point IniFormat at a temp directory so
+    a suite can never mutate the user's real preferences (macOS ignores
+    setPath() for NativeFormat).
+    """
+    if os.environ.get("PDFEVERYTHING_SETTINGS_INI"):
+        return QSettings(QSettings.Format.IniFormat, QSettings.Scope.UserScope,
+                         "PDFeverything", "PDFeverything")
+    return QSettings("PDFeverything", "PDFeverything")
 
 # ── Master translation table ──────────────────────────────
 
@@ -418,13 +434,17 @@ T = {
     "studio_cat_all": {"zh": "全部工具", "en": "All tools"},
     "studio_cat_organize": {"zh": "整理页面", "en": "Organize"},
     "studio_cat_convert": {"zh": "格式转换", "en": "Convert"},
-    "studio_cat_extract": {"zh": "提取与属性", "en": "Extract & inspect"},
-    "studio_cat_secure": {"zh": "优化与保护", "en": "Optimize & protect"},
+    "studio_cat_extract": {"zh": "提取与属性", "en": "Extract && inspect"},
+    "studio_cat_secure": {"zh": "优化与保护", "en": "Optimize && protect"},
     "studio_commands": {"zh": "快捷命令", "en": "Quick actions"},
-    "studio_command_button": {"zh": "搜索工具与操作…", "en": "Search tools & actions…"},
+    "studio_command_button": {"zh": "搜索工具与操作…", "en": "Search tools && actions…"},
     "studio_command_hint": {"zh": "↑ ↓ 选择     Enter 执行     Esc 关闭", "en": "↑ ↓ to select     Enter to run     Esc to close"},
     "studio_open": {"zh": "打开 PDF", "en": "Open PDF"},
     "studio_theme": {"zh": "切换明暗主题", "en": "Toggle light / dark theme"},
+    "menu_color_scheme": {"zh": "配色方案", "en": "Color scheme"},
+    "theme_forest": {"zh": "森林绿", "en": "Forest green"},
+    "theme_cherry": {"zh": "暖樱红", "en": "Warm cherry"},
+    "theme_florence": {"zh": "翡冷翠蓝", "en": "Florence blue"},
     "studio_local": {"zh": "● 本地处理 · 文件留在你的设备", "en": "● Local processing · Your files stay on your device"},
     "studio_result_open": {"zh": "打开结果  ↗", "en": "Open result  ↗"},
     "studio_result_folder": {"zh": "所在文件夹", "en": "Show folder"},
@@ -481,7 +501,7 @@ _current_lang = None
 def _load_lang() -> str:
     global _current_lang
     if _current_lang is None:
-        s = QSettings("PDFeverything", "PDFeverything")
+        s = app_settings()
         _current_lang = s.value("language", "zh")
     return _current_lang
 
@@ -513,7 +533,7 @@ def set_language(lang: str) -> None:
     """Persist language choice."""
     global _current_lang
     _current_lang = lang
-    s = QSettings("PDFeverything", "PDFeverything")
+    s = app_settings()
     s.setValue("language", lang)
 
 

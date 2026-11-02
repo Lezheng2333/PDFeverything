@@ -12,6 +12,9 @@ from PyInstaller.utils.hooks import collect_data_files
 PROJECT_ROOT = Path(SPECPATH)
 
 datas = []
+_icon = PROJECT_ROOT / 'resources' / 'app_icon.png'
+if _icon.is_file():
+    datas.append((str(_icon), 'resources'))
 for mod in ('fitz', 'PIL'):
     try:
         datas += collect_data_files(mod)
@@ -34,6 +37,7 @@ hiddenimports = [
     "core.converters", "core.merger", "core.search",
     "gui", "gui.i18n", "gui.pdf_reader_widget", "gui.main_window",
     "gui.file_list_widget", "gui.workers", "gui.dialogs",
+    "gui.theme", "gui.workspace", "gui.printing", "cryptography",
     "tempfile", "subprocess", "shutil", "uuid",
 ]
 

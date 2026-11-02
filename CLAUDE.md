@@ -8,9 +8,9 @@
 |---|---|---|---|
 | 1 | **清爽** | Clean | 界面零杂乱，按钮数量最小化，视觉噪音最低。阅读模式比操作模式更突出。 |
 | 2 | **简约** | Minimal | 一个按钮能完成的事不用两个。合并面板只有 `[Merge→]` 一个按钮。底栏只在需要时出现。 |
-| 3 | **全面** | Comprehensive | 26 种 PDF 操作、6 种格式互转、3 通道（GUI/CLI/MCP）、2 种阅读模式 + 侧栏（目录/搜索）。不多不少，刚好够用。 |
+| 3 | **全面** | Comprehensive | 30+ 项 PDF 操作、6 种格式互转、3 通道（GUI/CLI/MCP）、2 种阅读模式 + 侧栏（目录/搜索）、18 项 Studio 工具。不多不少，刚好够用。 |
 | 4 | **速度快** | Fast | 打开 <0.2s（窗口化渲染，与页数无关），模式切换瞬间（缓存命中小于 5ms），滚轮缩放 60fps，网格框选 0.01ms/事件。 |
-| 5 | **轻量化** | Lightweight | 单 exe ~76MB（onefile 压缩），内存 <200MB（缓存按可见窗口增长），不依赖外部运行时。PyMuPDF=C 内核，Qt=C++ 内核。 |
+| 5 | **轻量化** | Lightweight | 发布包约 73–98MB（macOS zip / Windows 安装包），缓存按可见窗口增长（上限 128–400MB），不依赖外部运行时。PyMuPDF=C 内核，Qt=C++ 内核。 |
 
 > ⚡ 每次修改前自问：**我是在让软件更清爽、更简约、更全面、更快、更轻吗？** 如果答案是"不是"，换方案。
 
@@ -38,16 +38,17 @@
 ## 上下文恢复
 
 - 每次对话开始或 compact 之后，必须阅读 `DEVELOPMENT_LOG.md` 了解最新开发进展和最近版本变更
-- 阅读本文件中的"关键架构决策"和"文件职责"理解代码组织方式
+- 阅读本文件中的"项目结构"、"关键架构决策"和"类结构"理解代码组织方式
 
 ## 当前开发状态
 
-### 最新版本：v2.0.0（Studio，双平台正式发布）
+### 最新版本：v2.0.1（Studio + 三套配色，双平台发布）
 - 全新原生 Studio 工作台、明暗主题、文档队列、18 项可搜索工具、⌘/Ctrl+K 快捷命令。
+- 三套配色：森林绿 / 暖樱红 / 翡冷翠蓝，均含明暗变体，Settings → 配色方案，QSettings 记忆。
 - 阅读欢迎页与最近文档、点击页码跳转、处理结果直达；旧阅读器渲染与三通道引擎保持兼容。
-- 新模块：`gui/theme.py`（统一设计系统）、`gui/workspace.py`（插画、工具库、命令面板）。
-- 新回归：`tests/test_studio.py` 20 项；连同既有套件共 513 项通过。
-- 本地 `PDFeverything.app` 已更新到 2.0.0；Windows 安装包已通过 CI；发布与 Office / 打印验收范围见开发日志和 docs/RELEASE_QA_2.0.0.md。
+- 新模块：`gui/theme.py`（统一设计系统）、`gui/workspace.py`（插画、工具库、命令面板）、`gui/printing.py`（Qt 原生打印）。
+- 新回归：`tests/test_studio.py` 25 项；连同既有套件共 522 项通过。
+- 已发布 GitHub Release v2.0.1；本地 `PDFeverything.app` 与 Windows 安装包均为 2.0.1；验收范围见 `docs/RELEASE_QA_2.0.1.md`。
 
 ### v1.9.0 引擎能力（继续保留）
 - 📖 **PDF 阅读器**：两模式（Scroll 连续滚动 / Grid 3 列缩略图）+ 可折叠侧栏（目录 / 搜索结果）
@@ -62,7 +63,7 @@
   - ⌨️ 快捷键：⌘F 查找 / ⌘B 侧栏 / ⌘+ ⌘− 缩放 / ⌘0 ⌘1 适应 / ⌘G 上下一个 / ←→ 翻页
   - 触控板捏合缩放、拖放打开、欢迎页、双击切换适应模式
 - GUI 中英文双语切换（Settings → Language）
-- 26 个 PDF 操作 + 6 种格式转换，三通道（GUI / CLI / MCP）共享同一实现，MCP 暴露 29 个工具
+- 22 个 `PdfOperator` 核心操作 + 页面编辑 / 搜索 / 目录 / 打印，6 种格式转换，三通道（GUI / CLI / MCP）共享同一实现，MCP 暴露 29 个工具
 - macOS + Windows 双平台 onedir/onefile 发布
 - 液态玻璃艺术风格 1024px 应用图标
 
@@ -71,27 +72,31 @@
 ✅ CLI原型 ✅ Core重构 ✅ PyQt6 GUI ✅ macOS/Windows发布
 ✅ i18n双语 ✅ Windows COM ✅ MCP服务器 ✅ PDF反向转换
 ✅ 批量处理 ✅ 鲁棒性加固 ✅ PDF阅读器 ✅ LRU缓存
-✅ Immortal 100% base ✅ 矢量级画质(精确解析度+MuPDF原生AA)
+✅ 两级缓存淘汰 ✅ 矢量级画质(精确解析度+MuPDF原生AA)
 ✅ v1.5.0 正确性大修(窗口化渲染/协作取消/CJK/加密/压缩档位) ✅ 回归测试套件
 ✅ v1.6.0 阅读器搜索+目录侧栏+阅读位置记忆 ✅ v1.7.0 页码/元数据/N-up/插入页面
 ✅ v1.8.0 界面清爽化(转换菜单/文件列表汇总)
 ✅ v1.9.0 QA 加固(19 缺陷修复 + 缓存上限/布局/惰性渲染提速)
-✅ v2.0.0 Studio工作台/主题/工具搜索/快捷命令/最近阅读/结果入口 => 双平台构建与发布验收
+✅ v2.0.0 Studio工作台/主题/工具搜索/快捷命令/最近阅读/结果入口
+✅ v2.0.1 三套配色/旧格式明确报错/压缩与 MCP 修复/文档元数据保留 => 双平台发布
 ```
 
 ### 测试
 ```bash
-.venv/bin/python tests/test_core.py    # 核心 / CLI / MCP / i18n   93 项
-.venv/bin/python tests/test_gui.py     # Worker / 批量 / 对话框 / 阅读器  70 项
-QT_QPA_PLATFORM=offscreen .venv/bin/python tests/qa_reader.py   # 阅读器 QA  38 项
-QT_QPA_PLATFORM=offscreen .venv/bin/python tests/test_reader.py # 阅读器综合  85 项
+.venv/bin/python tests/test_core.py    # 核心 / CLI / MCP / i18n   97 项
+QT_QPA_PLATFORM=offscreen .venv/bin/python tests/test_gui.py     # Worker / 批量 / 对话框  70 项
+QT_QPA_PLATFORM=offscreen .venv/bin/python tests/qa_reader.py    # 阅读器 QA  38 项
+QT_QPA_PLATFORM=offscreen .venv/bin/python tests/test_reader.py  # 阅读器综合  85 项
 
 # 对抗性套件（v1.9.0 新增）—— 主动攻击软件，而非复检既有行为
-.venv/bin/python tests/qa_adversarial.py                        # 鲁棒性/准确性 170 项
+.venv/bin/python tests/qa_adversarial.py                         # 鲁棒性/准确性 170 项
 QT_QPA_PLATFORM=offscreen .venv/bin/python tests/qa_reader_defects.py  # 阅读器缺陷 37 项
+
+# Studio 2.0 工作流 / 打印引擎回归
+QT_QPA_PLATFORM=offscreen .venv/bin/python tests/test_studio.py  # Studio 工作流 25 项
 ```
-发布前三套门禁必须全绿；改动阅读器或 core 后必须连同对抗性套件一起跑。
-当前全套 493 项。
+发布前七套门禁必须全绿；改动阅读器或 core 后必须连同对抗性套件一起跑。
+当前全套 522 项（97 + 70 + 38 + 85 + 170 + 37 + 25）。
 
 注：tests/qa_adversarial.py 里的每条探针失败时会打印具体证据，可直接据此定位；
 tests/qa_reader_defects.py 中每项都对应 v1.9.0 的一个已修缺陷，修复前必然失败。
@@ -140,10 +145,12 @@ tests/qa_reader_defects.py 中每项都对应 v1.9.0 的一个已修缺陷，修
 - **_layout_labels render_missing**：缩放路径必须传 `render_missing=False`，只有 `open_pdf` 传 True；传错会导致 Pass 1 缩放结果被 100% 覆盖
 - **_scroll_to_page_top()**：`_set_zoom_pct`、`_apply_fit_mode` 末尾必须调用，否则缩放后滚动位置丢失
 - **i18n 接线**：新增按钮/菜单项必须在 `_retranslate_ui()` 中同步添加翻译调用，漏了会导致切语言后按钮变空白
-- **MCP 工具计数**：新增/删除工具必须在 README EN+CN 的两处计数（AI 能看到的 N 个工具 / discover all N PDF tools）同步更新
+- **MCP 工具计数**：新增/删除工具必须在 README EN+CN 的所有计数（概览、工具表、MCP 段）以及 `mcp/README.md` 同步更新
 - **CLI_COMMANDS 集合**：`main.py` 中的 `CLI_COMMANDS` set 决定是否跳过 GUI 启动，新增命令漏加会导致双击 exe 出黑框
 - **_run_batch ext 参数**：非 PDF 输出（to-word→.docx / to-ppt→.pptx / to-excel→.xlsx / extract-text→.txt）必须传 ext 参数，否则生成错误后缀文件
-- **QSettings 持久化**：`main_window.py` 中的默认输出目录、dpi、语言等设置通过 QSettings 持久化，修改设置键名会导致用户丢失偏好
+- **QSettings 持久化**：`main_window.py` 中的默认输出目录、dpi、语言、主题、配色（`studio_scheme`）、最近文档（`studio_recent`）与处理历史（`studio_history`）等设置通过 QSettings 持久化，修改设置键名会导致用户丢失偏好
+- **QSettings 测试隔离**：GUI 测试必须先导入 `tests/settings_isolation.py` 并使用 `gui.i18n.app_settings()`；macOS 下直接 `QSettings("PDFeverything", "PDFeverything")` 会写真实 plist，`setPath(IniFormat)` 无效
+- **主题配色**：新增配色必须同时修改 `gui/theme.py` 的 `PALETTES`、`gui/i18n.py` 的 `theme_*` 键与测试；Settings → 配色方案菜单由 `SCHEMES` 自动生成
 
 ## 项目结构
 
@@ -154,19 +161,22 @@ PDFeverything/
 ├── core/
 │   ├── __init__.py
 │   ├── utils.py             # 文件分类、编码检测、临时文件、页码范围解析、Office 检测
-│   ├── pdf_ops.py           # PdfOperator — 26 个 PDF 处理方法（所有通道共享）
+│   ├── pdf_ops.py           # PdfOperator — 22 个公开 PDF 方法（所有通道共享）
 │   ├── search.py            # 全文搜索 + 目录(书签)解析（GUI/CLI/MCP 共用）
 │   ├── converters.py        # ConverterRegistry — 6 种格式→PDF 转换器（CJK 字体感知）
 │   ├── page_editor.py       # 页面编辑 + 快照撤销 + 持久化历史日志
 │   └── merger.py            # merge_mixed_files() — 混合文件→统一 PDF 流水线
 ├── gui/
 │   ├── __init__.py
-│   ├── main_window.py       # MainWindow — 双 Tab + 进度条 + 语言切换
+│   ├── main_window.py       # MainWindow — Studio 三空间 + 进度条 + 语言切换
+│   ├── theme.py             # 设计系统：配色、排版、控件样式与明暗主题
+│   ├── workspace.py         # WorkspaceHero / ToolLibrary / CommandPalette / HistoryDialog
+│   ├── printing.py          # Qt 原生打印：选中页顺序、纸张适配、比例保持
 │   ├── file_list_widget.py  # FileListWidget — 拖拽列表 + 工具栏 + 保护层
 │   ├── workers.py           # BaseWorker(QThread) — 60min 超时 + 优雅取消
 │   ├── dialogs.py           # 9 个操作对话框（加密/解密/水印/旋转/压缩/拆分/信息/页码/属性）
 │   ├── pdf_reader_widget.py  # PdfReaderWidget — PDF 阅读器（LRU 缓存 + 两阶段缩放）
-│   └── i18n.py              # tr() — 280+ 键位中英文翻译表（格式化异常安全）
+│   └── i18n.py              # tr() — 360+ 键位中英文翻译表（格式化异常安全）
 ├── mcp/
 │   ├── __init__.py
 │   ├── server.py            # MCP JSON-RPC stdio 服务器 — 29 tools
@@ -174,8 +184,23 @@ PDFeverything/
 ├── resources/
 │   ├── app_icon.icns        # macOS 图标
 │   ├── app_icon.ico         # Windows 图标
-│   ├── app_icon.png         # README 用 + Dock 显示
+│   ├── app_icon.png         # Dock / 应用图标
+│   ├── app_icon_readme.png  # README 页首图标
+│   ├── ChineseSimplified.isl # Inno Setup 中文向导（vendored）
 │   └── LICENSE.txt          # MIT
+├── docs/
+│   ├── RELEASE_QA_2.0.1.md  # 2.0.1 验收记录
+│   ├── RELEASE_QA_2.0.0.md  # Studio 2.0 历史验收记录
+│   └── studio-*.png         # Studio 截图
+├── tests/
+│   ├── test_core.py         # 核心 / CLI / MCP / i18n
+│   ├── test_gui.py          # Worker / 批量 / 对话框
+│   ├── qa_reader.py         # 阅读器 QA
+│   ├── test_reader.py       # 阅读器综合
+│   ├── qa_adversarial.py    # 对抗性探针
+│   ├── qa_reader_defects.py # 阅读器缺陷回归
+│   ├── test_studio.py       # Studio 工作流 / 打印
+│   └── settings_isolation.py # 测试用 QSettings 隔离
 ├── PDFeverything.spec       # PyInstaller macOS 构建配置
 ├── build_windows.spec       # PyInstaller Windows onefile 构建配置
 ├── build_windows.py         # Windows 一键构建脚本（exe + 安装包）
@@ -226,6 +251,7 @@ PDFeverything/
 - **QSettings 语言持久化**：`gui/i18n.py` 的 `_load_lang()` 读 QSettings，`set_language()` 写入
 - **_retranslate_ui() 全局刷新**：语言切换时遍历所有 widget 调用 `tr()` 重新设文本
 - **批处理决策**：1 个文件→文件对话框，多个文件→输出目录，通过 `_run_batch()` 统一处理
+- **Studio 工具库表驱动**：`gui/workspace.py` 的 `TOOLS` 是工具卡片的唯一清单，新增工具需同步 TOOLS、对应 QAction、i18n 文案与 `_retranslate_ui()`
 - **`.app` 二进制即 CLI**：`PDFeverything.app/Contents/MacOS/PDFeverything merge ...` 直接运行 CLI，同一文件三种用法
 
 ## 类结构
@@ -251,7 +277,7 @@ core/search.py
 BaseConverter (ABC) → ConverterRegistry
   ├── ImageConverter (.png/.jpg/.gif/...)
   ├── TextConverter (.txt/.md/.json/...)
-  ├── WordConverter (.docx/.doc) — macOS AppleScript / Windows COM / python-docx 回退
+  ├── WordConverter (.docx/.doc/.rtf) — macOS AppleScript / Windows COM / python-docx 回退
   ├── PowerPointConverter (.pptx/.ppt) — AppleScript / COM / python-pptx 回退
   ├── ExcelConverter (.xlsx/.xls) — AppleScript / COM / openpyxl 回退
   └── PdfPassThroughConverter (.pdf) — 直通
@@ -263,6 +289,9 @@ merge_mixed_files() — 混合文件→统一 PDF 流水线
 
 ```
 MainWindow(QMainWindow)
+  ├── QTabWidget — Workspace / Reader / All tools 三空间
+  ├── WorkspaceHero / ToolLibrary / CommandPalette / HistoryDialog（gui/workspace.py）
+  ├── PdfReaderWidget — 阅读器（LRU 缓存 + 两阶段缩放 + 搜索/目录/编辑/打印）
   ├── FileListWidget — 拖拽列表 + 工具栏 + 保护层
   │     ├── MAX_FILES=200, MAX_SIZE_BYTES=500MB
   │     ├── add_files / get_file_paths / retranslate_ui
@@ -304,24 +333,29 @@ serve() — stdin/stdout JSON-RPC 主循环（initialize / tools/list / tools/ca
 每次发布新版本时，按以下步骤操作：
 
 1. **功能接线检查**（参照 `.claude/RELEASE_CHECKLIST.md`）：
-   - 新功能是否在 7 个文件中全部注册（core > CLI > main.py > MCP > GUI > i18n > README）
-   - MCP 工具计数是否与 README 一致
-   - 版本字符串是否在所有位置更新
-2. **开发日志**：在 `DEVELOPMENT_LOG.md` 末尾写入新版本条目
+   - 新功能是否在 9 处注册（core > CLI > main.py > MCP > GUI QAction > `gui/workspace.py` TOOLS > i18n > README EN/CN > docs）
+   - MCP 工具计数是否与 README EN/CN、`mcp/README.md` 一致
+   - 版本字符串是否在 `main.py` / `gui/main_window.py` / `mcp/server.py` / `PDFeverything.spec` / `installer_windows.iss` / README / README_WINDOWS / `mcp/README.md` / docs 全部更新
+2. **开发日志**：在 `DEVELOPMENT_LOG.md` 末尾写入新版本条目（遵循本文"开发日志格式规范"）
 3. **测试**：
    ```bash
+   # 七套门禁，共 522 项（见上文「测试」）
    python main.py -h                           # CLI 帮助
    python pdf_tool.py <new-command> -i test.pdf -o out   # 新命令
-   python -c "from mcp.server import TOOLS; print(len(TOOLS))"  # MCP 工具数
+   python -c "from mcp.server import TOOLS; print(len(TOOLS))"  # MCP 工具数 = 29
    ```
 4. **macOS 构建**：
    ```bash
    pyinstaller PDFeverything.spec --noconfirm --clean
    cp -R dist/PDFeverything.app . && rm -rf build
    ```
-5. **GitHub Release**：
+5. **打标签并创建 GitHub Release**：
    ```bash
+   git tag -a vX.Y.Z -m "PDFeverything vX.Y.Z"
+   git push origin vX.Y.Z
+   git rev-parse vX.Y.Z          # 必须指向发布提交（曾出现 tag 指向前一版本的情况）
    zip -r /tmp/PDFeverything_macOS_vX.Y.Z.zip PDFeverything.app/
+   shasum -a 256 /tmp/PDFeverything_macOS_vX.Y.Z.zip > /tmp/SHA256SUMS.txt
    gh release create vX.Y.Z /tmp/PDFeverything_macOS_vX.Y.Z.zip \
      --title "PDFeverything vX.Y.Z" --notes "..."
    ```
@@ -330,7 +364,9 @@ serve() — stdin/stdout JSON-RPC 主循环（initialize / tools/list / tools/ca
    gh workflow run build-windows-installer.yml
    gh run watch
    gh run download <run-id> -n PDFeverything-Setup -D /tmp/win
-   gh release upload vX.Y.Z /tmp/win/PDFeverything_Setup_vX.Y.Z.exe
+   shasum -a 256 /tmp/win/PDFeverything_Setup_vX.Y.Z.exe >> /tmp/SHA256SUMS.txt
+   gh release upload vX.Y.Z /tmp/win/PDFeverything_Setup_vX.Y.Z.exe /tmp/SHA256SUMS.txt
+   # 重新下载已上传资产，核对 SHA-256 / 大小 / uploaded 状态
    ```
    （也可以在 Windows 上本地构建：`python build_windows.py`，产物同样是
    `PDFeverything_Setup_vX.Y.Z.exe`；推 `v*` 标签会自动触发 CI）

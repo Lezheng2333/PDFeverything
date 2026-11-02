@@ -30,6 +30,11 @@ def main():
     # 打印中文进度/报错前先把 stdout 的错误处理降到 replace，否则 Windows 的
     # GUI 子系统 exe 在英文代码页下会 UnicodeEncodeError 崩掉（见 core/utils.py）。
     make_output_encoding_safe()
+    try:
+        from core.page_editor import PdfPageEditor
+        PdfPageEditor.sweep_stale_journals()
+    except Exception:
+        pass
 
     parser = argparse.ArgumentParser(
         description="PDFeverything — 合并/拆分/提取/转换/压缩/水印/加密",
@@ -296,7 +301,7 @@ def main():
             from core.search import search_pdf
 
             pages = None
-            if args.pages:
+            if args.pages and args.pages.strip().lower() not in ("all", "*", "全部", "所有"):
                 pages = parse_page_ranges(args.pages, one_based=True)
             result = search_pdf(Path(args.input), args.query,
                                 case_sensitive=args.case,
@@ -351,7 +356,8 @@ def main():
 
         elif args.command == "add-page-numbers":
             pages = (parse_page_ranges(args.pages, one_based=True)
-                     if args.pages else None)
+                     if args.pages and args.pages.strip().lower()
+                     not in ("all", "*", "全部", "所有") else None)
             count = PdfOperator.add_page_numbers(
                 Path(args.input), Path(args.output), position=args.position,
                 start_number=args.start, font_size=args.font_size,
@@ -395,6 +401,8 @@ def main():
 
         elif args.command == "info":
             info = PdfOperator.get_info(Path(args.input))
+            if not info.get("readable", True):
+                sys.exit(f"❌ 错误: {info.get('error') or '无法读取 PDF'}")
             print(f"文件: {info['path']}")
             print(f"页数: {info['pages']}")
             print(f"文件大小: {format_bytes(info['size_bytes'])}")

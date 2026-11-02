@@ -4,17 +4,83 @@ from PyQt6.QtCore import Qt, QRectF
 from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap, QPalette
 
 
-def colors(dark=False):
-    return ({"bg": "#101c17", "surface": "#192a22", "text": "#e7f0e8",
-             "muted": "#a1b4a7", "border": "#344b3d", "accent": "#b9dda8",
-             "tint": "#263d2e", "on_accent": "#173323", "hover": "#22392c"}
-            if dark else
-            {"bg": "#f3f5ef", "surface": "#ffffff", "text": "#21372c",
-             "muted": "#728176", "border": "#dde5da", "accent": "#286344",
-             "tint": "#eaf2e5", "on_accent": "#ffffff", "hover": "#f0f5ec"})
+# Three complete color schemes. Each one has a light and a dark variant with the
+# same keys, so every surface can be switched without special-casing widgets.
+PALETTES = {
+    "forest": {
+        "light": {"bg": "#f3f5ef", "surface": "#ffffff", "text": "#21372c",
+                  "muted": "#6b7a6f", "border": "#dde5da", "accent": "#286344",
+                  "tint": "#eaf2e5", "on_accent": "#ffffff", "hover": "#f0f5ec",
+                  "accent_hover": "#1d5135", "hero": "#203f2e",
+                  "hero_text": "#edf4e5", "hero_muted": "#bad4ac"},
+        "dark": {"bg": "#101c17", "surface": "#192a22", "text": "#e7f0e8",
+                 "muted": "#a1b4a7", "border": "#344b3d", "accent": "#b9dda8",
+                 "tint": "#263d2e", "on_accent": "#173323", "hover": "#22392c",
+                 "accent_hover": "#c9e9ba", "hero": "#203f2e",
+                 "hero_text": "#edf4e5", "hero_muted": "#bad4ac"},
+    },
+    "cherry": {
+        "light": {"bg": "#fbf6f5", "surface": "#ffffff", "text": "#3a2326",
+                  "muted": "#7d666a", "border": "#ecd9da", "accent": "#a63d4a",
+                  "tint": "#f9e9eb", "on_accent": "#ffffff", "hover": "#fdf1f2",
+                  "accent_hover": "#8c2f3b", "hero": "#4a2328",
+                  "hero_text": "#fff1f2", "hero_muted": "#e7b8bd"},
+        "dark": {"bg": "#1b1214", "surface": "#271a1d", "text": "#f6e8ea",
+                 "muted": "#b99ba0", "border": "#4a3035", "accent": "#f0a6b0",
+                 "tint": "#3b2428", "on_accent": "#3a1118", "hover": "#2e1c20",
+                 "accent_hover": "#ffc2ca", "hero": "#3a1a1f",
+                 "hero_text": "#fff1f2", "hero_muted": "#d9a0a7"},
+    },
+    "florence": {
+        "light": {"bg": "#f3f7fa", "surface": "#ffffff", "text": "#1d2f3b",
+                  "muted": "#617686", "border": "#d8e4ec", "accent": "#2b5d7d",
+                  "tint": "#e8f2f8", "on_accent": "#ffffff", "hover": "#f0f7fb",
+                  "accent_hover": "#234c68", "hero": "#1e3448",
+                  "hero_text": "#eef6fb", "hero_muted": "#b5cbda"},
+        "dark": {"bg": "#0f1921", "surface": "#172630", "text": "#e8f1f7",
+                 "muted": "#9fb4c3", "border": "#2e4656", "accent": "#8fc4e8",
+                 "tint": "#20333f", "on_accent": "#11293a", "hover": "#1a2b37",
+                 "accent_hover": "#b7ddf8", "hero": "#162a3a",
+                 "hero_text": "#eef6fb", "hero_muted": "#a8c0d1"},
+    },
+}
+
+SCHEMES = tuple(PALETTES)
+DEFAULT_SCHEME = "forest"
+
+_DARK = False
+_SCHEME = DEFAULT_SCHEME
 
 
-def file_icon(label="PDF", color="#286344", size=40):
+def normalize_scheme(scheme):
+    return scheme if scheme in PALETTES else DEFAULT_SCHEME
+
+
+def set_active(dark=False, scheme=None):
+    """Remember the active pair so paint code and late-created widgets agree."""
+    global _DARK, _SCHEME
+    _DARK = bool(dark)
+    _SCHEME = normalize_scheme(scheme if scheme is not None else _SCHEME)
+
+
+def current_scheme():
+    return _SCHEME
+
+
+def current_dark():
+    return _DARK
+
+
+def colors(dark=None, scheme=None):
+    """Return the palette for the requested (or currently active) theme."""
+    use_dark = _DARK if dark is None else bool(dark)
+    use_scheme = normalize_scheme(scheme if scheme is not None else _SCHEME)
+    return dict(PALETTES[use_scheme]["dark" if use_dark else "light"])
+
+
+def file_icon(label="PDF", color=None, size=40):
+    if color is None:
+        color = colors()["accent"]
     pix = QPixmap(size * 2, size * 2)
     pix.fill(Qt.GlobalColor.transparent)
     pix.setDevicePixelRatio(2)
@@ -30,8 +96,8 @@ def file_icon(label="PDF", color="#286344", size=40):
     return QIcon(pix)
 
 
-def stylesheet(dark=False):
-    c = colors(dark)
+def stylesheet(dark=False, scheme=None):
+    c = colors(dark, scheme)
     return f"""
     QWidget {{ color:{c['text']}; font-family:'SF Pro Text','PingFang SC','Microsoft YaHei','Arial'; font-size:13px; }}
     QMainWindow, QDialog {{ background:{c['bg']}; }}
@@ -56,7 +122,7 @@ def stylesheet(dark=False):
     QPushButton:disabled {{ color:{c['muted']}; background:{c['bg']}; border-color:{c['border']}; }}
     QPushButton:focus, QToolButton:focus {{ border:1px solid {c['accent']}; }}
     QPushButton#primary {{ background:{c['accent']}; color:{c['on_accent']}; border:none; font-weight:600; padding:12px 18px; }}
-    QPushButton#primary:hover {{ background:{'#c9e9ba' if dark else '#1d5135'}; }}
+    QPushButton#primary:hover {{ background:{c['accent_hover']}; }}
     QPushButton#primary:disabled {{ background:{c['border']}; color:{c['muted']}; }}
     QPushButton#quiet {{ background:transparent; border:none; color:{c['muted']}; }}
     QPushButton#quiet:hover {{ background:{c['tint']}; color:{c['accent']}; }}
@@ -96,8 +162,9 @@ def stylesheet(dark=False):
     """
 
 
-def apply_theme(app, dark=False):
-    c = colors(dark)
+def apply_theme(app, dark=False, scheme=None):
+    set_active(dark, scheme)
+    c = colors(dark, scheme)
     palette = QPalette()
     for role, key in ((QPalette.ColorRole.Window, "bg"),
                       (QPalette.ColorRole.WindowText, "text"),
@@ -110,4 +177,4 @@ def apply_theme(app, dark=False):
                       (QPalette.ColorRole.HighlightedText, "on_accent")):
         palette.setColor(role, QColor(c[key]))
     app.setPalette(palette)
-    app.setStyleSheet(stylesheet(dark))
+    app.setStyleSheet(stylesheet(dark, scheme))

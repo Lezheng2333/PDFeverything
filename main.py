@@ -114,7 +114,7 @@ Subsequent runs in the same session are instant.
 """
 
 
-VERSION = "2.0.0"
+VERSION = "2.0.1"
 PROJECT_DIR = Path(__file__).parent.resolve()
 _DARK_MODE = False  # set by launch_gui before any GUI widgets are created
 
@@ -207,6 +207,11 @@ _THEME = {
 def launch_gui(open_files=None):
     from PyQt6.QtWidgets import QApplication
     from PyQt6.QtGui import QIcon, QPalette, QColor
+    try:
+        from core.page_editor import PdfPageEditor
+        PdfPageEditor.sweep_stale_journals()
+    except Exception:
+        pass
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
 

@@ -2,6 +2,8 @@
 import sys, time
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent))
+import settings_isolation  # noqa: F401  (isolates QSettings before GUI imports)
 
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt, QTimer

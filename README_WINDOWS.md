@@ -3,6 +3,8 @@
 Builds two artifacts on Windows: the payload **`PDFeverything.exe`** (single-file,
 no-install) and the **installer** `PDFeverything_Setup_v<version>.exe` that ships to users.
 
+Current source version: **2.0.1** (read from `VERSION` in `main.py`).
+
 ## Prerequisites
 
 - **Windows 10/11 64-bit**
@@ -59,7 +61,8 @@ produced.
 ## CI Build (no Windows machine needed)
 
 `.github/workflows/build-windows-installer.yml` runs the same pipeline on a
-`windows-latest` runner and uploads the installer as a build artifact.
+`windows-latest` runner and uploads the installer as a build artifact. It runs the
+core (97) and Studio (25) suites before packaging.
 
 ```bash
 gh workflow run build-windows-installer.yml
@@ -71,7 +74,7 @@ It also runs automatically when a `v*` tag is pushed. The version number is read
 `VERSION` in `main.py` unless you pass one:
 
 ```bash
-gh workflow run build-windows-installer.yml -f version=2.0.0
+gh workflow run build-windows-installer.yml -f version=2.0.1
 ```
 
 ## Troubleshooting
@@ -90,6 +93,8 @@ gh workflow run build-windows-installer.yml -f version=2.0.0
 
 在 Windows 上构建两样东西：载荷 **`PDFeverything.exe`**（单文件免安装版）和分发给
 用户的**安装包** `PDFeverything_Setup_v<版本>.exe`。
+
+当前源码版本：**2.0.1**（读取 `main.py` 的 `VERSION`）。
 
 ## 前置条件
 
@@ -144,7 +149,7 @@ MCP 配置所写的路径。向导首页仍可切换成「仅为我安装」。
 ## CI 构建（不需要 Windows 机器）
 
 `.github/workflows/build-windows-installer.yml` 在 `windows-latest` 跑同一条流水线，
-把安装包作为构建产物上传。
+把安装包作为构建产物上传。打包前会先跑核心（97 项）与 Studio（25 项）套件。
 
 ```bash
 gh workflow run build-windows-installer.yml
@@ -155,7 +160,7 @@ gh run download <run-id> -n PDFeverything-Setup -D /tmp/win
 推 `v*` 标签时也会自动触发。版本号默认读 `main.py` 里的 `VERSION`，也可以指定：
 
 ```bash
-gh workflow run build-windows-installer.yml -f version=2.0.0
+gh workflow run build-windows-installer.yml -f version=2.0.1
 ```
 
 ## 常见问题

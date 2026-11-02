@@ -137,8 +137,8 @@ app = BUNDLE(
         "NSHighResolutionCapable": True,
         "CFBundleName": "PDFeverything",
         "CFBundleDisplayName": "PDFeverything",
-        "CFBundleShortVersionString": "2.0.0",
-        "CFBundleVersion": "2.0.0",
+        "CFBundleShortVersionString": "2.0.1",
+        "CFBundleVersion": "2.0.1",
         "CFBundleDocumentTypes": [
             {
                 "CFBundleTypeName": "PDF Document",

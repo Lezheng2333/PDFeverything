@@ -48,14 +48,14 @@ from .dialogs import (
     WatermarkDialog,
 )
 from .file_list_widget import FileListWidget
-from .i18n import tr, set_language, current_language
+from .i18n import tr, set_language, current_language, app_settings
 from .pdf_reader_widget import PdfReaderWidget
 from .workers import BaseWorker
-from .theme import apply_theme, colors
+from .theme import SCHEMES, apply_theme, colors, normalize_scheme
 from .workspace import WorkspaceHero, ToolLibrary, CommandPalette, HistoryDialog, clean_title, label
 
 
-VERSION = "2.0.0"
+VERSION = "2.0.1"
 
 
 class MainWindow(QMainWindow):
@@ -65,11 +65,12 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._worker: Optional[QThread] = None
         self._office_probe = None
-        self._settings = QSettings("PDFeverything", "PDFeverything")
+        self._settings = app_settings()
         from . import pdf_reader_widget as reader_module
         self._dark = self._settings.value("studio_dark", reader_module._DARK, type=bool)
+        self._scheme = normalize_scheme(self._settings.value("studio_scheme", "forest"))
         reader_module._DARK = self._dark
-        apply_theme(QApplication.instance(), self._dark)
+        apply_theme(QApplication.instance(), self._dark, self._scheme)
         self._last_output = None
         self._job_output = None
         self._busy = False
@@ -136,10 +137,33 @@ class MainWindow(QMainWindow):
         self._settings.setValue("studio_dark", self._dark)
         from . import pdf_reader_widget as reader_module
         reader_module._DARK = self._dark
-        apply_theme(QApplication.instance(), self._dark)
+        apply_theme(QApplication.instance(), self._dark, self._scheme)
         self._style_reader()
+        self.reader.refresh_theme()
+        self.hero.apply_theme()
+        self.tool_library.apply_theme()
         self.file_list.list_widget.viewport().update()
         if not self.reader.has_document(): self.reader._show_welcome()
+
+    def _switch_scheme(self, scheme: str):
+        scheme = normalize_scheme(scheme)
+        if scheme == self._scheme:
+            self._update_scheme_check()
+            return
+        self._scheme = scheme
+        self._settings.setValue("studio_scheme", scheme)
+        apply_theme(QApplication.instance(), self._dark, self._scheme)
+        self._style_reader()
+        self.reader.refresh_theme()
+        self.hero.apply_theme()
+        self.tool_library.apply_theme()
+        self.file_list.list_widget.viewport().update()
+        if not self.reader.has_document(): self.reader._show_welcome()
+        self._update_scheme_check()
+
+    def _update_scheme_check(self):
+        for key, action in getattr(self, "scheme_actions", {}).items():
+            action.setChecked(key == self._scheme)
 
     def _style_reader(self):
         # Remove legacy local styles so all reader controls share the design system.
@@ -221,6 +245,15 @@ class MainWindow(QMainWindow):
         self.act_lang_en.setCheckable(True)
         self._update_lang_check()
 
+        self.menu_scheme = self.menu_settings.addMenu(tr("menu_color_scheme"))
+        self.scheme_actions = {}
+        for key in SCHEMES:
+            action = self.menu_scheme.addAction(
+                tr(f"theme_{key}"), lambda checked=False, k=key: self._switch_scheme(k))
+            action.setCheckable(True)
+            self.scheme_actions[key] = action
+        self._update_scheme_check()
+
         self.menu_help = mb.addMenu(tr("menu_help"))
         self.act_about = self.menu_help.addAction(tr("menu_about"), self._on_about)
 
@@ -245,6 +278,9 @@ class MainWindow(QMainWindow):
         self.btn_theme.setToolTip(tr("studio_theme"))
         self.btn_history.setToolTip(tr("history_title"))
         self.act_dpi.setText(tr("settings_dpi"))
+        self.menu_scheme.setTitle(tr("menu_color_scheme"))
+        for key, action in self.scheme_actions.items():
+            action.setText(tr(f"theme_{key}"))
         self.btn_open.setText(tr("studio_open"))
         self.act_commands.setText(tr("studio_commands"))
         self.btn_result_open.setText(tr("studio_result_open"))
@@ -337,6 +373,7 @@ class MainWindow(QMainWindow):
         self.reader.btn_search_prev.setToolTip(tr("reader_search_prev"))
         self.reader.btn_search_next.setToolTip(tr("reader_search_next"))
         self.reader.btn_search_close.setToolTip(tr("reader_search_close"))
+        self.reader.refresh_search_status()
         if not self.reader._outline_entries:
             self.reader._update_outline_placeholder()
         # Reader edit toolbar
@@ -638,7 +675,8 @@ class MainWindow(QMainWindow):
         # The counter text comes from i18n so it follows the UI language, and the
         # label is used as-is (it already carries its own icon).
         if has_files:
-            self.btn_merge.setText(tr("studio_merge_action", count=len(paths)))
+            merge_count = len(selected) if selected else len(paths)
+            self.btn_merge.setText(tr("studio_merge_action", count=merge_count))
         else:
             self.btn_merge.setText(tr("btn_merge_unified"))
         self.btn_merge.setText(clean_title(self.btn_merge.text()))
@@ -821,7 +859,9 @@ class MainWindow(QMainWindow):
     # ── Action handlers ──────────────────────────────
 
     def _on_merge_clicked(self):
-        paths = self.file_list.get_file_paths()
+        selected = self.file_list.list_widget.selectedItems()
+        paths = ([item.data(Qt.ItemDataRole.UserRole) for item in selected]
+                 if selected else self.file_list.get_file_paths())
         if not paths:
             QMessageBox.warning(self, tr("msg_op_failed"), tr("msg_no_files"))
             return
