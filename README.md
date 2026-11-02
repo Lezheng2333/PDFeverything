@@ -91,6 +91,10 @@ vector artwork, and a calmer layout built around the way you work.
 
 ![Studio dark theme](docs/studio-dark.png)
 
+![Warm cherry theme](docs/studio-cherry.png)
+
+![Florence blue theme](docs/studio-florence.png)
+
 </details>
 
 ## 🧾 Older release — v1.9.0
@@ -535,6 +539,10 @@ MIT — do whatever you want with it. [LICENSE](resources/LICENSE.txt)
 ![阅读欢迎页](docs/studio-welcome.png)
 
 ![暗色主题](docs/studio-dark.png)
+
+![暖樱红主题](docs/studio-cherry.png)
+
+![翡冷翠蓝主题](docs/studio-florence.png)
 
 </details>
 

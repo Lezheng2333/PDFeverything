@@ -62,7 +62,7 @@ produced.
 
 `.github/workflows/build-windows-installer.yml` runs the same pipeline on a
 `windows-latest` runner and uploads the installer as a build artifact. It runs the
-core (97) and Studio (25) suites before packaging.
+core (97) and Studio (25) suites before packaging, then smoke-tests the frozen exe (help, info, merge, encrypt and decrypt).
 
 ```bash
 gh workflow run build-windows-installer.yml
@@ -149,7 +149,7 @@ MCP 配置所写的路径。向导首页仍可切换成「仅为我安装」。
 ## CI 构建（不需要 Windows 机器）
 
 `.github/workflows/build-windows-installer.yml` 在 `windows-latest` 跑同一条流水线，
-把安装包作为构建产物上传。打包前会先跑核心（97 项）与 Studio（25 项）套件。
+把安装包作为构建产物上传。打包前会先跑核心（97 项）与 Studio（25 项）套件，构建后对冻结 exe 冒烟测试帮助、info、合并、加密与解密。
 
 ```bash
 gh workflow run build-windows-installer.yml

@@ -871,6 +871,9 @@ Ver 2.0.1 | 2026-11-02 — 三套配色与全面加固
   - Windows COM 改用 DispatchEx 独立实例，避免关闭用户正在使用的 Word/PowerPoint/Excel 并丢失未保存文档。
   - 测试：新增主题、合并选择、排序选择、阅读器语言状态、打印页序、压缩图片、旧格式报错与 AppleScript argv 回归，全套 522 项。
   - 文档：README 双语、README_WINDOWS、mcp/README、CLAUDE 与验收记录同步 2.0.1；新增 docs/RELEASE_QA_2.0.1.md。
+  - Windows CI 41449723436 全部通过：97 核心 + 25 Studio、exe/Inno 安装器构建、冻结 help/info/merge/encrypt/decrypt 冒烟测试。
+  - 发布：GitHub Release v2.0.1 已公开并设为 Latest；macOS zip 73,156,388 bytes、Windows 安装包 97,724,211 bytes、SHA256SUMS.txt 194 bytes；服务端 SHA-256/大小/uploaded 状态已核对。
+  - 运行时代码目标 9320be5f9816e80fe8613de4da5ae157a0244793（v2.0.1 标签）。
   - BUGFIX: 压缩 medium/max 把 zlib 数据写入 /DCTDecode 流导致图片无法解码；改为 JPEG 原始流并区分 DeviceRGB/DeviceGray。
   - BUGFIX: MCP 在 Windows cp1252 stdout 下输出中文会 UnicodeEncodeError 退出；改为 ensure_ascii=True 并尝试把 stdin/stdout 重配为 UTF-8。
   - BUGFIX: CLI/MCP 的 search 与 add-page-numbers 把 "pages: all" 解析成空列表；现在按全部页面处理。
