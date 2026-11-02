@@ -372,19 +372,19 @@ class WordConverter(BaseConverter):
         def write_line(text, fontsize=11, bold=False, indent=0):
             nonlocal y
             x = margin + indent
-            if y + line_height + 2 > rect.height - margin:
-                new_page()
-                x = margin + indent
-            current_page = pdf[-1]
-            if _has_cjk(text):
-                # Base-14 fonts cannot encode CJK — use the built-in CJK font so
-                # Chinese/Japanese/Korean text survives instead of becoming dots.
-                _draw_text_block(current_page, x, y, [text], fontsize)
-            else:
-                font = "Helvetica-Bold" if bold else "Helvetica"
-                current_page.insert_text(fitz.Point(x, y), text,
-                                         fontsize=fontsize, fontname=font)
-            y += line_height + 2
+            font = _text_font(text) if _has_cjk(text) else fitz.Font("hebo" if bold else "helv")
+            step = max(line_height + 2, fontsize * 1.4)
+            for logical_line in text.splitlines() or [""]:
+                for chunk in _wrap_by_width(logical_line, font, fontsize, usable_width - indent):
+                    if y + step > rect.height - margin:
+                        new_page()
+                    current_page = pdf[-1]
+                    if _has_cjk(chunk):
+                        _draw_text_block(current_page, x, y, [chunk], fontsize)
+                    else:
+                        current_page.insert_text(fitz.Point(x, y), chunk, fontsize=fontsize,
+                                                 fontname="Helvetica-Bold" if bold else "Helvetica")
+                    y += step
 
         def insert_image_blob(image_blob, max_width=None, max_height=400):
             """将图片数据插入 PDF 当前页面，返回图片高度。"""
@@ -470,14 +470,9 @@ class WordConverter(BaseConverter):
 
             is_list = para.style.name.startswith("List") or text.startswith(("•", "-", "*", "·"))
 
-            runs = para.runs
-            if runs:
-                for run in runs:
-                    if run.text.strip():
-                        write_line(run.text.strip(), fontsize=11 if not is_list else 10,
-                                   bold=run.bold or False, indent=indent)
-            else:
-                write_line(text, fontsize=11 if not is_list else 10, indent=indent)
+            runs = [run for run in para.runs if run.text.strip()]
+            write_line(text, fontsize=11 if not is_list else 10,
+                       bold=bool(runs) and all(run.bold for run in runs), indent=indent)
 
         # ── 表格 ──
         for table in doc.tables:
@@ -486,9 +481,6 @@ class WordConverter(BaseConverter):
             for row in table.rows:
                 cells = [cell.text.replace("\n", " ") for cell in row.cells]
                 row_text = " | ".join(cells)
-                max_chars = int(usable_width / 6.5)
-                if len(row_text) > max_chars:
-                    row_text = row_text[:max_chars - 3] + "..."
                 write_line(row_text, fontsize=8, bold=False)
             y += 4
 

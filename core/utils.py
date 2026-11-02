@@ -258,18 +258,30 @@ def _check_office_windows() -> dict:
     result = {"word": False, "powerpoint": False, "excel": False}
     try:
         import win32com.client
-        for prog_id, key in [("Word.Application", "word"),
-                              ("PowerPoint.Application", "powerpoint"),
-                              ("Excel.Application", "excel")]:
-            try:
-                app = win32com.client.Dispatch(prog_id)
-                ver = app.Version  # noqa: F841 — probe that it works
-                app.Quit()
-                result[key] = True
-            except Exception:
-                result[key] = False
+        import pythoncom
+        pythoncom.CoInitialize()
+        try:
+            return _probe_office_com(win32com.client)
+        finally:
+            pythoncom.CoUninitialize()
     except ImportError:
-        pass  # pywin32 not installed
+        return result
+
+
+def _probe_office_com(client) -> dict:
+    result = {"word": False, "powerpoint": False, "excel": False}
+    for prog_id, key in [("Word.Application", "word"),
+                         ("PowerPoint.Application", "powerpoint"),
+                         ("Excel.Application", "excel")]:
+        try:
+            # An independent automation instance must never quit the user's open Office session.
+            app = client.DispatchEx(prog_id)
+            try:
+                result[key] = bool(app.Version)
+            finally:
+                app.Quit()
+        except Exception:
+            result[key] = False
     return result
 
 
@@ -277,6 +289,11 @@ def set_office_cache(result: dict) -> None:
     """Publish a probe result (used by the GUI's background probe thread)."""
     global _office_cache
     _office_cache = result
+
+
+def get_office_cache() -> Optional[dict]:
+    """Read the last probe result without launching Office or blocking the UI."""
+    return _office_cache
 
 
 def check_office_availability(use_cache: bool = True) -> dict:

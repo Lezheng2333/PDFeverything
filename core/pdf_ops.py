@@ -1203,9 +1203,12 @@ class PdfOperator:
                     img_path = Path(tmpdir) / f"slide{pi+1:05d}.png"
                     page.get_pixmap(dpi=dpi).save(str(img_path))
                     slide = prs.slides.add_slide(prs.slide_layouts[6])  # blank
+                    scale = min(prs.slide_width / page.rect.width,
+                                prs.slide_height / page.rect.height)
+                    width, height = int(page.rect.width * scale), int(page.rect.height * scale)
                     slide.shapes.add_picture(
-                        str(img_path), PptInches(0), PptInches(0),
-                        width=prs.slide_width, height=prs.slide_height)
+                        str(img_path), (prs.slide_width - width) // 2,
+                        (prs.slide_height - height) // 2, width=width, height=height)
         finally:
             doc.close()
 

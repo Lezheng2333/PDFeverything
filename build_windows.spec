@@ -19,6 +19,7 @@ for mod in ('fitz', 'PIL'):
         pass
 
 hiddenimports = [
+    "PyQt6.QtPrintSupport",
     "PyQt6.QtCore", "PyQt6.QtGui", "PyQt6.QtWidgets", "PyQt6.sip",
     "pypdf", "pypdf.generic", "pypdf.filters",
     "pikepdf", "pikepdf._core", "pikepdf.models",

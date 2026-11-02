@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/Lezheng2333/PDFeverything/releases"><img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-blue?style=flat-square" /></a>
-  <a href="https://github.com/Lezheng2333/PDFeverything/releases/latest"><img src="https://img.shields.io/badge/version-v1.9.0-007aff?style=flat-square" /></a>
+  <a href="https://github.com/Lezheng2333/PDFeverything/releases/latest"><img src="https://img.shields.io/badge/version-v2.0.0-007aff?style=flat-square" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" /></a>
 </p>
 
@@ -31,12 +31,49 @@ Drag everything in — any combination of PDFs, Word documents, PowerPoint decks
 | Platform | Download |
 |---|---|
 | 🍎 macOS (Apple Silicon) | [`PDFeverything_macOS.zip`](https://github.com/Lezheng2333/PDFeverything/releases/latest) |
-| 🪟 Windows 10/11 (64-bit) | [`PDFeverything_Setup_v1.9.0.exe`](https://github.com/Lezheng2333/PDFeverything/releases/latest) |
+| 🪟 Windows 10/11 (64-bit) | [`PDFeverything_Setup_v2.0.0.exe`](https://github.com/Lezheng2333/PDFeverything/releases/latest) |
 
 > 🔗 [**Latest Release →**](https://github.com/Lezheng2333/PDFeverything/releases/latest)
 >
 > 🪟 The Windows download is an **installer** — bilingual wizard, licence page, Start Menu
 > entry, optional desktop shortcut and a standard uninstaller. No Python required.
+
+## Studio 2.0 — a new document workspace
+
+A complete native desktop redesign: warm neutrals, forest green, a live light/dark theme,
+vector artwork, and a calmer layout built around the way you work.
+
+![PDFeverything Studio workspace](docs/studio-workspace.png)
+
+- **Workspace** — drop mixed files, inspect format/size/pages, reorder, and combine.
+- **Tool library** — 18 searchable tools in four categories, with bilingual search.
+- **Quick actions** — press **⌘/Ctrl+K**, type a tool, then Enter to run it.
+- **Reader** — a new welcome screen, recent documents, page-number click to jump,
+  and the existing fast search, contents, grid editing, and reading-position memory.
+- **Finish the workflow** — open a completed PDF in the reader or jump to its folder.
+- **Correctness fixes** — compression respects the chosen level; PDF tools respect
+  selected files; native file reordering works; cancelled Save As keeps edits open;
+  a failed document open preserves the current document; Office detection stays off the UI thread.
+
+**Studio 2.0 release:** download the macOS Apple Silicon app or the Windows 10/11
+installer from the [release page](https://github.com/Lezheng2333/PDFeverything/releases/tag/v2.0.0).
+
+- **Queue upgrades** — import folders, naturally sort filenames, and move multiple selected files together.
+- **Activity history** — reopen results from the last 30 jobs; clear the history whenever you like.
+- **Native printing** — choose a system printer and print selected PDF pages with their proportions preserved.
+- **Conversion quality** — Word fallback paragraphs wrap by measured width; portrait PDFs keep their aspect ratio in PowerPoint.
+- **Safer batch work** — existing output files are preserved with numbered names; image export DPI is configurable in Settings.
+
+```bash
+.venv/bin/python main.py
+QT_QPA_PLATFORM=offscreen .venv/bin/python tests/test_studio.py
+```
+
+<details><summary>Tool library preview</summary>
+
+![Searchable PDF tools](docs/studio-tools.png)
+
+</details>
 
 ## 🆕 What's New in v1.9.0
 
@@ -177,29 +214,13 @@ A high-performance PDF reader with **vector-grade rendering** — rivaling Acrob
 
 ## 🖥️ The GUI
 
-```
-┌──────────────────────────────────────────────┐
-│  📄 doc.pdf        [🔼] [🔽] [✖]            │
-│  📊 data.xlsx      [🔼] [🔽] [✖]            │
-│  🖼️ photo.jpg      [🔼] [🔽] [✖]            │
-│  📝 report.docx    [🔼] [🔽] [✖]            │
-│                                              │
-│  ── drag & drop files here ──               │
-│                                              │
-│  [🔀 Merge All →]       [✂️ Split...]        │
-│  [🗜️ Compress...]       [💧 Watermark...]    │
-│  [🔒 Encrypt...]        [🔄 Rotate...]       │
-│                                              │
-│  ████████████░░░░░░  78%                     │
-│  Converting: report.docx (3/5)...            │
-└──────────────────────────────────────────────┘
-```
+Three focused spaces: **Workspace**, **Reader**, and **All tools**. Drag files into the
+workspace, arrange their order, then merge. Choose PDFs in the queue to target an
+operation; with no selection, PDF tools process all queued PDFs. The tool library and
+⌘/Ctrl+K quick actions make conversion, extraction, security, and page composition easy to find.
 
-- 🖱️ **Drag & drop** files from Finder / Explorer
-- 🔄 **Reorder** with arrow buttons or by dragging inside the list
-- ⚡ **Multi-threaded** — never freezes, always shows progress
-- 🧠 **Smart buttons** — the UI adapts to what's in your file list
-- 🌐 **Bilingual UI** — switch between Chinese and English (Settings > Language)
+Switch language with **EN / ZH** and appearance with **◐**. Both choices are remembered.
+Documents are processed locally, and the interface remains responsive while jobs run.
 
 ## 🤖 AI Agent Integration (MCP Server)
 
@@ -334,7 +355,7 @@ python mcp/server.py
 **Windows** (installer + portable exe, needs [Inno Setup 6](https://jrsoftware.org/isdl.php)):
 ```bash
 python build_windows.py
-# → PDFeverything_Setup_v1.9.0.exe   installer (copied to the project root)
+# → PDFeverything_Setup_v2.0.0.exe   installer (copied to the project root)
 # → dist/PDFeverything.exe           portable payload, no install
 ```
 
@@ -345,6 +366,8 @@ pyinstaller PDFeverything.spec --noconfirm --clean
 ```
 
 ## 🧪 Testing
+
+Studio 2.0 adds **20 workflow regressions** (`tests/test_studio.py`), bringing the full suite to **513 checks**.
 
 Three gates run on every release, plus two adversarial suites added in v1.9.0:
 
@@ -497,30 +520,22 @@ MIT — do whatever you want with it. [LICENSE](resources/LICENSE.txt)
   性能/临时文件卫生）与 `tests/qa_reader_defects.py`（37 项阅读器回归，每个缺陷一项）。
   全套件：**93 核心 + 70 GUI + 38 阅读器 + 85 阅读器综合 + 37 阅读器缺陷 + 170 对抗 = 493 项**。
 
-### 🖥️ 界面预览
+### 🆕 Studio 2.0：全新文档工作台
 
-```
-┌──────────────────────────────────────────────┐
-│  📄 doc.pdf        [🔼] [🔽] [✖]            │
-│  📊 data.xlsx      [🔼] [🔽] [✖]            │
-│  🖼️ photo.jpg      [🔼] [🔽] [✖]            │
-│  📝 report.docx    [🔼] [🔽] [✖]            │
-│                                              │
-│  ── 拖放文件到此处 ──                        │
-│                                              │
-│  [🔀 合并为统一 PDF]   [✂️ 拆分...]          │
-│  [🗜️ 压缩...]        [💧 水印...]          │
-│  [🔒 加密...]        [🔄 旋转...]           │
-│                                              │
-│  ████████████░░░░░░  78%                     │
-│  转换中: 报告.docx (3/5)...                  │
-└──────────────────────────────────────────────┘
-```
+![Studio 文档工作台](docs/studio-workspace.png)
 
-- 🖱️ 从资源管理器/Finder **拖放**文件
-- 🔄 用按钮或拖动**调整顺序**
-- ⚡ **多线程**处理 — 界面永不卡顿，实时进度条
-- 🧠 **智能按钮** — 根据文件列表内容自动变化
+- **全新视觉**：暖白与森林绿、原生矢量插画、统一组件、中英双语、即时明暗切换。
+- **文件队列**：格式标识、大小、页数与顺序编号；支持混合导入、拖拽排序、双击阅读。
+- **工具中心**：18 项工具，按整理、转换、提取、优化分类；可用中英文搜索。
+- **快捷命令**：⌘/Ctrl+K 打开，输入关键词，方向键选择、Enter 执行。
+- **阅读体验**：最近文档、点击页码跳转、全文搜索、目录、网格编辑与阅读位置记忆。
+- **处理闭环**：完成后直接打开结果或所在文件夹；工具优先处理选中的 PDF。
+- **关键修复**：压缩档位正确生效；取消另存为保留编辑；打开坏文件保留原文档；Office 后台检测。
+
+**Studio 2.0** 提供 macOS Apple Silicon 应用及 Windows 10/11 安装包，见上方下载入口。
+第二轮迭代新增文件夹导入、多选移动、自然排序、30 条处理历史、真正的系统打印与可配置导出分辨率。
+批量输出自动避让重名，Word 降级转换按实际字宽折行，PDF 转 PowerPoint 保持原始页面比例。
+新增回归套件：`QT_QPA_PLATFORM=offscreen .venv/bin/python tests/test_studio.py`。
 
 ### 🤖 AI Agent 集成（MCP 服务器）
 
@@ -638,7 +653,7 @@ python pdf_tool.py info -i document.pdf   # CLI 模式
 **Windows**（安装包 + 便携版 exe，需要 [Inno Setup 6](https://jrsoftware.org/isdl.php)）:
 ```bash
 python build_windows.py
-# → PDFeverything_Setup_v1.9.0.exe   安装包（同时复制到项目根目录）
+# → PDFeverything_Setup_v2.0.0.exe   安装包（同时复制到项目根目录）
 # → dist/PDFeverything.exe           便携版载荷，免安装
 ```
 
@@ -649,6 +664,8 @@ pyinstaller PDFeverything.spec --noconfirm --clean
 ```
 
 ### 🧪 测试
+
+Studio 2.0 新增 `tests/test_studio.py` 的 **20 项工作流回归**，全套共 **513 项**。
 
 发布前跑三个门禁套件，v1.9.0 起再加两个对抗性套件：
 

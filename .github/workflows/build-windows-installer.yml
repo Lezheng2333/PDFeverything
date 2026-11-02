@@ -86,6 +86,11 @@ jobs:
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_tests }}
         run: python tests/test_core.py
 
+      - name: Studio workflow and print-engine regression tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests/test_studio.py
+
       - name: Build exe and installer
         run: python build_windows.py --skip-deps
 
@@ -113,6 +118,8 @@ jobs:
           #    的话只有到这里才会暴露）
           python -c "import fitz; d = fitz.open(); d.new_page(); d.save('ci_fixture.pdf')"
           Invoke-Pdfe $exe @("info", "-i", "ci_fixture.pdf") "pdf info"
+          Invoke-Pdfe $exe @("merge", "-i", "ci_fixture.pdf", "ci_fixture.pdf", "-o", "ci_merged.pdf") "pdf merge"
+          python -c "import fitz; d=fitz.open('ci_merged.pdf'); assert len(d)==2, len(d); d.close()"
 
       - name: Verify installer
         shell: pwsh

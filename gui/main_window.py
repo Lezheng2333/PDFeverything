@@ -3,12 +3,13 @@
 from pathlib import Path
 from typing import List, Optional
 
-from PyQt6.QtCore import QSettings, Qt, QThread, QTimer
-from PyQt6.QtGui import QCloseEvent, QDragEnterEvent, QDropEvent
+from PyQt6.QtCore import QSettings, Qt, QThread, QTimer, QUrl, QObject, pyqtSignal
+from PyQt6.QtGui import QCloseEvent, QDragEnterEvent, QDropEvent, QDesktopServices
 from PyQt6.QtWidgets import (
     QFileDialog,
     QInputDialog,
     QGroupBox,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -21,6 +22,7 @@ from PyQt6.QtWidgets import (
     QTabWidget,
     QVBoxLayout,
     QWidget,
+    QApplication,
 )
 
 from core.merger import merge_mixed_files
@@ -31,6 +33,7 @@ from core.utils import (
     filter_by_category,
     format_bytes,
     get_file_category,
+    get_office_cache,
 )
 
 from .dialogs import (
@@ -48,14 +51,11 @@ from .file_list_widget import FileListWidget
 from .i18n import tr, set_language, current_language
 from .pdf_reader_widget import PdfReaderWidget
 from .workers import BaseWorker
+from .theme import apply_theme, colors
+from .workspace import WorkspaceHero, ToolLibrary, CommandPalette, HistoryDialog, clean_title, label
 
 
-VERSION = "1.9.0"
-
-
-def _dc(dark, light):
-    from . import pdf_reader_widget as _rw
-    return dark if _rw._DARK else light
+VERSION = "2.0.0"
 
 
 class MainWindow(QMainWindow):
@@ -64,8 +64,15 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self._worker: Optional[QThread] = None
-        self._office_worker: Optional[QThread] = None
+        self._office_probe = None
         self._settings = QSettings("PDFeverything", "PDFeverything")
+        from . import pdf_reader_widget as reader_module
+        self._dark = self._settings.value("studio_dark", reader_module._DARK, type=bool)
+        reader_module._DARK = self._dark
+        apply_theme(QApplication.instance(), self._dark)
+        self._last_output = None
+        self._job_output = None
+        self._busy = False
         self._init_ui()
         self._restore_geometry()
         self._start_office_probe()
@@ -74,11 +81,35 @@ class MainWindow(QMainWindow):
 
     def _init_ui(self):
         self.setWindowTitle(tr("window_title"))
-        self.setMinimumSize(900, 600)
+        self.setMinimumSize(940, 700)
+        self.resize(1180, 860)
 
         central = QWidget()
+        central.setObjectName("app_central")
         self.setCentralWidget(central)
         main_layout = QVBoxLayout(central)
+        main_layout.setContentsMargins(24, 18, 24, 12)
+        main_layout.setSpacing(14)
+        header = QHBoxLayout(); header.setSpacing(12)
+        mark = label("P/", "brand_mark"); mark.setFixedSize(44, 44)
+        mark.setAlignment(Qt.AlignmentFlag.AlignCenter); header.addWidget(mark)
+        brand = QVBoxLayout(); brand.setSpacing(1)
+        brand.addWidget(label("PDFeverything", "brand"))
+        brand.addWidget(label("DOCUMENT STUDIO  /  2.0", "edition")); header.addLayout(brand)
+        header.addStretch()
+        self.btn_commands = QPushButton(); self.btn_commands.setObjectName("command")
+        self.btn_commands.setMinimumWidth(210); self.btn_commands.clicked.connect(self._show_commands)
+        header.addWidget(self.btn_commands)
+        self.btn_history = QPushButton("↺"); self.btn_history.setFixedWidth(38)
+        self.btn_history.clicked.connect(lambda: HistoryDialog(self).exec()); header.addWidget(self.btn_history)
+        self.btn_language = QPushButton(); self.btn_language.setObjectName("quiet")
+        self.btn_language.clicked.connect(lambda: self._switch_language("en" if current_language() == "zh" else "zh"))
+        header.addWidget(self.btn_language)
+        self.btn_theme = QPushButton("◐"); self.btn_theme.setFixedWidth(38)
+        self.btn_theme.clicked.connect(self._toggle_theme); header.addWidget(self.btn_theme)
+        self.btn_open = QPushButton(); self.btn_open.setObjectName("primary")
+        self.btn_open.clicked.connect(lambda: self._open_pdf_in_reader())
+        header.addWidget(self.btn_open); main_layout.addLayout(header)
 
         self.tabs = QTabWidget()
         self._init_merge_tab()
@@ -87,10 +118,39 @@ class MainWindow(QMainWindow):
 
         self._init_status_bar(main_layout)
         self._create_menu()
+        self.act_commands = self.menu_file.addAction(tr("studio_commands"), "Ctrl+K", self._show_commands)
+        self.act_commands.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut)
+        self.tool_library = ToolLibrary(self)
+        self.tabs.addTab(self.tool_library, tr("studio_cat_all"))
+        self._style_reader()
         self.setAcceptDrops(True)
 
         # Apply initial language (default zh from QSettings, or user's previous choice)
         self._retranslate_ui()
+
+    def _show_commands(self):
+        CommandPalette(self).exec()
+
+    def _toggle_theme(self):
+        self._dark = not self._dark
+        self._settings.setValue("studio_dark", self._dark)
+        from . import pdf_reader_widget as reader_module
+        reader_module._DARK = self._dark
+        apply_theme(QApplication.instance(), self._dark)
+        self._style_reader()
+        self.file_list.list_widget.viewport().update()
+        if not self.reader.has_document(): self.reader._show_welcome()
+
+    def _style_reader(self):
+        # Remove legacy local styles so all reader controls share the design system.
+        for widget in (self.reader, self.reader.toolbar, self.reader.edit_toolbar,
+                       self.reader.sidebar, self.reader.search_bar,
+                       self.reader.scroll_area, self.reader.page_label,
+                       self.reader.label_filename):
+            widget.setStyleSheet("")
+        c = colors(self._dark)
+        self.reader.scroll_area.setStyleSheet(f"QScrollArea{{background:{c['bg']};border:none;}}")
+        self.reader.label_filename.setMaximumWidth(180)
 
     def _create_menu(self):
         mb = self.menuBar()
@@ -151,6 +211,7 @@ class MainWindow(QMainWindow):
 
         # Settings → Language
         self.menu_settings = mb.addMenu(tr("menu_settings"))
+        self.act_dpi = self.menu_settings.addAction(tr("settings_dpi"), self._choose_dpi)
         self.menu_lang = self.menu_settings.addMenu(tr("menu_language"))
         self.act_lang_zh = self.menu_lang.addAction(
             tr("menu_lang_zh"), lambda: self._switch_language("zh"))
@@ -176,6 +237,19 @@ class MainWindow(QMainWindow):
     def _retranslate_ui(self):
         """Refresh all UI text after language switch."""
         self.setWindowTitle(tr("window_title"))
+        self.hero.retranslate_ui()
+        for widget, key in self._studio_labels:
+            widget.setText(tr(key))
+        self.btn_commands.setText(tr("studio_command_button") + "     ⌘ / Ctrl K")
+        self.btn_language.setText("EN" if current_language() == "zh" else "ZH")
+        self.btn_theme.setToolTip(tr("studio_theme"))
+        self.btn_history.setToolTip(tr("history_title"))
+        self.act_dpi.setText(tr("settings_dpi"))
+        self.btn_open.setText(tr("studio_open"))
+        self.act_commands.setText(tr("studio_commands"))
+        self.btn_result_open.setText(tr("studio_result_open"))
+        self.btn_result_folder.setText(tr("studio_result_folder"))
+        self.tool_library.retranslate_ui()
         # Menus
         self.menu_file.setTitle(tr("menu_file"))
         self.act_add.setText(tr("menu_add_files"))
@@ -211,8 +285,8 @@ class MainWindow(QMainWindow):
         self.menu_help.setTitle(tr("menu_help"))
         self.act_about.setText(tr("menu_about"))
         # Group boxes
-        self.merge_group.setTitle(tr("group_merge_ops"))
-        self.single_group.setTitle(tr("group_pdf_ops"))
+        self.merge_group.setTitle("")
+        self.single_group.setTitle(tr("studio_quick_tools"))
         # Buttons (the merge button text is derived from the file list, so it is
         # refreshed at the end of this method instead of being set directly)
         self.btn_split.setText(tr("btn_split"))
@@ -222,12 +296,16 @@ class MainWindow(QMainWindow):
         self.btn_decrypt.setText(tr("btn_decrypt"))
         self.btn_rotate.setText(tr("btn_rotate"))
         self.btn_info.setText(tr("btn_info"))
+        for b in (self.btn_split, self.btn_compress, self.btn_watermark,
+                  self.btn_encrypt, self.btn_decrypt, self.btn_rotate, self.btn_info):
+            b.setText(clean_title(b.text()))
         self.btn_browse_out.setText(tr("btn_browse"))
         self.btn_cancel.setText(tr("btn_cancel"))
         self.label_output.setText(tr("label_output"))
         # Tab names
         self.tabs.setTabText(0, tr("tab_merge"))
         self.tabs.setTabText(1, tr("tab_reader"))
+        self.tabs.setTabText(2, tr("studio_cat_all"))
         # Reader edit button labels
         self.reader._normal_label = tr("reader_edit")
         self.reader._editing_label = tr("reader_editing")
@@ -249,6 +327,7 @@ class MainWindow(QMainWindow):
         self.reader.btn_zoom_in.setToolTip(tr("reader_zoom_in"))
         self.reader.zoom_edit.setToolTip(tr("reader_zoom_edit"))
         self.reader.btn_close.setToolTip(tr("reader_close"))
+        self.reader.page_label.setToolTip(tr("studio_jump"))
         self.reader.btn_sidebar.setToolTip(tr("reader_sidebar_tip"))
         self.reader.btn_search.setToolTip(tr("reader_search_tip"))
         self.reader.btn_tab_outline.setText(tr("reader_tab_outline"))
@@ -307,99 +386,76 @@ class MainWindow(QMainWindow):
         self._check_office()
 
     def _init_merge_tab(self):
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
+        tab = QWidget(); tab.setObjectName("workspace")
+        layout = QVBoxLayout(tab); layout.setContentsMargins(0, 4, 0, 0)
+        layout.setSpacing(16)
+        self._studio_labels = []
+        self.hero = WorkspaceHero(); self.hero.setMaximumHeight(164)
+        layout.addWidget(self.hero)
         splitter = QSplitter(Qt.Orientation.Horizontal)
-
+        splitter.setHandleWidth(16)
+        splitter.setChildrenCollapsible(False)
+        left = QWidget(); left.setObjectName("card")
+        ll = QVBoxLayout(left); ll.setContentsMargins(20, 16, 20, 14); ll.setSpacing(10)
+        queue_title = label("", "section_title"); ll.addWidget(queue_title)
+        queue_desc = label(""); self.queue_desc = queue_desc; ll.addWidget(queue_desc)
+        self._studio_labels += [(queue_title, "studio_queue"), (queue_desc, "studio_queue_desc")]
         self.file_list = FileListWidget()
         self.file_list.files_changed.connect(self._update_button_states)
-        self.file_list.list_widget.itemDoubleClicked.connect(
-            self._on_file_list_double_click)
-        splitter.addWidget(self.file_list)
+        self.file_list.list_widget.itemSelectionChanged.connect(self._update_button_states)
+        self.file_list.list_widget.itemDoubleClicked.connect(self._on_file_list_double_click)
+        ll.addWidget(self.file_list, 1); splitter.addWidget(left)
 
-        # Right panel wrapped in scroll area — tools scroll when window is too short
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        s_bg = _dc("#2c2c2c", "#f5f5f5"); sb_bg = _dc("#1e1e1e", "#e8e8e8"); sh = _dc("#555", "#bbb")
-        scroll.setStyleSheet(
-            f"QScrollArea{{background:{s_bg};border:none;}}"
-            f"QScrollBar:vertical{{background:{sb_bg};width:8px;margin:0}}"
-            f"QScrollBar::handle:vertical{{background:{sh};border-radius:3px;min-height:20px}}"
-            f"QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{{height:0}}")
-
-        right = QWidget()
-        right.setStyleSheet(f"background:{_dc('#2c2c2c','#f5f5f5')};")
-        right_layout = QVBoxLayout(right)
-        right_layout.setContentsMargins(10, 0, 0, 20)
-
-        self.merge_group = QGroupBox(tr("group_merge_ops"))
-        mg_layout = QVBoxLayout(self.merge_group)
-
-        self.btn_merge = QPushButton(tr("btn_merge_unified"))
-        self.btn_merge.setMinimumHeight(40)
-        self.btn_merge.setStyleSheet(
-            "QPushButton { font-size: 14px; font-weight: bold; "
-            "background-color: #007aff; color: white; border-radius: 6px; }"
-            "QPushButton:hover { background-color: #0056cc; }"
-            "QPushButton:disabled { background-color: #aaa; }")
-        self.btn_merge.clicked.connect(self._on_merge_clicked)
+        scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setMinimumWidth(295)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        right = QWidget(); right_layout = QVBoxLayout(right)
+        right_layout.setContentsMargins(0, 0, 0, 0); right_layout.setSpacing(12)
+        self.merge_group = QGroupBox()
+        self.merge_group.setObjectName("merge_card")
+        mg_layout = QVBoxLayout(self.merge_group); mg_layout.setSpacing(8)
+        mg_layout.setContentsMargins(16, 16, 16, 16)
+        overline = label("01  /  COMBINE", "eyebrow"); mg_layout.addWidget(overline)
+        merge_title = label("", "section_title"); mg_layout.addWidget(merge_title)
+        merge_desc = label(""); merge_desc.setWordWrap(True); mg_layout.addWidget(merge_desc)
+        self._studio_labels += [(merge_title, "studio_merge_title"), (merge_desc, "studio_merge_desc")]
+        self.btn_merge = QPushButton(); self.btn_merge.setObjectName("primary")
+        self.btn_merge.setMinimumHeight(46); self.btn_merge.clicked.connect(self._on_merge_clicked)
         mg_layout.addWidget(self.btn_merge)
         right_layout.addWidget(self.merge_group)
 
-        self.single_group = QGroupBox(tr("group_pdf_ops"))
-        sg_layout = QVBoxLayout(self.single_group)
-        self.btn_split = QPushButton(tr("btn_split"))
-        self.btn_split.clicked.connect(self._on_split_clicked)
-        sg_layout.addWidget(self.btn_split)
-        self.btn_compress = QPushButton(tr("btn_compress"))
-        self.btn_compress.clicked.connect(self._on_compress_clicked)
-        sg_layout.addWidget(self.btn_compress)
-        self.btn_watermark = QPushButton(tr("btn_watermark"))
-        self.btn_watermark.clicked.connect(self._on_watermark_clicked)
-        sg_layout.addWidget(self.btn_watermark)
-        self.btn_encrypt = QPushButton(tr("btn_encrypt"))
-        self.btn_encrypt.clicked.connect(self._on_encrypt_clicked)
-        sg_layout.addWidget(self.btn_encrypt)
-        self.btn_decrypt = QPushButton(tr("btn_decrypt"))
-        self.btn_decrypt.clicked.connect(self._on_decrypt_clicked)
-        sg_layout.addWidget(self.btn_decrypt)
-        self.btn_rotate = QPushButton(tr("btn_rotate"))
-        self.btn_rotate.clicked.connect(self._on_rotate_clicked)
-        sg_layout.addWidget(self.btn_rotate)
-        self.btn_info = QPushButton(tr("btn_info"))
-        self.btn_info.clicked.connect(self._on_info_clicked)
-        sg_layout.addWidget(self.btn_info)
+        self.single_group = QGroupBox(); self.single_group.setObjectName("quick_tools")
+        sg_layout = QGridLayout(self.single_group); sg_layout.setContentsMargins(16, 22, 16, 14)
+        sg_layout.setSpacing(8)
+        for i, (attr, slot) in enumerate([
+            ("btn_split", self._on_split_clicked), ("btn_compress", self._on_compress_clicked),
+            ("btn_watermark", self._on_watermark_clicked), ("btn_rotate", self._on_rotate_clicked),
+            ("btn_encrypt", self._on_encrypt_clicked), ("btn_decrypt", self._on_decrypt_clicked),
+            ("btn_info", self._on_info_clicked)]):
+            b = QPushButton(); b.clicked.connect(slot); setattr(self, attr, b)
+            sg_layout.addWidget(b, i // 2, i % 2)
+        all_tools = QPushButton(); all_tools.setObjectName("quiet")
+        all_tools.clicked.connect(lambda: self.tabs.setCurrentIndex(2))
+        self._studio_labels.append((all_tools, "studio_all_tools")); sg_layout.addWidget(all_tools, 3, 1)
         right_layout.addWidget(self.single_group)
-
-        # The seven format-conversion actions live in the Convert menu; the
-        # right-hand panel keeps only the operations that act on the file list
-        # plus the merge button, so the layout stays quiet.
-        self.tools_group = None
-        self._tool_buttons = []
-
-        self.office_status_label = QLabel(tr("office_checking"))
-        self.office_status_label.setStyleSheet(f"color: {_dc('#999','#777')};")
+        self.tools_group = None; self._tool_buttons = []
+        self.office_status_label = label(""); self.office_status_label.setWordWrap(True)
+        self.office_status_label.setStyleSheet("font-size:10px;")
+        self.office_status_label.hide()
         right_layout.addWidget(self.office_status_label)
         right_layout.addStretch()
+        scroll.setWidget(right); splitter.addWidget(scroll)
+        splitter.setStretchFactor(0, 3); splitter.setStretchFactor(1, 1)
+        splitter.setSizes([760, 330]); self.workspace_splitter = splitter
+        layout.addWidget(splitter, 1)
 
-        scroll.setWidget(right)
-        splitter.addWidget(scroll)
-        splitter.setStretchFactor(0, 2)
-        splitter.setStretchFactor(1, 1)
-        layout.addWidget(splitter)
-
-        out_layout = QHBoxLayout()
-        self.label_output = QLabel(tr("label_output"))
-        out_layout.addWidget(self.label_output)
+        out_layout = QHBoxLayout(); out_layout.setSpacing(10)
+        self.label_output = label(""); out_layout.addWidget(self.label_output)
         self.output_path_edit = QLineEdit()
         dfl = self._settings.value("output_dir", str(Path.home() / "Desktop"))
-        self.output_path_edit.setText(dfl + "/" + tr("default_output"))
+        self.output_path_edit.setText(str(Path(dfl) / tr("default_output")))
         out_layout.addWidget(self.output_path_edit)
-        self.btn_browse_out = QPushButton(tr("btn_browse"))
-        self.btn_browse_out.clicked.connect(self._on_browse_output)
-        out_layout.addWidget(self.btn_browse_out)
-        layout.addLayout(out_layout)
-
+        self.btn_browse_out = QPushButton(); self.btn_browse_out.clicked.connect(self._on_browse_output)
+        out_layout.addWidget(self.btn_browse_out); layout.addLayout(out_layout)
         self.tabs.addTab(tab, tr("tab_merge"))
 
     def _init_reader_tab(self):
@@ -407,6 +463,7 @@ class MainWindow(QMainWindow):
         self.reader = PdfReaderWidget()
         self.reader.close_requested.connect(self._on_reader_close)
         self.reader.open_requested.connect(self._on_reader_open_requested)
+        self.reader.recent_requested.connect(lambda path: self._open_pdf_in_reader(Path(path)))
         self.tabs.addTab(self.reader, tr("tab_reader"))
 
     def _on_reader_open_requested(self):
@@ -427,7 +484,9 @@ class MainWindow(QMainWindow):
                 return
             path = Path(path_str)
         self.reader.opened_from_file_list = from_file_list
-        self.reader.open_pdf(path)
+        opened = self.reader.open_pdf(path)
+        if opened is False:
+            self.status_label.setText(tr("studio_reader_error"))
         self.tabs.setCurrentIndex(1)  # switch to reader tab
 
     def _on_reader_close(self):
@@ -450,9 +509,17 @@ class MainWindow(QMainWindow):
         status_layout.addWidget(self.progress_bar)
         hlayout = QHBoxLayout()
         self.status_label = QLabel(tr("status_ready"))
-        self.status_label.setStyleSheet(f"color: {_dc('#999','#777')};")
+        self.status_label.setObjectName("muted")
         hlayout.addWidget(self.status_label)
         hlayout.addStretch()
+        self.btn_result_open = QPushButton(); self.btn_result_open.setObjectName("quiet")
+        self.btn_result_open.clicked.connect(self._open_last_output); self.btn_result_open.hide()
+        self.btn_result_folder = QPushButton(); self.btn_result_folder.setObjectName("quiet")
+        self.btn_result_folder.clicked.connect(lambda: self._open_last_output(folder=True))
+        self.btn_result_folder.hide()
+        hlayout.addWidget(self.btn_result_open); hlayout.addWidget(self.btn_result_folder)
+        self.local_label = label(tr("studio_local"))
+        self._studio_labels.append((self.local_label, "studio_local")); hlayout.addWidget(self.local_label)
         self.btn_cancel = QPushButton(tr("btn_cancel"))
         self.btn_cancel.setVisible(False)
         self.btn_cancel.clicked.connect(self._on_cancel)
@@ -479,7 +546,8 @@ class MainWindow(QMainWindow):
             if result == "cancel":
                 event.ignore(); return
             if result == "save_as":
-                self.reader._save_edited_copy()
+                if not self.reader._save_edited_copy():
+                    event.ignore(); return
         # Persist where the reader is before the widget is destroyed. Only
         # close_document() used to do this, so quitting with the window button or
         # Cmd+Q lost the reading position and the file always reopened at page 1.
@@ -507,7 +575,7 @@ class MainWindow(QMainWindow):
         The probe itself shells out to osascript/COM (up to 30 s), so it runs on a
         worker thread started by _start_office_probe; this method only formats the
         now-known answer and is called from the language switch and the probe."""
-        avail = check_office_availability()
+        avail = get_office_cache()
         if avail is None:
             self.office_status_label.setText(tr("office_checking"))
             return
@@ -525,22 +593,27 @@ class MainWindow(QMainWindow):
 
         Previously this ran inline in the constructor and froze the window for up
         to 30 seconds on machines where the AppleScript probe is slow."""
-        if check_office_availability() is not None:
+        if get_office_cache() is not None:
             self._check_office()
             return
 
-        class _ProbeWorker(QThread):
+        class _ProbeSignals(QObject):
             done = pyqtSignal(dict)
 
-            def run(self):  # noqa: D102
+            def run(self):
                 try:
-                    self.done.emit(check_office_availability(use_cache=False))
+                    result = check_office_availability(use_cache=False)
                 except Exception:
-                    self.done.emit({})
+                    result = {}
+                try:
+                    self.done.emit(result)
+                except RuntimeError:
+                    pass  # the application was closed while Office was probing
 
-        self._office_worker = _ProbeWorker(self)
-        self._office_worker.done.connect(self._on_office_probed)
-        self._office_worker.start()
+        import threading
+        self._office_probe = _ProbeSignals(self)
+        self._office_probe.done.connect(self._on_office_probed)
+        threading.Thread(target=self._office_probe.run, daemon=True).start()
 
     def _on_office_probed(self, avail: dict):
         import core.utils as utils
@@ -552,25 +625,23 @@ class MainWindow(QMainWindow):
     def _update_button_states(self):
         paths = self.file_list.get_file_paths()
         has_files = len(paths) > 0
-        self.btn_merge.setEnabled(has_files)
+        busy = self._busy
+        selected = self.file_list.list_widget.selectedItems()
+        count = sum(get_file_category(item.data(Qt.ItemDataRole.UserRole)) == "pdf" for item in selected)
+        self.queue_desc.setText(tr("queue_target", count=count) if count else tr("studio_queue_desc"))
+        self.btn_merge.setEnabled(has_files and not busy)
+        self.office_status_label.setVisible(any(get_file_category(p) in ("word", "excel", "powerpoint") for p in paths))
+        for b in (self.btn_split, self.btn_compress, self.btn_watermark,
+                  self.btn_encrypt, self.btn_decrypt, self.btn_rotate, self.btn_info):
+            b.setEnabled(not busy)
         # Show a hint about what's in the list, but always keep one button.
         # The counter text comes from i18n so it follows the UI language, and the
         # label is used as-is (it already carries its own icon).
         if has_files:
-            cats = set(get_file_category(p) for p in paths)
-            if len(cats) > 1:
-                label = tr("merge_mixed_files")
-            elif cats == {"pdf"}:
-                label = tr("merge_pdf_files")
-            elif cats == {"image"}:
-                label = tr("merge_image_files")
-            elif cats == {"word"}:
-                label = tr("merge_word_files")
-            else:
-                label = tr("merge_as_pdf")
-            self.btn_merge.setText(tr("merge_count_fmt", label=label, count=len(paths)))
+            self.btn_merge.setText(tr("studio_merge_action", count=len(paths)))
         else:
             self.btn_merge.setText(tr("btn_merge_unified"))
+        self.btn_merge.setText(clean_title(self.btn_merge.text()))
 
     # ── Output path ──────────────────────────────────
 
@@ -578,7 +649,8 @@ class MainWindow(QMainWindow):
         if suffix is None:
             suffix = tr("default_output")
         current = self.output_path_edit.text().strip()
-        if current and not current.endswith(suffix):
+        # Preserve a filename the user explicitly typed or chose.
+        if current and Path(current).name in (tr("default_output"), tr("default_merged")):
             current = str(Path(current).parent / suffix)
         if current and Path(current).parent.exists():
             path, _ = QFileDialog.getSaveFileName(
@@ -598,6 +670,9 @@ class MainWindow(QMainWindow):
     def _run_worker(self, func, *args, **kwargs):
         if self._worker and self._worker.isRunning():
             return
+        self._job_output = Path(args[1]) if len(args) > 1 and isinstance(args[1], (str, Path)) else None
+        self.btn_result_open.hide(); self.btn_result_folder.hide()
+        self.progress_bar.setValue(0)
         self._worker = BaseWorker(func, *args, **kwargs)
         self._worker.progress.connect(self._on_progress)
         self._worker.finished.connect(self._on_finished)
@@ -617,6 +692,7 @@ class MainWindow(QMainWindow):
         return sender is self._worker
 
     def _set_busy(self, busy: bool):
+        self._busy = busy
         # show()/hide() rather than setVisible(): they are explicit and leave no
         # ambiguity about a widget's visibility state for tests and for Qt.
         if busy:
@@ -626,12 +702,27 @@ class MainWindow(QMainWindow):
             self.progress_bar.hide()
             self.btn_cancel.hide()
         self.file_list.setEnabled(not busy)
+        for menu in (self.menu_op, self.menu_convert, self.menu_compose):
+            menu.setEnabled(not busy)
+        self.tool_library.setEnabled(not busy)
+        self.btn_commands.setEnabled(not busy)
+        self.act_commands.setEnabled(not busy)
         for w in [self.btn_merge,
                   self.btn_split, self.btn_compress, self.btn_watermark,
                   self.btn_encrypt, self.btn_decrypt, self.btn_rotate, self.btn_info]:
             w.setEnabled(not busy)
         if not busy:
             self._update_button_states()
+
+    def _open_last_output(self, checked=False, folder=False):
+        path = self._last_output
+        if path is None or not path.exists():
+            self.status_label.setText(tr("studio_result_missing")); return
+        if folder: path = path if path.is_dir() else path.parent
+        if not folder and path.is_file() and path.suffix.lower() == ".pdf":
+            self._open_pdf_in_reader(path)
+        else:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
     def _on_progress(self, msg: str, pct: int):
         if not self._is_current_worker():
@@ -656,6 +747,15 @@ class MainWindow(QMainWindow):
         self._set_busy(False)
         self.status_label.setText(tr("status_done"))
         self.progress_bar.setValue(100)
+        output = result.get("output") if isinstance(result, dict) else None
+        if not output and isinstance(result, list) and result:
+            output = str(Path(result[0]).parent)
+        path = Path(output) if output else self._job_output
+        success = not isinstance(result, dict) or result.get("converted", 1) > 0
+        self._record_job(success, path if path and path.exists() else None)
+        if path and path.exists():
+            self._last_output = path
+            self.btn_result_open.show(); self.btn_result_folder.show()
         if isinstance(result, dict):
             if "results" in result:
                 failed = result.get("failed") or []
@@ -700,6 +800,7 @@ class MainWindow(QMainWindow):
             return
         self._set_busy(False)
         self.status_label.setText(tr("status_error"))
+        self._record_job(False, error=msg)
         self._show_message("critical", tr("msg_op_failed"), msg)
 
     def _on_cancelled(self):
@@ -834,13 +935,14 @@ class MainWindow(QMainWindow):
         dlg = CompressDialog(self)
         if not dlg.exec():
             return
+        mode = ("lossless", "medium", "max")[dlg.get_mode()]
         if len(files) == 1:
             out = self._get_output_path(f"{files[0].stem}_compressed.pdf")
             if not out:
                 return
-            self._run_worker(PdfOperator.compress, files[0], out)
+            self._run_worker(PdfOperator.compress, files[0], out, mode)
         else:
-            self._run_batch(files, "compressed", PdfOperator.compress)
+            self._run_batch(files, "compressed", PdfOperator.compress, mode)
 
     def _on_watermark_clicked(self):
         files = self._pick_input_files()
@@ -947,7 +1049,7 @@ class MainWindow(QMainWindow):
                 return
             self._run_worker(PdfOperator.extract_images, files[0], Path(out_dir))
         else:
-            self._run_batch(files, "images", PdfOperator.extract_images)
+            self._run_batch(files, "images", PdfOperator.extract_images, ext="")
 
     def _on_pdf_to_images(self):
         files = self._pick_input_files()
@@ -960,7 +1062,7 @@ class MainWindow(QMainWindow):
                 return
             self._run_worker(PdfOperator.to_images, files[0], Path(out_dir), dpi)
         else:
-            self._run_batch(files, "pages", PdfOperator.to_images, dpi)
+            self._run_batch(files, "pages", PdfOperator.to_images, dpi, ext="")
 
     def _on_single_images_to_pdf(self):
         files, _ = QFileDialog.getOpenFileNames(
@@ -976,7 +1078,9 @@ class MainWindow(QMainWindow):
         """Get PDFs to process: from file list if available, else from dialog.
         If user selected specific rows in the list, use only those.
         Returns empty list if user cancelled."""
-        paths = self.file_list.get_file_paths()
+        selected = self.file_list.list_widget.selectedItems()
+        paths = ([item.data(Qt.ItemDataRole.UserRole) for item in selected]
+                 if selected else self.file_list.get_file_paths())
         pdfs = filter_by_category(paths, "pdf")
         if pdfs:
             return pdfs
@@ -1001,7 +1105,11 @@ class MainWindow(QMainWindow):
     def _get_batch_output_path(self, input_path: Path, suffix: str, out_dir: Path,
                                 ext: str = ".pdf") -> Path:
         """Generate output path for a single file in a batch."""
-        return out_dir / f"{input_path.stem}_{suffix}{ext}"
+        base = out_dir / f"{input_path.stem}_{suffix}{ext}"
+        candidate, serial = base, 2
+        while candidate.exists():
+            candidate = base.with_name(f"{input_path.stem}_{suffix}_{serial}{ext}"); serial += 1
+        return candidate
 
     def _on_add_files_dialog(self):
         self.file_list._on_add_files()
@@ -1014,6 +1122,7 @@ class MainWindow(QMainWindow):
             self, tr("dlg_save_pdf"), current, tr("file_filter_pdf"))
         if path:
             self.output_path_edit.setText(path)
+            self._settings.setValue("output_dir", str(Path(path).parent))
 
     def _on_to_word(self):
         files = self._pick_input_files()
@@ -1151,6 +1260,20 @@ class MainWindow(QMainWindow):
         if not out:
             return
         self._run_worker(PdfOperator.insert_pages, target, source, out, at - 1)
+
+    def _choose_dpi(self):
+        dpi, accepted = QInputDialog.getInt(self, tr("settings_dpi"), tr("dpi_label"),
+                                            int(self._settings.value("dpi", 200)), 36, 1200)
+        if accepted: self._settings.setValue("dpi", dpi)
+
+    def _record_job(self, success, output=None, error=""):
+        import json
+        from datetime import datetime
+        try: entries = json.loads(self._settings.value("studio_history", "[]"))
+        except (TypeError, ValueError): entries = []
+        entries.insert(0, {"time": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                           "success": success, "output": str(output) if output else "", "error": error})
+        self._settings.setValue("studio_history", json.dumps(entries[:30], ensure_ascii=False))
 
     def _on_about(self):
         QMessageBox.about(self, tr("about_title"), tr("about_text", version=VERSION))

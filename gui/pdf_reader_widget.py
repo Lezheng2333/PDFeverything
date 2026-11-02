@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
     QCheckBox, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
     QPushButton, QScrollArea, QSplitter, QStackedWidget, QToolButton,
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget, QApplication,
-    QMessageBox, QFileDialog,
+    QMessageBox, QFileDialog, QInputDialog,
 )
 
 from .i18n import tr
@@ -60,6 +60,7 @@ class PdfReaderWidget(QWidget):
     document_changed = pyqtSignal(str)
     close_requested = pyqtSignal()
     open_requested = pyqtSignal()
+    recent_requested = pyqtSignal(str)
     _cache: OrderedDict = OrderedDict()
     _cache_memory_bytes: int = 0
     _protected_pages: set = set()   # pages whose entries survive eviction longest
@@ -274,7 +275,8 @@ class PdfReaderWidget(QWidget):
             self._hover_on(btn)
 
         self.page_container = QWidget()
-        self.page_container.setStyleSheet("background:transparent;")
+        self.page_container.setObjectName("page_container")
+        self.page_container.setStyleSheet("QWidget#page_container{background:transparent;}")
         self.scroll_area.setWidget(self.page_container)
 
         # ── Sidebar (outline / search results) + page area ──
@@ -353,6 +355,9 @@ class PdfReaderWidget(QWidget):
         self.page_label = QLabel("0 / 0")
         self.page_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.page_label.setFixedWidth(70)
+        self.page_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.page_label.setToolTip(tr("studio_jump"))
+        self.page_label.mousePressEvent = lambda event: self._jump_to_page()
         pl = _dc("#bbb", "#555")
         self.page_label.setStyleSheet(f"QLabel{{color:{pl}}}")
 
@@ -883,7 +888,7 @@ class PdfReaderWidget(QWidget):
                 result = self._prompt_save_changes()
                 if result == "cancel": return
                 if result == "save_as":
-                    self._save_edited_copy()
+                    if not self._save_edited_copy(): return
             self.close_document()
             self.close_requested.emit()
 
@@ -909,9 +914,14 @@ class PdfReaderWidget(QWidget):
         path, _ = QFileDialog.getSaveFileName(
             self, tr("reader_saveas_title"), "edited.pdf", tr("file_filter_pdf"))
         if path:
-            self._page_editor.save(Path(path))
-            self._unsaved_edits = False
+            try:
+                self._page_editor.save(Path(path))
+                self._unsaved_edits = False
+            except Exception as exc:
+                QMessageBox.warning(self, tr("msg_op_failed"), str(exc))
+                return False
         self._layout_labels()  # Bug 4 fix: re-layout after dialog
+        return bool(path)
 
     def _revert_to_original(self):
         """Discard all edits: reload the original document snapshot."""
@@ -943,13 +953,28 @@ class PdfReaderWidget(QWidget):
                 event.ignore()
                 return
             if result == "save_as":
-                self._save_edited_copy()
+                if not self._save_edited_copy():
+                    event.ignore(); return
         event.accept()
 
     # ═══════════ Open / Close ═══════════
 
-    def open_pdf(self, path: Path) -> None:
+    def open_pdf(self, path: Path) -> bool:
         import fitz
+        path = Path(path)
+        try:
+            candidate = fitz.open(path)
+            if (candidate.is_encrypted and not candidate.authenticate("")) or len(candidate) == 0:
+                candidate.close()
+                return False
+        except Exception:
+            return False
+        if self.doc and self._unsaved_edits:
+            answer = self._prompt_save_changes()
+            if answer == "cancel" or (answer == "save_as" and not self._save_edited_copy()):
+                candidate.close()
+                return False
+        if self.doc: self._remember_reading_position()
         # Leave any previous editing session first: its page editor still points
         # at the OLD document, so an edit made after this open would silently act
         # on (and then display) the previous file while the filename chip showed
@@ -957,11 +982,9 @@ class PdfReaderWidget(QWidget):
         self._reset_document_state()
         self._cancel_deferred_renders()
         PdfReaderWidget._clear_cache(); self._destroy_labels(); self._destroy_welcome()
-        try: self.doc = fitz.open(path)
-        except Exception: self._show_welcome(); return
-        if self.doc.is_encrypted:
-            if not self.doc.authenticate(""):
-                self.doc.close(); self.doc = None; self._show_welcome(); return
+        if self.doc: self.doc.close()
+        self.doc = candidate
+        self.toolbar.show(); self.toggle_sidebar(True)
         # Configure MuPDF for maximum text rendering quality.
         # fz_set_aa_level(8) gives highest sub-pixel anti-aliasing (8 bits).
         self._configure_mupdf_aa()
@@ -1001,7 +1024,9 @@ class PdfReaderWidget(QWidget):
         self.btn_close.show()
         self._restore_reading_position(path)
         self.document_changed.emit(str(path))
+        self._record_recent(path)
         self.setFocus()
+        return True
 
     def _reset_document_state(self):
         """Drop every piece of per-document state before another file is opened.
@@ -1755,7 +1780,7 @@ class PdfReaderWidget(QWidget):
             result = self._prompt_save_changes()
             if result == "cancel": return
             if result == "save_as":
-                self._save_edited_copy()
+                if not self._save_edited_copy(): return
             elif result == "discard":
                 self._revert_to_original()
         self._edit_mode = False; self.btn_edit.setChecked(False)
@@ -2102,16 +2127,13 @@ class PdfReaderWidget(QWidget):
     def _edit_print(self):
         if not self._selected_pages or not self._page_editor: return
         try:
-            import tempfile
-            tmp = Path(tempfile.gettempdir()) / "pdfeverything_print.pdf"
-            self._page_editor.extract_pages(list(self._selected_pages), tmp)
-            import subprocess, sys
-            if sys.platform == "darwin":
-                subprocess.Popen(["open", str(tmp)])
-            elif sys.platform == "win32":
-                os.startfile(str(tmp))  # noqa: S606 — Windows shell open
-            else:
-                subprocess.Popen(["xdg-open", str(tmp)])
+            from PyQt6.QtPrintSupport import QPrintDialog, QPrinter
+            from .printing import print_pages
+            printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+            printer.setDocName(self._path.name if self._path else "PDFeverything")
+            dialog = QPrintDialog(printer, self)
+            if dialog.exec():
+                print_pages(self.doc, self._selected_pages, printer)
         except Exception as ex:
             QMessageBox.warning(self, tr("reader_print_title"),
                                 tr("reader_print_failed", error=ex))
@@ -2672,6 +2694,12 @@ class PdfReaderWidget(QWidget):
         self._current_page = n - 1; self._scroll_to_page_top(); self._update_nav_ui()
         self._schedule_render_visible(0)  # instant high-quality render
 
+    def _jump_to_page(self):
+        if not self.doc: return
+        page, ok = QInputDialog.getInt(self, tr("studio_jump"), tr("studio_page"),
+                                       self._current_page + 1, 1, self._total_pages)
+        if ok: self.go_to_page(page)
+
     def next_page(self):
         if self.doc and self._current_page < self._total_pages - 1:
             self._current_page += 1; self._scroll_to_page_top(); self._update_nav_ui()
@@ -2729,41 +2757,70 @@ class PdfReaderWidget(QWidget):
         if self._welcome:
             self._welcome.setParent(None); self._welcome.deleteLater(); self._welcome = None
 
+    def _record_recent(self, path):
+        from PyQt6.QtCore import QSettings
+        settings = QSettings("PDFeverything", "PDFeverything")
+        entries = settings.value("studio_recent", []) or []
+        if not isinstance(entries, list): entries = []
+        resolved = str(Path(path).resolve())
+        settings.setValue("studio_recent", [resolved] + [p for p in entries if p != resolved][:7])
+
+    def _recent_documents(self):
+        from PyQt6.QtCore import QSettings
+        entries = QSettings("PDFeverything", "PDFeverything").value("studio_recent", []) or []
+        if not isinstance(entries, list): return []
+        return [Path(p) for p in entries if isinstance(p, str) and Path(p).is_file()][:3]
+
+    def _clear_recent(self):
+        from PyQt6.QtCore import QSettings
+        QSettings("PDFeverything", "PDFeverything").remove("studio_recent")
+        self._show_welcome()
+
     def _show_welcome(self, drop_text=None, load_btn_text=None):
-        if drop_text is None: drop_text = self._welcome_drop or "Drop PDF here to read"
-        if load_btn_text is None: load_btn_text = self._welcome_btn_text or "Load file..."
-        self._welcome_drop = drop_text
-        self._welcome_btn_text = load_btn_text
+        from .workspace import DocumentArt, label
+        from .theme import colors, file_icon
+        if drop_text is not None: self._welcome_drop = drop_text
+        if load_btn_text is not None: self._welcome_btn_text = load_btn_text
         if self.doc: return
         vp = self.scroll_area.viewport()
         if not vp or vp.width() < 100 or vp.height() < 50: return
-
+        self.toolbar.hide(); self.sidebar.hide()
         self._destroy_welcome()
-        # welcome card colors following theme
-        cc = _dc("#555", "#666")
-        bc = _dc("#666", "#555"); bbg = _dc("#2a2a2a", "#ffffff"); bb = _dc("#444", "#bbb")
-        bhc = _dc("#999", "#333"); bhb = _dc("#555", "#aaa")
         self.page_container.setFixedSize(vp.width(), vp.height())
-        c = QWidget(self.page_container)
-        c.setStyleSheet("background:transparent;")
-        cl = QVBoxLayout(c); cl.setAlignment(Qt.AlignmentFlag.AlignCenter); cl.setSpacing(12)
-        t = QLabel(drop_text); t.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        t.setStyleSheet(f"QLabel{{color:{cc};font-size:16px;background:transparent;}}")
-        cl.addWidget(t)
-        b = QPushButton(load_btn_text); b.setFixedWidth(120)
+        c = QWidget(self.page_container); c.setObjectName("reader_welcome")
+        c.setStyleSheet("QWidget#reader_welcome{background:transparent;}")
+        c.setFixedWidth(min(580, max(320, vp.width() - 40)))
+        cl = QVBoxLayout(c); cl.setContentsMargins(20, 12, 20, 12); cl.setSpacing(12)
+        art = DocumentArt(); art.setFixedSize(260, 150)
+        # A dark canvas keeps the artwork crisp in both application themes.
+        art.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        art.setStyleSheet("background:#203f2e;border-radius:16px;")
+        cl.addWidget(art, alignment=Qt.AlignmentFlag.AlignCenter)
+        title = QLabel(tr("studio_reader_title")); title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet("font-size:25px;font-weight:600;background:transparent;")
+        cl.addWidget(title)
+        desc = label(tr("studio_reader_desc")); desc.setWordWrap(True)
+        desc.setAlignment(Qt.AlignmentFlag.AlignCenter); cl.addWidget(desc)
+        b = QPushButton(tr("studio_open")); b.setObjectName("primary"); b.setFixedWidth(150)
         b.setCursor(Qt.CursorShape.PointingHandCursor)
-        b.setStyleSheet(
-            f"QPushButton{{color:{bc};background:{bbg};border:1px solid {bb};"
-            f"border-radius:4px;padding:5px 16px;font-size:12px}}"
-            f"QPushButton:hover{{color:{bhc};background:{_dc('#333','#e8e8e8')};border-color:{bhb}}}")
-        b.clicked.connect(lambda: self.open_requested.emit())
+        b.clicked.connect(self.open_requested.emit)
         cl.addWidget(b, alignment=Qt.AlignmentFlag.AlignCenter)
+        recent = self._recent_documents()[:1 if vp.height() < 600 else 3]
+        if recent:
+            row = QHBoxLayout(); row.addWidget(label(tr("studio_recent"))); row.addStretch()
+            clear = QPushButton(tr("studio_clear_recent")); clear.setObjectName("quiet")
+            clear.clicked.connect(self._clear_recent); row.addWidget(clear); cl.addLayout(row)
+            for path in recent:
+                btn = QPushButton(path.name); btn.setIcon(file_icon("PDF")); btn.setToolTip(str(path))
+                btn.setStyleSheet("text-align:left;padding:8px 12px;")
+                btn.clicked.connect(lambda checked=False, p=str(path): self.recent_requested.emit(p))
+                cl.addWidget(btn)
+        hint = label(tr("studio_reader_keys")); hint.setWordWrap(True)
+        hint.setAlignment(Qt.AlignmentFlag.AlignCenter); hint.setStyleSheet("font-size:10px;")
+        cl.addWidget(hint)
         c.adjustSize()
-        c.move(max(0, (vp.width() - c.width()) // 2),
-               max(0, (vp.height() - c.height()) // 2))
-        c.show(); c.raise_()
-        self._welcome = c
-
+        c.move(max(0, (vp.width() - c.width()) // 2), max(0, (vp.height() - c.height()) // 2))
+        c.show(); c.raise_(); self._welcome = c
         self.scroll_area.setAcceptDrops(True)
         self.scroll_area.dragEnterEvent = self._drag_enter
         self.scroll_area.dropEvent = self._drop_event
@@ -2779,7 +2836,7 @@ class PdfReaderWidget(QWidget):
         paths = [Path(u.toLocalFile()) for u in e.mimeData().urls()
                  if Path(u.toLocalFile()).exists()]
         pdfs = [p for p in paths if p.suffix.lower() == ".pdf"]
-        if pdfs: self._path = pdfs[0]; self.open_requested.emit()
+        if pdfs: self.recent_requested.emit(str(pdfs[0]))
         e.acceptProposedAction()
 
     # ═══════════ Keyboard ═══════════
@@ -2905,6 +2962,7 @@ class PdfReaderWidget(QWidget):
     def resizeEvent(self, e):
         super().resizeEvent(e)
         if self.doc: self._resize_timer.start()
+        elif self._welcome: QTimer.singleShot(0, self._show_welcome)
 
     # ═══════════ Public ═══════════
 

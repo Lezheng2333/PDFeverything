@@ -24,6 +24,7 @@ datas.append((str(PROJECT_ROOT / 'resources' / 'app_icon.png'), 'resources'))
 # ── 隐藏导入 ─────────────────────────────────────────────
 
 hiddenimports = [
+    "PyQt6.QtPrintSupport",
     "PyQt6.QtCore",
     "PyQt6.QtGui",
     "PyQt6.QtWidgets",
@@ -107,7 +108,9 @@ exe = EXE(
     upx=True,
     console=False,
     disable_windowed_traceback=False,
-    argv_emulation=True,
+    # Qt owns the native event loop; Apple Event argv emulation delays CLI/MCP
+    # startup and may abort when no WindowServer connection is available.
+    argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
@@ -134,8 +137,8 @@ app = BUNDLE(
         "NSHighResolutionCapable": True,
         "CFBundleName": "PDFeverything",
         "CFBundleDisplayName": "PDFeverything",
-        "CFBundleShortVersionString": "1.9.0",
-        "CFBundleVersion": "1.9.0",
+        "CFBundleShortVersionString": "2.0.0",
+        "CFBundleVersion": "2.0.0",
         "CFBundleDocumentTypes": [
             {
                 "CFBundleTypeName": "PDF Document",
