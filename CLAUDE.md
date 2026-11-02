@@ -151,6 +151,9 @@ tests/qa_reader_defects.py 中每项都对应 v1.9.0 的一个已修缺陷，修
 - **QSettings 持久化**：`main_window.py` 中的默认输出目录、dpi、语言、主题、配色（`studio_scheme`）、最近文档（`studio_recent`）与处理历史（`studio_history`）等设置通过 QSettings 持久化，修改设置键名会导致用户丢失偏好
 - **QSettings 测试隔离**：GUI 测试必须先导入 `tests/settings_isolation.py` 并使用 `gui.i18n.app_settings()`；macOS 下直接 `QSettings("PDFeverything", "PDFeverything")` 会写真实 plist，`setPath(IniFormat)` 无效
 - **主题配色**：新增配色必须同时修改 `gui/theme.py` 的 `PALETTES`、`gui/i18n.py` 的 `theme_*` 键与测试；Settings → 配色方案菜单由 `SCHEMES` 自动生成
+- **压缩图片流**：`_recompress_images` 必须 `update_stream(..., compress=False)`——新字节已经是 JPEG，再压缩会写成 zlib 却保留 `/DCTDecode`；ColorSpace 按 `im.mode` 选 DeviceGray/DeviceRGB
+- **AppleScript 路径**：`_applescript_convert` 用 `on run argv` + `osascript -e ... -- path`；绝不能把路径 `format` 进脚本，否则文件名可注入执行
+- **MCP stdout**：`_send` 必须 `ensure_ascii=True`，`_configure_stdio` 尝试 UTF-8；新增输出不得绕过 `_send`，否则 Windows 代码页会崩
 
 ## 项目结构
 
