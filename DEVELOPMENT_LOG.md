@@ -817,3 +817,7 @@ Ver 2.0.0 | 2026-11-02 — Studio：全新文档工作台与完整处理流程
   - BUGFIX: 阅读器拖入新 PDF 不再提前修改旧文档路径，取消打开或保存阅读位置时身份保持正确。
   - BUGFIX: 批量操作避让已存在输出文件；提取图片 / 导出页面的批量输出使用目录而非 .pdf 后缀。
   - 验收边界：物理打印机、多显示器硬件以及 Windows Office 版式需要对应设备；本轮以 Qt 打印 PDF、Windows CI 和本机 Office 验证覆盖可用路径。
+
+  - 最终 macOS 产物通过 24 个冻结 CLI 命令、MCP initialize / tools/list / pdf_info 及 GUI 启动实测。
+  - Office 实机验收：PowerPoint 原生 AppleScript 转换通过；Word / Excel 的原生路径在本机未成功，已验证自动降级输出内容正确；复杂版式原生保真仍受 Office 自动化环境影响。
+  - Windows CI 首轮：93 项核心及 19/20 Studio 项通过，后台探测测试的固定 0.5 秒阈值被慢速 runner 触发；改为验证实际线程身份，仍能捕获同步探测回归。

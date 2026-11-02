@@ -238,12 +238,23 @@ class StudioTests(unittest.TestCase):
 
     def test_office_probe_does_not_block_window_creation(self):
         set_office_cache(None)
+        import threading
+        entered, release = threading.Event(), threading.Event()
+        probe_threads = []
         def slow_probe(**kwargs):
-            time.sleep(.6); return {"word": False}
+            probe_threads.append(threading.get_ident()); entered.set()
+            release.wait(5)
+            return {"word": False}
         with patch.object(main_module, "check_office_availability", side_effect=slow_probe):
-            start = time.monotonic(); other = MainWindow()
-            self.assertLess(time.monotonic() - start, .5)
-            other.close(); other.deleteLater(); app.processEvents()
+            other = None
+            try:
+                other = MainWindow()
+                self.assertTrue(entered.wait(1))
+                self.assertNotEqual(probe_threads[0], threading.get_ident())
+            finally:
+                release.set()
+                if other is not None:
+                    other.close(); other.deleteLater(); app.processEvents()
         set_office_cache({"word": False})
 
 
