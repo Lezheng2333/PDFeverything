@@ -821,3 +821,12 @@ Ver 2.0.0 | 2026-11-02 — Studio：全新文档工作台与完整处理流程
   - 最终 macOS 产物通过 24 个冻结 CLI 命令、MCP initialize / tools/list / pdf_info 及 GUI 启动实测。
   - Office 实机验收：PowerPoint 原生 AppleScript 转换通过；Word / Excel 的原生路径在本机未成功，已验证自动降级输出内容正确；复杂版式原生保真仍受 Office 自动化环境影响。
   - Windows CI 首轮：93 项核心及 19/20 Studio 项通过，后台探测测试的固定 0.5 秒阈值被慢速 runner 触发；改为验证实际线程身份，仍能捕获同步探测回归。
+
+
+  Ver 2.0.0 | 2026-11-02 — 双平台正式发布完成
+  - GitHub Release 已公开并设为 Latest：https://github.com/Lezheng2333/PDFeverything/releases/tag/v2.0.0。
+  - 运行时代码目标：92b61347dd26ea17a584a1ca87a817711bfc5fbe；后续提交仅补充验收及发布文档。
+  - Windows CI 41432690093 全部通过：93 项核心 + 20 项 Studio / 打印回归、exe / Inno 安装器构建、冻结帮助 / info / 实际合并校验。
+  - 已上传 PDFeverything_macOS_v2.0.0.zip（73,147,149 bytes）、PDFeverything_Setup_v2.0.0.exe（97,672,899 bytes）与 SHA256SUMS.txt。
+  - 三个附件的 GitHub 服务端 SHA-256、文件大小及 uploaded 状态均与本地逐项一致，核对后才公开 Release。
+  - 第一轮 Windows 构建与 GitHub 发布断点已关闭；物理打印 / 多显示器和本机 Office 原生自动化的验收边界记录于 docs/RELEASE_QA_2.0.0.md。
