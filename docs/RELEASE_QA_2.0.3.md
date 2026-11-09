@@ -60,12 +60,16 @@ WordConverter 转换 docx                                         → 1.70 s，�
 
 ## 4. 产物
 
-| 项 | 值 |
-|---|---|
-| `PDFeverything_macOS_v2.0.3.zip` | 72,563,769 bytes |
-| SHA-256 | `eedcdc3d9c108f59a43c5870c2df5445493a594cfd532070c1f60714959c683d` |
-| 架构 / 最低系统 | arm64 / macOS 13.0 |
-| 签名 | ad-hoc（未公证） |
+| 资产 | 大小 | SHA-256 |
+|---|---|---|
+| `PDFeverything_macOS_v2.0.3.zip` | 72,563,769 | `eedcdc3d9c108f59a43c5870c2df5445493a594cfd532070c1f60714959c683d` |
+| `PDFeverything_Setup_v2.0.3.exe` | 80,960,739 | `328dfb485eb51a68e336fec20f2dce29f7e85fad81834bf74060944e5ea9320a` |
+| `SHA256SUMS.txt` | 194 | — |
+
+架构 / 最低系统：arm64 / macOS 13.0；签名 ad-hoc（未公证）。
+GitHub 服务端 `digest` 与本地 `shasum -a 256` 一致。
+Windows 安装包由 CI run 42642245039 构建（核心 101 + 兼容 40 + Studio 25、冻结包
+help/info/merge/encrypt/decrypt 冒烟全部通过）。
 
 ## 5. 已知边界
 
