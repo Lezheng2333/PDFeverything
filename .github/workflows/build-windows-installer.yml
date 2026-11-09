@@ -86,6 +86,9 @@ jobs:
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_tests }}
         run: python tests/test_core.py
 
+      - name: macOS compatibility audit tests
+        run: python tests/test_macos_compat.py
+
       - name: Studio workflow and print-engine regression tests
         env:
           QT_QPA_PLATFORM: offscreen

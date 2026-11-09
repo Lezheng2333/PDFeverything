@@ -892,3 +892,23 @@ Ver 2.0.1 | 2026-11-02 — 三套配色与全面加固
   - BUGFIX: 搜索状态文本不随语言切换更新；新增 refresh_search_status()。
   - BUGFIX: 已删除的最近文档残留不可见记录；读取时清理并回写。
   - BUGFIX: GUI 测试在 macOS 写入真实 plist；新增 settings_isolation + app_settings()，测试固定使用临时 INI。
+
+----------------------------------------------------------------
+Ver 2.0.2 | 2026-11-09 — macOS 26 与 Apple 芯片全系统兼容
+----------------------------------------------------------------
+
+  - 新增 build_macos.py：macOS 唯一构建入口（预检 → PyInstaller → 签名 → 全包审计 → zip）
+  - 新增 core/compat.py：纯标准库 Mach-O 解析（LC_BUILD_VERSION/minos）、bundle 审计、doctor、崩溃日志
+  - 新增 tests/test_macos_compat.py（40 项）：合成 Mach-O/fat 解析、审计判定、doctor 报告
+  - 新增 docs/MACOS_COMPAT.md：根因、版本矩阵、可复现构建、公证流程与用户排障
+  - 新增 resources/macos_entitlements.plist：hardened runtime 签名授权（Developer ID / 公证）
+  - 新增 --doctor/--diagnose：打印 macOS、Python、Qt、bundle 声明 vs 实际最低系统、架构与签名
+  - GUI 启动失败写入 ~/Library/Logs/PDFeverything/crash.log，并用原生弹窗给出日志路径
+  - PDFeverything.spec：PDFE_MIN_MACOS/PDFE_TARGET_ARCH、显式 arm64、LSMinimumSystemVersion=13.0
+  - 无损压缩改用 MuPDF（garbage=4 + deflate），移除 pikepdf 依赖（少 5MB 原生库，去掉 macOS 14 底线）
+  - requirements.txt 钉 PyQt6 <6.12（Qt 6.12 基线 macOS 14.4）与 PyMuPDF <2
+  - Windows 构建与 CI 同步移除 pikepdf；CI 增加 macOS 兼容性套件
+  - 文档：README 双语、CLAUDE 与 docs/RELEASE_QA_2.0.2.md 同步 2.0.2
+  - BUGFIX: 2.0.1 的 bundle 实际要求 macOS 27（pyenv Python 26.0 + Homebrew OpenSSL/readline 27.0 + pikepdf 14.0），
+    Info.plist 却声明 11.0，macOS 26 上 dyld 直接拒绝加载（issue #1）——改用 python.org universal2 Python
+    （基线 11.0）构建，构建后逐文件审计，实际最低系统 13.0

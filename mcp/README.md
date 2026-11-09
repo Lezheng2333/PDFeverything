@@ -1,6 +1,6 @@
 # PDFeverything MCP Server — AI Agent Integration Guide
 
-Current server version: **2.0.1** · **29 tools**
+Current server version: **2.0.2** · **29 tools**
 
 This MCP server lets any AI agent (Claude Desktop, Claude Code, Cursor, etc.) discover and call PDFeverything tools directly. The compiled `.exe` / `.app` needs no Python; running from source needs the project dependencies.
 
@@ -162,4 +162,4 @@ No separate install is required for the compiled app: the agent starts
 - All MCP tools call the same `core/` implementation as the GUI and CLI.
 - stdout is reserved for JSON-RPC; diagnostics go to stderr, so keep ad-hoc
   `print()` calls out of the server path.
-- The server reports its version in the `initialize` response (`2.0.1`).
+- The server reports its version in the `initialize` response (`2.0.2`).

@@ -1,7 +1,11 @@
-PyQt6>=6.8.0
-PyMuPDF>=1.27.0
+# Runtime dependencies.
+#
+# Upper bounds are deliberate: on macOS a newer wheel can raise the minimum
+# supported system for the whole app bundle (every Mach-O file it ships must
+# load on the oldest system we claim to support).  See docs/MACOS_COMPAT.md.
+PyQt6>=6.11.0,<6.12.0      # Qt 6.11: macOS 13.0+; Qt 6.12 jumps to 14.4
+PyMuPDF>=1.27.0,<2.0.0     # MuPDF 2.x is a different API surface
 pypdf>=6.0.0
-pikepdf>=10.0.0
 cryptography>=41.0.0
 pillow>=12.0.0
 python-docx>=1.2.0

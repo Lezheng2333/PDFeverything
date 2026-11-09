@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/Lezheng2333/PDFeverything/releases"><img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-blue?style=flat-square" /></a>
-  <a href="https://github.com/Lezheng2333/PDFeverything/releases/latest"><img src="https://img.shields.io/badge/version-v2.0.1-007aff?style=flat-square" /></a>
+  <a href="https://github.com/Lezheng2333/PDFeverything/releases/latest"><img src="https://img.shields.io/badge/version-v2.0.2-007aff?style=flat-square" /></a>
   <a href="resources/LICENSE.txt"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" /></a>
 </p>
 
@@ -30,8 +30,8 @@ Drag everything in — any combination of PDFs, Word documents, PowerPoint decks
 
 | Platform | Download |
 |---|---|
-| 🍎 macOS (Apple Silicon, 11+) | [`PDFeverything_macOS_v2.0.1.zip`](https://github.com/Lezheng2333/PDFeverything/releases/download/v2.0.1/PDFeverything_macOS_v2.0.1.zip) |
-| 🪟 Windows 10/11 (64-bit) | [`PDFeverything_Setup_v2.0.1.exe`](https://github.com/Lezheng2333/PDFeverything/releases/download/v2.0.1/PDFeverything_Setup_v2.0.1.exe) |
+| 🍎 macOS (Apple Silicon, 13+) | [`PDFeverything_macOS_v2.0.2.zip`](https://github.com/Lezheng2333/PDFeverything/releases/download/v2.0.2/PDFeverything_macOS_v2.0.2.zip) |
+| 🪟 Windows 10/11 (64-bit) | [`PDFeverything_Setup_v2.0.2.exe`](https://github.com/Lezheng2333/PDFeverything/releases/download/v2.0.2/PDFeverything_Setup_v2.0.2.exe) |
 
 > 🔗 [**Latest Release →**](https://github.com/Lezheng2333/PDFeverything/releases/latest)
 >
@@ -40,9 +40,29 @@ Drag everything in — any combination of PDFs, Word documents, PowerPoint decks
 > 🪟 The Windows download is an **installer** — bilingual wizard, licence page, Start Menu
 > entry, optional desktop shortcut and a standard uninstaller. No Python required.
 >
-> 🔐 Checksums for both assets: [`SHA256SUMS.txt`](https://github.com/Lezheng2333/PDFeverything/releases/download/v2.0.1/SHA256SUMS.txt)
+> 🔐 Checksums for both assets: [`SHA256SUMS.txt`](https://github.com/Lezheng2333/PDFeverything/releases/download/v2.0.2/SHA256SUMS.txt)
 
-## 🆕 v2.0.1 — three color schemes & hardening
+## 🆕 v2.0.2 — runs on macOS 26 and every Apple-silicon macOS since Ventura
+
+A macOS portability fix for [issue #1](https://github.com/Lezheng2333/PDFeverything/issues/1):
+the 2.0.1 bundle was actually built for **macOS 27** (pyenv Python 26.0, Homebrew
+OpenSSL 27.0) while its `Info.plist` promised 11.0 — dyld refused to start it on
+macOS 26.
+
+- **Portable runtime** — built with the official python.org universal2 Python (macOS 11 baseline) instead of a pyenv build that inherits the build machine's OS; no Homebrew dylibs are bundled any more.
+- **pikepdf dropped** — lossless compression uses the MuPDF already inside the app; one native dependency less, and its macOS-14 wheel floor disappears.
+- **arm64 by default** — native on every Apple-silicon Mac; `LSMinimumSystemVersion` is now the honest **13.0** (Qt 6.11 baseline).
+- **Build-time guard** — `build_macos.py` refuses to package when Python, Qt or a wheel raises the floor, then audits every Mach-O in the finished app. `PDFeverything --doctor` prints the same report from inside the app.
+- **Crash logs** — uncaught exceptions and fatal signals land in `~/Library/Logs/PDFeverything/crash.log` instead of vanishing.
+- **Tests** — new `tests/test_macos_compat.py` (40 checks); full suite now 562.
+
+Read [docs/MACOS_COMPAT.md](docs/MACOS_COMPAT.md) for the full diagnosis, the compatibility matrix and the reproducible build.
+
+**Release:** [PDFeverything v2.0.2](https://github.com/Lezheng2333/PDFeverything/releases/tag/v2.0.2) (2026-11-09) ·
+[compatibility notes](docs/MACOS_COMPAT.md) ·
+[checksums](https://github.com/Lezheng2333/PDFeverything/releases/download/v2.0.2/SHA256SUMS.txt)
+
+## v2.0.1 — three color schemes & hardening
 
 A patch release on top of Studio 2.0: three palettes, security fixes, and a broad
 correctness/QA pass.
@@ -409,22 +429,27 @@ Windows-only `pywin32` (installed automatically on Windows).
 **Windows** (installer + portable exe, needs [Inno Setup 6](https://jrsoftware.org/isdl.php)):
 ```bash
 python build_windows.py
-# → PDFeverything_Setup_v2.0.1.exe   installer (copied to the project root)
+# → PDFeverything_Setup_v2.0.2.exe   installer (copied to the project root)
 # → dist/PDFeverything.exe           portable payload, no install
 ```
 
-**macOS** (app bundle):
+**macOS** (app bundle — portable, audited, signed):
 ```bash
-pyinstaller PDFeverything.spec --noconfirm --clean
-# → dist/PDFeverything.app
+python build_macos.py
+# → dist/PDFeverything.app  (arm64, macOS 13+, audited)
+# → /tmp/PDFeverything_macOS_v2.0.2.zip
 ```
+Build with the **python.org** Python, not Homebrew/pyenv: a pyenv build inherits the
+build machine's macOS version and silently makes the app require it. See
+[docs/MACOS_COMPAT.md](docs/MACOS_COMPAT.md).
 
 ## 🧪 Testing
 
-v2.0.1 brings the Studio suite to **25 workflow regressions** (`tests/test_studio.py`) and the full suite to **522 checks**. The release gate runs seven suites:
+v2.0.2 adds **40 macOS compatibility checks** (`tests/test_macos_compat.py`) and keeps the Studio suite at **25 workflow regressions**. The release gate runs eight suites:
 
 ```bash
 .venv/bin/python tests/test_core.py                            # core / CLI / MCP / i18n   97
+.venv/bin/python tests/test_macos_compat.py                     # Mach-O audit / doctor      40
 QT_QPA_PLATFORM=offscreen .venv/bin/python tests/test_gui.py    # workers / batch / dialogs 70
 QT_QPA_PLATFORM=offscreen .venv/bin/python tests/qa_reader.py   # reader QA                 38
 QT_QPA_PLATFORM=offscreen .venv/bin/python tests/test_reader.py # reader comprehensive      85
@@ -458,6 +483,7 @@ suites run on `windows-latest` before every installer build.
 | [DEVELOPMENT_LOG.md](DEVELOPMENT_LOG.md) | Version-by-version release history |
 | [README_WINDOWS.md](README_WINDOWS.md) | Windows build and installer guide |
 | [mcp/README.md](mcp/README.md) | MCP setup and tool reference |
+| [docs/MACOS_COMPAT.md](docs/MACOS_COMPAT.md) | macOS compatibility: diagnosis, build, notarization |
 | [docs/RELEASE_QA_2.0.1.md](docs/RELEASE_QA_2.0.1.md) | v2.0.1 validation record |
 | [docs/RELEASE_QA_2.0.0.md](docs/RELEASE_QA_2.0.0.md) | Studio 2.0 historical record |
 | [CLAUDE.md](CLAUDE.md) | Architecture notes for contributors and agents |
@@ -467,7 +493,7 @@ suites run on `windows-latest` before every installer build.
 | Layer | Tech |
 |---|---|
 | 🖼️ GUI | **PyQt6** — native look on both macOS & Windows |
-| 🧠 PDF Engine | **PyMuPDF** + **pypdf** + **pikepdf** |
+| 🧠 PDF Engine | **PyMuPDF** + **pypdf** |
 | 🔐 Encryption | **cryptography** — AES-256 |
 | 📝 Office Converters | **AppleScript** (macOS) / **COM** (Windows) / **python-docx** + **python-pptx** + **openpyxl** (fallback) |
 | 🔌 AI Integration | **MCP (Model Context Protocol)** — 29 tools, auto-discovered |
@@ -489,14 +515,33 @@ MIT — do whatever you want with it. [LICENSE](resources/LICENSE.txt)
 
 | 平台 | 下载 |
 |---|---|
-| 🍎 macOS (Apple Silicon, 11+) | [`PDFeverything_macOS_v2.0.1.zip`](https://github.com/Lezheng2333/PDFeverything/releases/download/v2.0.1/PDFeverything_macOS_v2.0.1.zip) |
-| 🪟 Windows 10/11 (64-bit) | [`PDFeverything_Setup_v2.0.1.exe`](https://github.com/Lezheng2333/PDFeverything/releases/download/v2.0.1/PDFeverything_Setup_v2.0.1.exe) |
+| 🍎 macOS (Apple Silicon, 13+) | [`PDFeverything_macOS_v2.0.2.zip`](https://github.com/Lezheng2333/PDFeverything/releases/download/v2.0.2/PDFeverything_macOS_v2.0.2.zip) |
+| 🪟 Windows 10/11 (64-bit) | [`PDFeverything_Setup_v2.0.2.exe`](https://github.com/Lezheng2333/PDFeverything/releases/download/v2.0.2/PDFeverything_Setup_v2.0.2.exe) |
 
-> 🔐 校验和：[`SHA256SUMS.txt`](https://github.com/Lezheng2333/PDFeverything/releases/download/v2.0.1/SHA256SUMS.txt) ·
-> 📝 [发布说明](https://github.com/Lezheng2333/PDFeverything/releases/tag/v2.0.1) ·
-> 🧪 [2.0.1 验收记录](docs/RELEASE_QA_2.0.1.md)
+> 🔐 校验和：[`SHA256SUMS.txt`](https://github.com/Lezheng2333/PDFeverything/releases/download/v2.0.2/SHA256SUMS.txt) ·
+> 📝 [发布说明](https://github.com/Lezheng2333/PDFeverything/releases/tag/v2.0.2) ·
+> 🧪 [2.0.2 验收记录](docs/RELEASE_QA_2.0.2.md)
 
-### 🆕 v2.0.1 — 三套配色与全面加固
+### 🆕 v2.0.2 — macOS 26 能开了，Apple 芯片全系统可用
+
+针对 [issue #1](https://github.com/Lezheng2333/PDFeverything/issues/1) 的兼容性修复：
+2.0.1 的包实际上是按 **macOS 27** 构建的（pyenv 编译的 Python 26.0、Homebrew OpenSSL 27.0），
+`Info.plist` 却写着 11.0 —— dyld 在 macOS 26 上直接拒绝启动。
+
+- **可移植运行时**：改用 python.org 官方 universal2 Python（基线 macOS 11），不再打包 Homebrew 动态库，也不再继承构建机的系统版本。
+- **移除 pikepdf**：无损压缩改用包里已有的 MuPDF，少一个原生依赖，同时去掉它 macOS 14 的 wheel 底线。
+- **默认 arm64**：所有 Apple 芯片原生运行；`LSMinimumSystemVersion` 如实写成 **13.0**（Qt 6.11 基线）。
+- **构建期保险**：`build_macos.py` 在 Python / Qt /  wheel 抬高底线时直接拒绝打包，构建后逐个 Mach-O 审计；`PDFeverything --doctor` 在 App 内打印同一份报告。
+- **崩溃日志**：未捕获异常与致命信号写入 `~/Library/Logs/PDFeverything/crash.log`，不再无声消失。
+- **测试**：新增 `tests/test_macos_compat.py`（40 项），全套 562 项。
+
+完整诊断、版本矩阵与可复现构建步骤见 [docs/MACOS_COMPAT.md](docs/MACOS_COMPAT.md)。
+
+**发布**：[PDFeverything v2.0.2](https://github.com/Lezheng2333/PDFeverything/releases/tag/v2.0.2)（2026-11-09）·
+[兼容性说明](docs/MACOS_COMPAT.md) ·
+[SHA256SUMS.txt](https://github.com/Lezheng2333/PDFeverything/releases/download/v2.0.2/SHA256SUMS.txt)
+
+### v2.0.1 — 三套配色与全面加固
 
 在 Studio 2.0 基础上的补丁版本：三套配色、安全修复，以及一轮全面的正确性/QA 加固。
 
@@ -821,19 +866,23 @@ python mcp/server.py
 **Windows**（安装包 + 便携版 exe，需要 [Inno Setup 6](https://jrsoftware.org/isdl.php)）:
 ```bash
 python build_windows.py
-# → PDFeverything_Setup_v2.0.1.exe   安装包（同时复制到项目根目录）
+# → PDFeverything_Setup_v2.0.2.exe   安装包（同时复制到项目根目录）
 # → dist/PDFeverything.exe           便携版载荷，免安装
 ```
 
-**macOS**（App Bundle）:
+**macOS**（App Bundle，可移植 + 自动审计 + 签名）:
 ```bash
-pyinstaller PDFeverything.spec --noconfirm --clean
-# → dist/PDFeverything.app
+python build_macos.py
+# → dist/PDFeverything.app  （arm64，macOS 13+，已审计）
+# → /tmp/PDFeverything_macOS_v2.0.2.zip
 ```
+必须使用 **python.org** 的 Python，不要用 Homebrew / pyenv：pyenv 编译的解释器会继承
+构建机的 macOS 版本，悄悄把 App 的底线抬到新系统。详见
+[docs/MACOS_COMPAT.md](docs/MACOS_COMPAT.md)。
 
 ### 🧪 测试
 
-v2.0.1 将 `tests/test_studio.py` 的 Studio 回归扩展到 **25 项**，全套共 **522 项**。
+v2.0.2 新增 **40 项** macOS 兼容性回归（`tests/test_macos_compat.py`），Studio 套件保持 **25 项**，全套共 **562 项**。
 发布前跑完整七套门禁：
 
 ```bash
@@ -859,7 +908,7 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python tests/test_studio.py # Studio 工作�
 `tests/qa_reader_defects.py` 中每个 v1.9.0 修复的阅读器缺陷都对应一项回归，
 它们在修复前必然失败。
 
-**合计 522 项**（97 + 70 + 38 + 85 + 170 + 37 + 25）。同样的核心与 Studio 套件会在
+**合计 562 项**（97 + 40 + 70 + 38 + 85 + 170 + 37 + 25）。同样的核心与 Studio 套件会在
 Windows CI 构建安装包前运行。
 
 ### 📚 文档
@@ -869,6 +918,7 @@ Windows CI 构建安装包前运行。
 | [DEVELOPMENT_LOG.md](DEVELOPMENT_LOG.md) | 逐版本开发与发布记录 |
 | [README_WINDOWS.md](README_WINDOWS.md) | Windows 构建与安装包指南 |
 | [mcp/README.md](mcp/README.md) | MCP 配置与工具参考 |
+| [docs/MACOS_COMPAT.md](docs/MACOS_COMPAT.md) | macOS 兼容性：诊断、构建、公证 |
 | [docs/RELEASE_QA_2.0.1.md](docs/RELEASE_QA_2.0.1.md) | v2.0.1 验收记录 |
 | [docs/RELEASE_QA_2.0.0.md](docs/RELEASE_QA_2.0.0.md) | Studio 2.0 历史验收记录 |
 | [CLAUDE.md](CLAUDE.md) | 贡献者与 AI Agent 的架构备忘 |
@@ -878,7 +928,7 @@ Windows CI 构建安装包前运行。
 | 层 | 技术 |
 |---|---|
 | 🖼️ 界面 | **PyQt6** — macOS / Windows 原生体验 |
-| 🧠 PDF 引擎 | **PyMuPDF** + **pypdf** + **pikepdf** |
+| 🧠 PDF 引擎 | **PyMuPDF** + **pypdf** |
 | 🔐 加密 | **cryptography** — AES-256 |
 | 📝 Office 转换 | **AppleScript** (macOS) / **COM** (Windows) / **python-docx** + **python-pptx** + **openpyxl** (备选) |
 | 🔌 AI 集成 | **MCP (Model Context Protocol)** — 29 个工具自动发现 |

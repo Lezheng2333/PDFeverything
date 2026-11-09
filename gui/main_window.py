@@ -56,7 +56,7 @@ from .workspace import (BrandMark, WorkspaceHero, ToolLibrary, CommandPalette,
                         HistoryDialog, clean_title, label)
 
 
-VERSION = "2.0.1"
+VERSION = "2.0.2"
 
 
 class MainWindow(QMainWindow):

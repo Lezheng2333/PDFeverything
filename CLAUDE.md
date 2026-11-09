@@ -10,7 +10,7 @@
 | 2 | **简约** | Minimal | 一个按钮能完成的事不用两个。合并面板只有 `[Merge→]` 一个按钮。底栏只在需要时出现。 |
 | 3 | **全面** | Comprehensive | 30+ 项 PDF 操作、6 种格式互转、3 通道（GUI/CLI/MCP）、2 种阅读模式 + 侧栏（目录/搜索）、18 项 Studio 工具。不多不少，刚好够用。 |
 | 4 | **速度快** | Fast | 打开 <0.2s（窗口化渲染，与页数无关），模式切换瞬间（缓存命中小于 5ms），滚轮缩放 60fps，网格框选 0.01ms/事件。 |
-| 5 | **轻量化** | Lightweight | 发布包约 73–98MB（macOS zip / Windows 安装包），缓存按可见窗口增长（上限 128–400MB），不依赖外部运行时。PyMuPDF=C 内核，Qt=C++ 内核。 |
+| 5 | **轻量化** | Lightweight | 发布包约 72–98MB（macOS zip / Windows 安装包），缓存按可见窗口增长（上限 128–400MB），不依赖外部运行时。PyMuPDF=C 内核，Qt=C++ 内核。 |
 
 > ⚡ 每次修改前自问：**我是在让软件更清爽、更简约、更全面、更快、更轻吗？** 如果答案是"不是"，换方案。
 
@@ -26,8 +26,12 @@
   python main.py -h                        # 帮助
   python main.py --mcp                     # MCP 服务器
   ```
-- **macOS 打包**：`PYINSTALLER_CONFIG_DIR="$PWD/.buildcache" pyinstaller PDFeverything.spec --noconfirm --clean`
-  （沙箱环境无法写入 `~/Library/Application Support/pyinstaller`，必须重定向缓存目录）
+- **macOS 打包**：`python build_macos.py`（预检 → PyInstaller → 签名 → 全包 Mach-O 审计 → zip）
+  - 必须用 **python.org 官方 Python**（universal2，基线 macOS 11），不能用 Homebrew / pyenv：
+    pyenv 编译的解释器继承构建机系统版本，会把 App 的最低系统悄悄抬到新版本（2.0.1 的 issue #1）
+  - 脚本会校验 Python / Qt / 各 wheel 的实际 `minos` ≤ `--min-macos`，构建后再逐文件审计；
+    审计不通过直接失败，不会产出 zip
+  - 手动复核：`.venv/bin/python -m core.compat dist/PDFeverything.app --max-macos 13.0`
 - **Windows 打包**：`python build_windows.py`（在 Windows 上运行，产出免安装 exe + 安装包）
   没装 Inno Setup 6 时自动跳过安装包那步；`--skip-deps` / `--exe-only` 见 `README_WINDOWS.md`
 - **Windows 安装包**：`installer_windows.iss`（Inno Setup 6），本机无法交叉编译——
@@ -42,7 +46,15 @@
 
 ## 当前开发状态
 
-### 最新版本：v2.0.1（Studio + 三套配色，双平台发布）
+### 最新版本：v2.0.2（macOS 26 / Apple 芯片兼容修复）
+- 根因：2.0.1 的 bundle 实际要求 macOS 27（pyenv Python 26.0 + Homebrew OpenSSL 27.0 + pikepdf 14.0），
+  Info.plist 却写 11.0；dyld 在 macOS 26 上直接拒绝加载 → issue #1。
+- 2.0.2：python.org universal2 Python 构建、移除 pikepdf（无损压缩改走 MuPDF）、显式 arm64、
+  `LSMinimumSystemVersion = 13.0`（Qt 6.11 基线，Qt 6.12 会抬到 14.4，故 requirements 钉 `<6.12`）。
+- 新模块：`build_macos.py`（预检/签名/审计/打包）、`core/compat.py`（Mach-O 解析、`--doctor`、崩溃日志）。
+- 新回归：`tests/test_macos_compat.py` 40 项；全套 562 项；`docs/MACOS_COMPAT.md` 记录诊断与构建。
+
+### v2.0.1（Studio + 三套配色，双平台发布）
 - 全新原生 Studio 工作台、明暗主题、文档队列、18 项可搜索工具、⌘/Ctrl+K 快捷命令。
 - 三套配色：森林绿 / 暖樱红 / 翡冷翠蓝，均含明暗变体，Settings → 配色方案，QSettings 记忆。
 - 阅读欢迎页与最近文档、点击页码跳转、处理结果直达；旧阅读器渲染与三通道引擎保持兼容。
@@ -94,9 +106,12 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python tests/qa_reader_defects.py  # 阅读�
 
 # Studio 2.0 工作流 / 打印引擎回归
 QT_QPA_PLATFORM=offscreen .venv/bin/python tests/test_studio.py  # Studio 工作流 25 项
+
+# macOS 兼容性（Mach-O minos 审计 / doctor）—— 跨平台可跑
+.venv/bin/python tests/test_macos_compat.py                      # 40 项
 ```
-发布前七套门禁必须全绿；改动阅读器或 core 后必须连同对抗性套件一起跑。
-当前全套 522 项（97 + 70 + 38 + 85 + 170 + 37 + 25）。
+发布前八套门禁必须全绿；改动阅读器或 core 后必须连同对抗性套件一起跑。
+当前全套 562 项（97 + 40 + 70 + 38 + 85 + 170 + 37 + 25）。
 
 注：tests/qa_adversarial.py 里的每条探针失败时会打印具体证据，可直接据此定位；
 tests/qa_reader_defects.py 中每项都对应 v1.9.0 的一个已修缺陷，修复前必然失败。
@@ -153,6 +168,10 @@ tests/qa_reader_defects.py 中每项都对应 v1.9.0 的一个已修缺陷，修
 - **主题配色**：新增配色必须同时修改 `gui/theme.py` 的 `PALETTES`、`gui/i18n.py` 的 `theme_*` 键与测试；Settings → 配色方案菜单由 `SCHEMES` 自动生成
 - **压缩图片流**：`_recompress_images` 必须 `update_stream(..., compress=False)`——新字节已经是 JPEG，再压缩会写成 zlib 却保留 `/DCTDecode`；ColorSpace 按 `im.mode` 选 DeviceGray/DeviceRGB
 - **AppleScript 路径**：`_applescript_convert` 用 `on run argv` + `osascript -e ... -- path`；绝不能把路径 `format` 进脚本，否则文件名可注入执行
+- **macOS 最低系统（v2.0.2 起）**：`LSMinimumSystemVersion` 必须等于全包 Mach-O 的最高
+  `LC_BUILD_VERSION.minos`；Python 必须来自 python.org（pyenv / Homebrew 会继承构建机系统）。
+  新增原生依赖后必须跑 `python -m core.compat dist/PDFeverything.app --max-macos 13.0`；
+  `requirements.txt` 中 PyQt6 钉 `<6.12`（Qt 6.12 基线 macOS 14.4）
 - **MCP stdout**：`_send` 必须 `ensure_ascii=True`，`_configure_stdio` 尝试 UTF-8；新增输出不得绕过 `_send`，否则 Windows 代码页会崩
 
 ## 项目结构
@@ -167,6 +186,7 @@ PDFeverything/
 │   ├── pdf_ops.py           # PdfOperator — 22 个公开 PDF 方法（所有通道共享）
 │   ├── search.py            # 全文搜索 + 目录(书签)解析（GUI/CLI/MCP 共用）
 │   ├── converters.py        # ConverterRegistry — 6 种格式→PDF 转换器（CJK 字体感知）
+│   ├── compat.py           # Mach-O minos 解析 / bundle 审计 / --doctor / 崩溃日志
 │   ├── page_editor.py       # 页面编辑 + 快照撤销 + 持久化历史日志
 │   └── merger.py            # merge_mixed_files() — 混合文件→统一 PDF 流水线
 ├── gui/
@@ -189,9 +209,12 @@ PDFeverything/
 │   ├── app_icon.ico         # Windows 图标
 │   ├── app_icon.png         # Dock / 应用图标
 │   ├── app_icon_readme.png  # README 页首图标
+│   ├── macos_entitlements.plist # hardened runtime 签名授权
 │   ├── ChineseSimplified.isl # Inno Setup 中文向导（vendored）
 │   └── LICENSE.txt          # MIT
 ├── docs/
+│   ├── MACOS_COMPAT.md      # macOS 兼容性诊断 / 构建 / 公证
+│   ├── RELEASE_QA_2.0.2.md  # 2.0.2 验收记录
 │   ├── RELEASE_QA_2.0.1.md  # 2.0.1 验收记录
 │   ├── RELEASE_QA_2.0.0.md  # Studio 2.0 历史验收记录
 │   └── studio-*.png         # Studio 截图
@@ -203,8 +226,10 @@ PDFeverything/
 │   ├── qa_adversarial.py    # 对抗性探针
 │   ├── qa_reader_defects.py # 阅读器缺陷回归
 │   ├── test_studio.py       # Studio 工作流 / 打印
+│   ├── test_macos_compat.py # Mach-O 审计 / doctor
 │   └── settings_isolation.py # 测试用 QSettings 隔离
-├── PDFeverything.spec       # PyInstaller macOS 构建配置
+├── PDFeverything.spec       # PyInstaller macOS 构建配置（PDFE_MIN_MACOS / PDFE_TARGET_ARCH）
+├── build_macos.py           # macOS 唯一构建入口：预检 → 构建 → 签名 → 审计 → 打包
 ├── build_windows.spec       # PyInstaller Windows onefile 构建配置
 ├── build_windows.py         # Windows 一键构建脚本（exe + 安装包）
 ├── build_windows.bat        # Windows 双击启动器
@@ -342,14 +367,14 @@ serve() — stdin/stdout JSON-RPC 主循环（initialize / tools/list / tools/ca
 2. **开发日志**：在 `DEVELOPMENT_LOG.md` 末尾写入新版本条目（遵循本文"开发日志格式规范"）
 3. **测试**：
    ```bash
-   # 七套门禁，共 522 项（见上文「测试」）
+   # 八套门禁，共 562 项（见上文「测试」）
    python main.py -h                           # CLI 帮助
    python pdf_tool.py <new-command> -i test.pdf -o out   # 新命令
    python -c "from mcp.server import TOOLS; print(len(TOOLS))"  # MCP 工具数 = 29
    ```
 4. **macOS 构建**：
    ```bash
-   pyinstaller PDFeverything.spec --noconfirm --clean
+   python build_macos.py          # 预检 + 构建 + 签名 + 审计 + zip（失败即中止）
    cp -R dist/PDFeverything.app . && rm -rf build
    ```
 5. **打标签并创建 GitHub Release**：

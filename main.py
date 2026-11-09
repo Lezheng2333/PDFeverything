@@ -96,6 +96,8 @@ Commands:
     -h, --help                               Show this help
     --version                                Show version
     --mcp                                    Launch MCP server (for AI agents)
+    --doctor [--json]                        Print macOS/Python/Qt/bundle
+                                             compatibility report (for bug reports)
 
 Examples:
     PDFeverything.exe merge -i a.pdf b.pdf c.pdf -o merged.pdf
@@ -114,7 +116,7 @@ Subsequent runs in the same session are instant.
 """
 
 
-VERSION = "2.0.1"
+VERSION = "2.0.2"
 PROJECT_DIR = Path(__file__).parent.resolve()
 _DARK_MODE = False  # set by launch_gui before any GUI widgets are created
 
@@ -205,6 +207,27 @@ _THEME = {
 
 
 def launch_gui(open_files=None):
+    # Finder launches have no terminal: keep tracebacks and fatal signals on
+    # disk instead of losing them, then surface a native alert if Qt cannot
+    # even create a window (e.g. a broken bundle on an older macOS).
+    from core.compat import install_crash_logging
+    log_path = install_crash_logging()
+    try:
+        _launch_gui(open_files)
+    except Exception as exc:  # noqa: BLE001 - last line of defence
+        import traceback
+        from core.compat import show_native_alert
+        details = traceback.format_exc()
+        print(details, file=sys.stderr)
+        show_native_alert(
+            "PDFeverything could not start",
+            f"{exc}\n\nDiagnostics log:\n{log_path}\n\n"
+            "Run 'PDFeverything --doctor' in Terminal for a compatibility report.",
+        )
+        sys.exit(1)
+
+
+def _launch_gui(open_files=None):
     from PyQt6.QtWidgets import QApplication
     from PyQt6.QtGui import QIcon, QPalette, QColor
     try:
@@ -277,6 +300,16 @@ def main():
         return
     if len(sys.argv) > 1 and sys.argv[1] in ("-v", "--version"):
         print(f"PDFeverything v{VERSION}")
+        return
+    if len(sys.argv) > 1 and sys.argv[1] in ("--doctor", "--diagnose"):
+        from core.compat import collect_environment, format_doctor
+        import json as _json
+        app_arg = next((a for a in sys.argv[2:] if not a.startswith("-")), None)
+        env = collect_environment(app_arg)
+        if "--json" in sys.argv[2:]:
+            print(_json.dumps(env, indent=2, ensure_ascii=False))
+        else:
+            print(format_doctor(env))
         return
     if len(sys.argv) > 1 and sys.argv[1] == "--mcp":
         launch_mcp()

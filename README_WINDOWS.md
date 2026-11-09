@@ -3,7 +3,7 @@
 Builds two artifacts on Windows: the payload **`PDFeverything.exe`** (single-file,
 no-install) and the **installer** `PDFeverything_Setup_v<version>.exe` that ships to users.
 
-Current source version: **2.0.1** (read from `VERSION` in `main.py`).
+Current source version: **2.0.2** (read from `VERSION` in `main.py`).
 
 ## Prerequisites
 

@@ -40,7 +40,7 @@ OUTPUT_EXE = DIST_DIR / "PDFeverything.exe"
 SPEC_FILE = PROJECT_DIR / "build_windows.spec"
 ISS_FILE = PROJECT_DIR / "installer_windows.iss"
 REQUIREMENTS = [
-    "PyQt6", "PyMuPDF", "pypdf", "pikepdf", "pillow",
+    "PyQt6", "PyMuPDF", "pypdf", "pillow",
     "python-docx", "python-pptx", "openpyxl", "pywin32", "pyinstaller",
 ]
 

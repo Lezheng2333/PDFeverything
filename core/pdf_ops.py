@@ -74,9 +74,9 @@ def _reject_if_encrypted(*paths) -> None:
 
     Without this the underlying libraries leak their own diagnostics —
     "File has not been decrypted" from pypdf, "document closed or encrypted"
-    from MuPDF, "PasswordError" from pikepdf — none of which tell the user what
-    to do. Encrypted input is a normal situation, not an internal error, so it
-    gets one consistent message across every operation and every channel."""
+    from MuPDF — none of which tell the user what to do. Encrypted input is a
+    normal situation, not an internal error, so it gets one consistent message
+    across every operation and every channel."""
     import fitz
 
     for p in paths:
@@ -417,7 +417,7 @@ class PdfOperator:
           medium   — 图片重采样到 150 DPI / JPEG 质量 75
           max      — 图片重采样到 96 DPI / JPEG 质量 45
         """
-        import pikepdf
+        import fitz
 
         if mode not in PdfOperator.COMPRESS_MODES:
             raise ValueError(f"未知压缩档位: {mode}")
@@ -430,15 +430,19 @@ class PdfOperator:
             progress_callback("正在压缩...", 20)
 
         if quality is None:
-            pdf = pikepdf.open(input_path)
+            # Structural rewrite through MuPDF: garbage=4 drops duplicate and
+            # unreferenced objects, deflate=True compresses plain streams.
+            # Lossless for the rendered page (same text, vectors, images).
+            #
+            # 2.0.2 replaced pikepdf here: its arm64 wheels are built for
+            # macOS 14+, so shipping it forced the whole app to require macOS
+            # 14 even though Qt only asks for 13.  MuPDF is already bundled for
+            # rendering, so this also removes a 5 MB native dependency.
+            doc = fitz.open(input_path)
             try:
-                pdf.save(
-                    output_path,
-                    compress_streams=True,
-                    object_stream_mode=pikepdf.ObjectStreamMode.generate,
-                )
+                doc.save(output_path, garbage=4, deflate=True)
             finally:
-                pdf.close()
+                doc.close()
         else:
             PdfOperator._recompress_images(input_path, output_path, quality,
                                            target_dpi, progress_callback)

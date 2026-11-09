@@ -3,7 +3,7 @@
 ; ============================================================================
 ;
 ;  用法 / Usage:
-;    ISCC.exe installer_windows.iss /DMyAppVersion=2.0.1
+;    ISCC.exe installer_windows.iss /DMyAppVersion=2.0.2
 ;
 ;  全部路径由本文件用 SourcePath 自行推导（= 本脚本所在目录），因此无论从哪个
 ;  工作目录调用 ISCC 都能正确找到资源，无需传路径参数。
@@ -25,7 +25,7 @@
 #endif
 #define MyProjectRootDir AddBackslash(MyProjectRoot)
 #ifndef MyAppVersion
-  #define MyAppVersion "2.0.1"
+  #define MyAppVersion "2.0.2"
 #endif
 #ifndef MySourceExe
   #define MySourceExe MyProjectRootDir + "dist\PDFeverything.exe"
