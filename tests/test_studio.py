@@ -236,6 +236,9 @@ class StudioTests(unittest.TestCase):
         self.window._switch_language("en"); app.processEvents()
         self.window._switch_language("zh"); app.processEvents()
         self.assertEqual(reader.outline_tree.topLevelItemCount(), 1)
+        for btn in (reader.btn_search_prev, reader.btn_search_next, reader.btn_search_close):
+            self.assertTrue(btn.text())
+            self.assertGreaterEqual(btn.height(), btn.sizeHint().height())
         reader.start_search("report"); app.processEvents()
         self.assertIn("找到", reader.search_status.text())
         self.window._switch_language("en"); app.processEvents()

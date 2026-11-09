@@ -595,7 +595,8 @@ class PdfReaderWidget(QWidget):
             f"QLineEdit{{color:{fg};background:{_dc('#1e1e1e', '#f7f7f7')};"
             f"border:1px solid {brd};border-radius:4px;padding:4px 8px;font-size:13px;}}"
             f"QLabel{{color:{fg};font-size:12px;}}"
-            f"QCheckBox{{color:{fg};font-size:12px;}}")
+            f"QCheckBox{{color:{fg};font-size:12px;}}"
+            f"QPushButton{{padding:4px 10px;font-size:12px;border-radius:6px;}}")
         row = QHBoxLayout(bar)
         row.setContentsMargins(8, 5, 8, 5)
         row.setSpacing(6)
@@ -613,21 +614,24 @@ class PdfReaderWidget(QWidget):
         self.search_count_label = QLabel("")
         row.addWidget(self.search_count_label)
 
-        self.btn_search_prev = QPushButton("◀")
-        self.btn_search_prev.setFixedSize(28, 26)
+        self.btn_search_prev = QPushButton(tr("reader_search_prev_short"))
+        self.btn_search_prev.setMinimumWidth(64); self.btn_search_prev.setMinimumHeight(30)
         self.btn_search_prev.setToolTip(tr("reader_search_prev"))
+        self.btn_search_prev.setAccessibleName(tr("reader_search_prev"))
         self.btn_search_prev.clicked.connect(self.find_prev)
         row.addWidget(self.btn_search_prev)
 
-        self.btn_search_next = QPushButton("▶")
-        self.btn_search_next.setFixedSize(28, 26)
+        self.btn_search_next = QPushButton(tr("reader_search_next_short"))
+        self.btn_search_next.setMinimumWidth(64); self.btn_search_next.setMinimumHeight(30)
         self.btn_search_next.setToolTip(tr("reader_search_next"))
+        self.btn_search_next.setAccessibleName(tr("reader_search_next"))
         self.btn_search_next.clicked.connect(self.find_next)
         row.addWidget(self.btn_search_next)
 
-        self.btn_search_close = QPushButton("✕")
-        self.btn_search_close.setFixedSize(28, 26)
+        self.btn_search_close = QPushButton(tr("reader_search_close_short"))
+        self.btn_search_close.setMinimumWidth(48); self.btn_search_close.setMinimumHeight(30)
         self.btn_search_close.setToolTip(tr("reader_search_close"))
+        self.btn_search_close.setAccessibleName(tr("reader_search_close"))
         self.btn_search_close.clicked.connect(lambda: self.show_search_bar(False))
         row.addWidget(self.btn_search_close)
 

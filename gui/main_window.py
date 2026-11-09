@@ -52,7 +52,8 @@ from .i18n import tr, set_language, current_language, app_settings
 from .pdf_reader_widget import PdfReaderWidget
 from .workers import BaseWorker
 from .theme import SCHEMES, apply_theme, colors, normalize_scheme
-from .workspace import WorkspaceHero, ToolLibrary, CommandPalette, HistoryDialog, clean_title, label
+from .workspace import (BrandMark, WorkspaceHero, ToolLibrary, CommandPalette,
+                        HistoryDialog, clean_title, label)
 
 
 VERSION = "2.0.1"
@@ -92,8 +93,9 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(24, 18, 24, 12)
         main_layout.setSpacing(14)
         header = QHBoxLayout(); header.setSpacing(12)
-        mark = label("P/", "brand_mark"); mark.setFixedSize(44, 44)
-        mark.setAlignment(Qt.AlignmentFlag.AlignCenter); header.addWidget(mark)
+        self.brand_mark = BrandMark()
+        self.brand_mark.setToolTip("PDFeverything")
+        header.addWidget(self.brand_mark)
         brand = QVBoxLayout(); brand.setSpacing(1)
         brand.addWidget(label("PDFeverything", "brand"))
         brand.addWidget(label("DOCUMENT STUDIO  /  2.0", "edition")); header.addLayout(brand)
@@ -141,6 +143,7 @@ class MainWindow(QMainWindow):
         self._style_reader()
         self.reader.refresh_theme()
         self.hero.apply_theme()
+        self.brand_mark.update()
         self.tool_library.apply_theme()
         self.file_list.list_widget.viewport().update()
         if not self.reader.has_document(): self.reader._show_welcome()
@@ -156,6 +159,7 @@ class MainWindow(QMainWindow):
         self._style_reader()
         self.reader.refresh_theme()
         self.hero.apply_theme()
+        self.brand_mark.update()
         self.tool_library.apply_theme()
         self.file_list.list_widget.viewport().update()
         if not self.reader.has_document(): self.reader._show_welcome()
@@ -370,8 +374,11 @@ class MainWindow(QMainWindow):
         self.reader.btn_tab_search.setText(tr("reader_tab_search"))
         self.reader.search_edit.setPlaceholderText(tr("reader_search_placeholder"))
         self.reader.search_check_case.setText(tr("reader_search_case"))
+        self.reader.btn_search_prev.setText(tr("reader_search_prev_short"))
         self.reader.btn_search_prev.setToolTip(tr("reader_search_prev"))
+        self.reader.btn_search_next.setText(tr("reader_search_next_short"))
         self.reader.btn_search_next.setToolTip(tr("reader_search_next"))
+        self.reader.btn_search_close.setText(tr("reader_search_close_short"))
         self.reader.btn_search_close.setToolTip(tr("reader_search_close"))
         self.reader.refresh_search_status()
         if not self.reader._outline_entries:
@@ -451,7 +458,6 @@ class MainWindow(QMainWindow):
         self.merge_group.setObjectName("merge_card")
         mg_layout = QVBoxLayout(self.merge_group); mg_layout.setSpacing(8)
         mg_layout.setContentsMargins(16, 16, 16, 16)
-        overline = label("01  /  COMBINE", "eyebrow"); mg_layout.addWidget(overline)
         merge_title = label("", "section_title"); mg_layout.addWidget(merge_title)
         merge_desc = label(""); merge_desc.setWordWrap(True); mg_layout.addWidget(merge_desc)
         self._studio_labels += [(merge_title, "studio_merge_title"), (merge_desc, "studio_merge_desc")]

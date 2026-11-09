@@ -104,7 +104,6 @@ def stylesheet(dark=False, scheme=None):
     QWidget#app_central, QWidget#workspace, QWidget#tool_library {{ background:{c['bg']}; }}
     QLabel {{ background:transparent; }}
     QLabel#brand {{ font-size:20px; font-weight:700; letter-spacing:-0.7px; }}
-    QLabel#brand_mark {{ background:{c['accent']}; color:{c['on_accent']}; border-radius:12px; font-size:22px; font-weight:700; }}
     QLabel#edition {{ color:{c['muted']}; font-size:10px; letter-spacing:2px; }}
     QLabel#muted, QLabel#file_list_summary {{ color:{c['muted']}; font-size:12px; }}
     QLabel#section_title {{ font-size:19px; font-weight:600; }}

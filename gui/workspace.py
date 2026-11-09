@@ -3,7 +3,7 @@
 import re
 
 from PyQt6.QtCore import Qt, QRectF, QSize, QTimer
-from PyQt6.QtGui import QColor, QFont, QPainter, QPen
+from PyQt6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
 from PyQt6.QtWidgets import (
     QDialog, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QPushButton, QScrollArea, QVBoxLayout, QWidget,
@@ -16,6 +16,45 @@ from .theme import colors, file_icon
 def label(text, name="muted"):
     w = QLabel(text); w.setObjectName(name)
     return w
+
+
+class BrandMark(QWidget):
+    """A document-with-folded-corner mark, painted in the active accent color."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(44, 44)
+        self.setAccessibleName("PDFeverything")
+
+    def paintEvent(self, event):
+        c = colors()
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(c["accent"]))
+        p.drawRoundedRect(QRectF(0, 0, 44, 44), 12, 12)
+
+        ink = QColor(c["on_accent"])
+        pen = QPen(ink, 2.2)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        p.setPen(pen)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        page = QPainterPath()
+        page.moveTo(13, 10)
+        page.lineTo(25, 10)
+        page.lineTo(32, 17)
+        page.lineTo(32, 34)
+        page.lineTo(13, 34)
+        page.closeSubpath()
+        p.drawPath(page)
+        p.drawLine(25, 10, 25, 17)
+        p.drawLine(25, 17, 32, 17)
+
+        p.setPen(QPen(ink, 1.8, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        p.drawLine(17, 23, 28, 23)
+        p.drawLine(17, 28, 25, 28)
+        p.end()
 
 
 class DocumentArt(QWidget):
