@@ -46,7 +46,17 @@
 
 ## 当前开发状态
 
-### 最新版本：v2.0.2（macOS 26 / Apple 芯片兼容修复）
+### 最新版本：v2.0.3（Office 自动化 TCC 授权不再卡死）
+- 根因：macOS 首次向 Word/PPT/Excel 发 Apple Event 会弹「自动化」授权框，`osascript`
+  会阻塞到用户响应；无人点击时旧代码要等满 300 秒（PR #2 报告）。
+- 2.0.3：每次 AppleScript 转换前做 6 秒 TCC 探测，失败立即回退内置渲染；主转换上限
+  300s → 90s；Office 可用性探测改用 LaunchServices（`id of app`），不再启动 Office、
+  不再弹授权框（GUI 探测 30s → ~0.1s）。
+- 未直接合并 PR #2：其 `script.format(...)` 会把路径拼进脚本，重新引入 AppleScript
+  注入（v2.0.1 已修）；且 spec 把最低系统改回 14.0、build_macos.sh 与 2.0.2 的构建链冲突。
+- 新回归 4 项（`tests/test_core.py` TCC 段），全套 566 项。
+
+### v2.0.2（macOS 26 / Apple 芯片兼容修复）
 - 根因：2.0.1 的 bundle 实际要求 macOS 27（pyenv Python 26.0 + Homebrew OpenSSL 27.0 + pikepdf 14.0），
   Info.plist 却写 11.0；dyld 在 macOS 26 上直接拒绝加载 → issue #1。
 - 2.0.2：python.org universal2 Python 构建、移除 pikepdf（无损压缩改走 MuPDF）、显式 arm64、
@@ -95,7 +105,7 @@
 
 ### 测试
 ```bash
-.venv/bin/python tests/test_core.py    # 核心 / CLI / MCP / i18n   97 项
+.venv/bin/python tests/test_core.py    # 核心 / CLI / MCP / TCC  101 项
 QT_QPA_PLATFORM=offscreen .venv/bin/python tests/test_gui.py     # Worker / 批量 / 对话框  70 项
 QT_QPA_PLATFORM=offscreen .venv/bin/python tests/qa_reader.py    # 阅读器 QA  38 项
 QT_QPA_PLATFORM=offscreen .venv/bin/python tests/test_reader.py  # 阅读器综合  85 项
@@ -111,7 +121,7 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python tests/test_studio.py  # Studio 工作
 .venv/bin/python tests/test_macos_compat.py                      # 40 项
 ```
 发布前八套门禁必须全绿；改动阅读器或 core 后必须连同对抗性套件一起跑。
-当前全套 562 项（97 + 40 + 70 + 38 + 85 + 170 + 37 + 25）。
+当前全套 566 项（101 + 40 + 70 + 38 + 85 + 170 + 37 + 25）。
 
 注：tests/qa_adversarial.py 里的每条探针失败时会打印具体证据，可直接据此定位；
 tests/qa_reader_defects.py 中每项都对应 v1.9.0 的一个已修缺陷，修复前必然失败。
@@ -168,6 +178,9 @@ tests/qa_reader_defects.py 中每项都对应 v1.9.0 的一个已修缺陷，修
 - **主题配色**：新增配色必须同时修改 `gui/theme.py` 的 `PALETTES`、`gui/i18n.py` 的 `theme_*` 键与测试；Settings → 配色方案菜单由 `SCHEMES` 自动生成
 - **压缩图片流**：`_recompress_images` 必须 `update_stream(..., compress=False)`——新字节已经是 JPEG，再压缩会写成 zlib 却保留 `/DCTDecode`；ColorSpace 按 `im.mode` 选 DeviceGray/DeviceRGB
 - **AppleScript 路径**：`_applescript_convert` 用 `on run argv` + `osascript -e ... -- path`；绝不能把路径 `format` 进脚本，否则文件名可注入执行
+- **AppleScript / TCC（v2.0.3 起）**：`_applescript_convert` 必须先过 `_automation_granted`
+  的短探测再跑长脚本；路径只能经 `osascript` 的 `--` argv 传入，绝不能 `script.format(path)`
+  （会重新引入 AppleScript 注入）。缩短/移除探测会让「弹窗无人响应」重新变成长时间卡死
 - **macOS 最低系统（v2.0.2 起）**：`LSMinimumSystemVersion` 必须等于全包 Mach-O 的最高
   `LC_BUILD_VERSION.minos`；Python 必须来自 python.org（pyenv / Homebrew 会继承构建机系统）。
   新增原生依赖后必须跑 `python -m core.compat dist/PDFeverything.app --max-macos 13.0`；
@@ -367,7 +380,7 @@ serve() — stdin/stdout JSON-RPC 主循环（initialize / tools/list / tools/ca
 2. **开发日志**：在 `DEVELOPMENT_LOG.md` 末尾写入新版本条目（遵循本文"开发日志格式规范"）
 3. **测试**：
    ```bash
-   # 八套门禁，共 562 项（见上文「测试」）
+   # 八套门禁，共 566 项（见上文「测试」）
    python main.py -h                           # CLI 帮助
    python pdf_tool.py <new-command> -i test.pdf -o out   # 新命令
    python -c "from mcp.server import TOOLS; print(len(TOOLS))"  # MCP 工具数 = 29

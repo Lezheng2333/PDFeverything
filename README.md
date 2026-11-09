@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/Lezheng2333/PDFeverything/releases"><img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-blue?style=flat-square" /></a>
-  <a href="https://github.com/Lezheng2333/PDFeverything/releases/latest"><img src="https://img.shields.io/badge/version-v2.0.2-007aff?style=flat-square" /></a>
+  <a href="https://github.com/Lezheng2333/PDFeverything/releases/latest"><img src="https://img.shields.io/badge/version-v2.0.3-007aff?style=flat-square" /></a>
   <a href="resources/LICENSE.txt"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" /></a>
 </p>
 
@@ -30,8 +30,8 @@ Drag everything in — any combination of PDFs, Word documents, PowerPoint decks
 
 | Platform | Download |
 |---|---|
-| 🍎 macOS (Apple Silicon, 13+) | [`PDFeverything_macOS_v2.0.2.zip`](https://github.com/Lezheng2333/PDFeverything/releases/download/v2.0.2/PDFeverything_macOS_v2.0.2.zip) |
-| 🪟 Windows 10/11 (64-bit) | [`PDFeverything_Setup_v2.0.2.exe`](https://github.com/Lezheng2333/PDFeverything/releases/download/v2.0.2/PDFeverything_Setup_v2.0.2.exe) |
+| 🍎 macOS (Apple Silicon, 13+) | [`PDFeverything_macOS_v2.0.3.zip`](https://github.com/Lezheng2333/PDFeverything/releases/download/v2.0.3/PDFeverything_macOS_v2.0.3.zip) |
+| 🪟 Windows 10/11 (64-bit) | [`PDFeverything_Setup_v2.0.3.exe`](https://github.com/Lezheng2333/PDFeverything/releases/download/v2.0.3/PDFeverything_Setup_v2.0.3.exe) |
 
 > 🔗 [**Latest Release →**](https://github.com/Lezheng2333/PDFeverything/releases/latest)
 >
@@ -40,9 +40,27 @@ Drag everything in — any combination of PDFs, Word documents, PowerPoint decks
 > 🪟 The Windows download is an **installer** — bilingual wizard, licence page, Start Menu
 > entry, optional desktop shortcut and a standard uninstaller. No Python required.
 >
-> 🔐 Checksums for both assets: [`SHA256SUMS.txt`](https://github.com/Lezheng2333/PDFeverything/releases/download/v2.0.2/SHA256SUMS.txt)
+> 🔐 Checksums for both assets: [`SHA256SUMS.txt`](https://github.com/Lezheng2333/PDFeverything/releases/download/v2.0.3/SHA256SUMS.txt)
 
-## 🆕 v2.0.2 — runs on macOS 26 and every Apple-silicon macOS since Ventura
+## 🆕 v2.0.3 — Office automation no longer hangs on the macOS consent dialog
+
+Reported in [PR #2](https://github.com/Lezheng2333/PDFeverything/pull/2): the first Apple
+Event to Word / PowerPoint / Excel raises the Automation consent dialog, and `osascript`
+blocks until it is answered. Merging Office files with that dialog ignored looked frozen
+for the full 300-second timeout.
+
+- **6-second TCC probe before every AppleScript conversion** — an unanswered or denied prompt now falls back to the built-in renderer immediately instead of waiting minutes.
+- **90-second conversion cap** — a granted but stuck Office instance (recovery dialog, modal sheet) can no longer stall a batch for five minutes.
+- **Silent Office detection** — the startup probe asks LaunchServices (`id of app`) instead of sending Apple Events, so launching the app neither starts Office nor pops permission dialogs; the GUI probe drops from up to 30 s to ~0.1 s.
+- **Path-injection guard kept** — paths still travel through `osascript` argv. PR #2's `script.format(...)` rewrite would have re-opened AppleScript injection, so the fix was re-implemented instead of merged.
+- **Tests** — 4 new TCC regressions; full suite now 566.
+
+Thanks to [@Gray-Chan-sh](https://github.com/Gray-Chan-sh) for the diagnosis and the pull request.
+
+**Release:** [PDFeverything v2.0.3](https://github.com/Lezheng2333/PDFeverything/releases/tag/v2.0.3) (2026-11-09) ·
+[checksums](https://github.com/Lezheng2333/PDFeverything/releases/download/v2.0.3/SHA256SUMS.txt)
+
+## v2.0.2 — runs on macOS 26 and every Apple-silicon macOS since Ventura
 
 A macOS portability fix for [issue #1](https://github.com/Lezheng2333/PDFeverything/issues/1):
 the 2.0.1 bundle was actually built for **macOS 27** (pyenv Python 26.0, Homebrew
@@ -429,7 +447,7 @@ Windows-only `pywin32` (installed automatically on Windows).
 **Windows** (installer + portable exe, needs [Inno Setup 6](https://jrsoftware.org/isdl.php)):
 ```bash
 python build_windows.py
-# → PDFeverything_Setup_v2.0.2.exe   installer (copied to the project root)
+# → PDFeverything_Setup_v2.0.3.exe   installer (copied to the project root)
 # → dist/PDFeverything.exe           portable payload, no install
 ```
 
@@ -437,7 +455,7 @@ python build_windows.py
 ```bash
 python build_macos.py
 # → dist/PDFeverything.app  (arm64, macOS 13+, audited)
-# → /tmp/PDFeverything_macOS_v2.0.2.zip
+# → /tmp/PDFeverything_macOS_v2.0.3.zip
 ```
 Build with the **python.org** Python, not Homebrew/pyenv: a pyenv build inherits the
 build machine's macOS version and silently makes the app require it. See
@@ -484,6 +502,7 @@ suites run on `windows-latest` before every installer build.
 | [README_WINDOWS.md](README_WINDOWS.md) | Windows build and installer guide |
 | [mcp/README.md](mcp/README.md) | MCP setup and tool reference |
 | [docs/MACOS_COMPAT.md](docs/MACOS_COMPAT.md) | macOS compatibility: diagnosis, build, notarization |
+| [docs/RELEASE_QA_2.0.3.md](docs/RELEASE_QA_2.0.3.md) | v2.0.3 validation record |
 | [docs/RELEASE_QA_2.0.1.md](docs/RELEASE_QA_2.0.1.md) | v2.0.1 validation record |
 | [docs/RELEASE_QA_2.0.0.md](docs/RELEASE_QA_2.0.0.md) | Studio 2.0 historical record |
 | [CLAUDE.md](CLAUDE.md) | Architecture notes for contributors and agents |
@@ -515,14 +534,31 @@ MIT — do whatever you want with it. [LICENSE](resources/LICENSE.txt)
 
 | 平台 | 下载 |
 |---|---|
-| 🍎 macOS (Apple Silicon, 13+) | [`PDFeverything_macOS_v2.0.2.zip`](https://github.com/Lezheng2333/PDFeverything/releases/download/v2.0.2/PDFeverything_macOS_v2.0.2.zip) |
-| 🪟 Windows 10/11 (64-bit) | [`PDFeverything_Setup_v2.0.2.exe`](https://github.com/Lezheng2333/PDFeverything/releases/download/v2.0.2/PDFeverything_Setup_v2.0.2.exe) |
+| 🍎 macOS (Apple Silicon, 13+) | [`PDFeverything_macOS_v2.0.3.zip`](https://github.com/Lezheng2333/PDFeverything/releases/download/v2.0.3/PDFeverything_macOS_v2.0.3.zip) |
+| 🪟 Windows 10/11 (64-bit) | [`PDFeverything_Setup_v2.0.3.exe`](https://github.com/Lezheng2333/PDFeverything/releases/download/v2.0.3/PDFeverything_Setup_v2.0.3.exe) |
 
-> 🔐 校验和：[`SHA256SUMS.txt`](https://github.com/Lezheng2333/PDFeverything/releases/download/v2.0.2/SHA256SUMS.txt) ·
-> 📝 [发布说明](https://github.com/Lezheng2333/PDFeverything/releases/tag/v2.0.2) ·
-> 🧪 [2.0.2 验收记录](docs/RELEASE_QA_2.0.2.md)
+> 🔐 校验和：[`SHA256SUMS.txt`](https://github.com/Lezheng2333/PDFeverything/releases/download/v2.0.3/SHA256SUMS.txt) ·
+> 📝 [发布说明](https://github.com/Lezheng2333/PDFeverything/releases/tag/v2.0.3) ·
+> 🧪 [2.0.3 验收记录](docs/RELEASE_QA_2.0.3.md)
 
-### 🆕 v2.0.2 — macOS 26 能开了，Apple 芯片全系统可用
+### 🆕 v2.0.3 — Office 自动化不再卡在 macOS 授权弹窗
+
+[PR #2](https://github.com/Lezheng2333/PDFeverything/pull/2) 报告：macOS 第一次向
+Word / PowerPoint / Excel 发送 Apple Event 会弹出「自动化」授权框，`osascript` 会一直等到
+用户响应；如果没人点，合并 Office 文件就会卡满 300 秒，看起来像卡死。
+
+- **每次 AppleScript 转换前 6 秒 TCC 探测**：未授权、被拒或弹窗没人响应时立刻回退内置渲染，不再等几分钟。
+- **转换上限 90 秒**：已授权但 Office 自身卡住（文档恢复、模态框）也不会把批量拖住 5 分钟。
+- **静默检测 Office**：启动探测改用 LaunchServices（`id of app`），不再启动 Office、不再弹授权框；GUI 探测从最多 30 秒降到约 0.1 秒。
+- **保留路径注入防护**：路径仍走 `osascript` argv；PR #2 里的 `script.format(...)` 会重新引入 AppleScript 注入，因此按其思路重写而不是直接合并。
+- **测试**：新增 4 项 TCC 回归，全套 566 项。
+
+感谢 [@Gray-Chan-sh](https://github.com/Gray-Chan-sh) 的诊断与 PR。
+
+**发布**：[PDFeverything v2.0.3](https://github.com/Lezheng2333/PDFeverything/releases/tag/v2.0.3)（2026-11-09）·
+[SHA256SUMS.txt](https://github.com/Lezheng2333/PDFeverything/releases/download/v2.0.3/SHA256SUMS.txt)
+
+### v2.0.2 — macOS 26 能开了，Apple 芯片全系统可用
 
 针对 [issue #1](https://github.com/Lezheng2333/PDFeverything/issues/1) 的兼容性修复：
 2.0.1 的包实际上是按 **macOS 27** 构建的（pyenv 编译的 Python 26.0、Homebrew OpenSSL 27.0），
@@ -866,7 +902,7 @@ python mcp/server.py
 **Windows**（安装包 + 便携版 exe，需要 [Inno Setup 6](https://jrsoftware.org/isdl.php)）:
 ```bash
 python build_windows.py
-# → PDFeverything_Setup_v2.0.2.exe   安装包（同时复制到项目根目录）
+# → PDFeverything_Setup_v2.0.3.exe   安装包（同时复制到项目根目录）
 # → dist/PDFeverything.exe           便携版载荷，免安装
 ```
 
@@ -874,7 +910,7 @@ python build_windows.py
 ```bash
 python build_macos.py
 # → dist/PDFeverything.app  （arm64，macOS 13+，已审计）
-# → /tmp/PDFeverything_macOS_v2.0.2.zip
+# → /tmp/PDFeverything_macOS_v2.0.3.zip
 ```
 必须使用 **python.org** 的 Python，不要用 Homebrew / pyenv：pyenv 编译的解释器会继承
 构建机的 macOS 版本，悄悄把 App 的底线抬到新系统。详见
@@ -919,6 +955,7 @@ Windows CI 构建安装包前运行。
 | [README_WINDOWS.md](README_WINDOWS.md) | Windows 构建与安装包指南 |
 | [mcp/README.md](mcp/README.md) | MCP 配置与工具参考 |
 | [docs/MACOS_COMPAT.md](docs/MACOS_COMPAT.md) | macOS 兼容性：诊断、构建、公证 |
+| [docs/RELEASE_QA_2.0.3.md](docs/RELEASE_QA_2.0.3.md) | v2.0.3 验收记录 |
 | [docs/RELEASE_QA_2.0.1.md](docs/RELEASE_QA_2.0.1.md) | v2.0.1 验收记录 |
 | [docs/RELEASE_QA_2.0.0.md](docs/RELEASE_QA_2.0.0.md) | Studio 2.0 历史验收记录 |
 | [CLAUDE.md](CLAUDE.md) | 贡献者与 AI Agent 的架构备忘 |

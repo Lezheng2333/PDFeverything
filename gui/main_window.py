@@ -56,7 +56,7 @@ from .workspace import (BrandMark, WorkspaceHero, ToolLibrary, CommandPalette,
                         HistoryDialog, clean_title, label)
 
 
-VERSION = "2.0.2"
+VERSION = "2.0.3"
 
 
 class MainWindow(QMainWindow):
@@ -634,8 +634,9 @@ class MainWindow(QMainWindow):
     def _start_office_probe(self):
         """Detect Word/PowerPoint/Excel off the GUI thread.
 
-        Previously this ran inline in the constructor and froze the window for up
-        to 30 seconds on machines where the AppleScript probe is slow."""
+        Previously this ran inline in the constructor and froze the window for
+        up to 30 seconds.  macOS now uses a silent LaunchServices lookup, but
+        Windows COM can still take a few seconds, so keep it off the UI thread."""
         if get_office_cache() is not None:
             self._check_office()
             return

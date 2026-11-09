@@ -21,7 +21,7 @@ PROJECT_ROOT = Path(SPECPATH)
 # PDFE_TARGET_ARCH: "arm64"（Apple 芯片原生）或 "universal2"。
 # PDFE_CODESIGN_IDENTITY: 留空 = ad-hoc 签名；"Developer ID Application: ..."
 #                配合 build_macos.py --notarize 才能免 Gatekeeper 拦截。
-VERSION = "2.0.2"
+VERSION = "2.0.3"
 MIN_MACOS = os.environ.get("PDFE_MIN_MACOS", "13.0")
 TARGET_ARCH = os.environ.get("PDFE_TARGET_ARCH", "arm64")
 CODESIGN_IDENTITY = os.environ.get("PDFE_CODESIGN_IDENTITY") or None

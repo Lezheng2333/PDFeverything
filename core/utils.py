@@ -235,22 +235,35 @@ def read_text_file(path: Path) -> str:
 _office_cache: Optional[dict] = None
 
 
-def _check_office_macos() -> dict:
-    """Detect Office on macOS via AppleScript."""
+_OFFICE_APPS = {"word": "Microsoft Word",
+                "powerpoint": "Microsoft PowerPoint",
+                "excel": "Microsoft Excel"}
+
+
+def _app_registered_macos(app_name: str) -> bool:
+    """Is the app installed? LaunchServices lookup — no launch, no TCC prompt.
+
+    ``tell application X to get version`` used to be the probe here, but that
+    sends an Apple Event: it launches the app and raises the Automation consent
+    dialog before the user has asked for anything (and blocks for the timeout
+    when nobody answers).  ``id of app`` only asks LaunchServices for the
+    bundle identifier, which needs no permission.
+    """
     import subprocess
-    apps = {"word": "Microsoft Word", "powerpoint": "Microsoft PowerPoint",
-            "excel": "Microsoft Excel"}
-    result = {}
-    for key, name in apps.items():
-        try:
-            r = subprocess.run(
-                ["osascript", "-e", f'tell application "{name}" to get version'],
-                capture_output=True, text=True, timeout=10,
-            )
-            result[key] = r.returncode == 0
-        except Exception:
-            result[key] = False
-    return result
+    try:
+        r = subprocess.run(
+            ["osascript", "-e", f'id of app "{app_name}"'],
+            capture_output=True, text=True, timeout=5,
+        )
+        return r.returncode == 0 and bool(r.stdout.strip())
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return False
+
+
+def _check_office_macos() -> dict:
+    """Detect whether Office is installed on macOS (silent, no automation)."""
+    return {key: _app_registered_macos(name)
+            for key, name in _OFFICE_APPS.items()}
 
 
 def _check_office_windows() -> dict:
@@ -299,9 +312,10 @@ def get_office_cache() -> Optional[dict]:
 def check_office_availability(use_cache: bool = True) -> dict:
     """Cross-platform Office detection. Returns {word, powerpoint, excel: bool}.
 
-    This shells out to `osascript` / COM with a 10 s timeout per application, so
-    on a machine where the probe hangs it can block for 30 s. Callers on a UI
-    thread should run it in a worker (see MainWindow._start_office_probe) or pass
+    macOS detection only asks LaunchServices (`id of app`), so it neither
+    launches Office nor triggers the TCC automation dialog.  Windows still uses
+    COM, which can take a few seconds per application; callers on a UI thread
+    should run it in a worker (see MainWindow._start_office_probe) or pass
     `use_cache=False` from the worker itself."""
     global _office_cache
     if use_cache and _office_cache is not None:

@@ -213,7 +213,9 @@ except Exception as exc:  # noqa: BLE001
 set_office_cache(None)
 
 bad_name = TMP / 'inj" & (do shell script "touch PWNED") & ".rtf'
-with patch.object(converters.subprocess, "run") as run:
+converters._automation_cache.clear()
+with patch.object(converters, "_automation_granted", return_value=True), \
+     patch.object(converters.subprocess, "run") as run:
     run.return_value.returncode = 1
     converters._applescript_convert("Word", "SCRIPT", bad_name, TMP / "out.pdf")
     cmd = run.call_args.args[0]
@@ -221,6 +223,44 @@ check("AppleScript passes paths as argv",
       cmd[:4] == ["osascript", "-e", "SCRIPT", "--"]
       and cmd[4] == str(bad_name.resolve()) and 'do shell script' not in cmd[2],
       str(cmd[:5]))
+
+# ── TCC automation consent (PR #2) ────────────────────────
+# An unanswered "wants to control Word" dialog must degrade to the fallback
+# immediately instead of blocking the conversion timeout.
+converters._automation_cache.clear()
+tcc_out = TMP / "out_tcc.pdf"
+with patch.object(converters.subprocess, "run",
+                  side_effect=subprocess.TimeoutExpired("osascript", 6)) as run:
+    tcc_ok = converters._applescript_convert("Microsoft Word", "SCRIPT", bad_name, tcc_out)
+check("unanswered TCC prompt falls back fast",
+      tcc_ok is False and run.call_count == 1, f"calls={run.call_count}")
+
+converters._automation_cache.clear()
+denied = subprocess.CompletedProcess(["osascript"], 1, "",
+                                     "0:2: execution error: Not authorized (-1743)")
+with patch.object(converters.subprocess, "run", return_value=denied) as run:
+    first = converters._applescript_convert("Microsoft Word", "SCRIPT", bad_name, tcc_out)
+    second = converters._applescript_convert("Microsoft Word", "SCRIPT", bad_name, tcc_out)
+check("denied automation is cached",
+      first is False and second is False and run.call_count == 1,
+      f"calls={run.call_count}")
+
+converters._automation_cache.clear()
+granted = subprocess.CompletedProcess(["osascript"], 0, "16.0", "")
+converted = subprocess.CompletedProcess(["osascript"], 0, "", "")
+good_out = TMP / "tcc_granted.pdf"
+_doc = fitz.open(); _page = _doc.new_page(); _page.insert_text((72, 72), "ok")
+_doc.save(good_out); _doc.close()
+with patch.object(converters.subprocess, "run",
+                  side_effect=[granted, converted]) as run:
+    granted_ok = converters._applescript_convert("Microsoft Word", "SCRIPT",
+                                                 bad_name, good_out)
+check("granted automation runs the real script",
+      granted_ok is True and run.call_count == 2,
+      f"ok={granted_ok} calls={run.call_count}")
+check("AppleScript timeout capped at 90 s",
+      converters._applescript_convert.__defaults__[-1] == 90,
+      str(converters._applescript_convert.__defaults__))
 
 # ═══════════════════════════════════════════════════════════
 print("\n═══ 3. i18n invariants ═══")

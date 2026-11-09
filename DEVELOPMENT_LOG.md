@@ -915,3 +915,15 @@ Ver 2.0.2 | 2026-11-09 — macOS 26 与 Apple 芯片全系统兼容
   - 发布：GitHub Release v2.0.2 已公开并设为 Latest；macOS zip 72,561,457 bytes、
     Windows 安装包 80,959,416 bytes、SHA256SUMS.txt 194 bytes；服务端 SHA-256 digest 与本地一致
   - CI 42639151981 全绿：核心 97 + macOS 兼容 40 + Studio 25、exe/安装包构建与冻结包冒烟
+
+----------------------------------------------------------------
+Ver 2.0.3 | 2026-11-09 — Office 自动化 TCC 授权不再卡死
+----------------------------------------------------------------
+
+  - 每次 AppleScript 转换前做 6 秒 TCC 自动化权限探测，未授权/被拒/弹窗未响应立即回退内置渲染
+  - AppleScript 主转换超时 300s → 90s，已授权但 Office 自身卡住时不再拖住批量 5 分钟
+  - Office 可用性探测改用 LaunchServices（id of app）：不再启动 Office、不再弹授权框，GUI 探测 30s → ~0.1s
+  - 路径继续经 osascript 的 -- argv 传递，保留 v2.0.1 的注入防护（未采纳 PR #2 的 script.format 方案）
+  - 测试：新增 4 项 TCC 回归（探测超时、拒绝缓存、授权后正常转换、90s 上限），全套 566 项
+  - BUGFIX: macOS 首次转换 Office 文件时，若「自动化」授权弹窗无人响应，osascript 会阻塞至
+    300 秒超时，合并 Office 文件表现为卡死（PR #2）——改为短探测 + 90 秒上限，立即回退

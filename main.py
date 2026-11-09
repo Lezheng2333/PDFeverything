@@ -116,7 +116,7 @@ Subsequent runs in the same session are instant.
 """
 
 
-VERSION = "2.0.2"
+VERSION = "2.0.3"
 PROJECT_DIR = Path(__file__).parent.resolve()
 _DARK_MODE = False  # set by launch_gui before any GUI widgets are created
 

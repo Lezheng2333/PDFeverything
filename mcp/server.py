@@ -51,7 +51,7 @@ except Exception:
     except Exception:
         pass
 
-SERVER_VERSION = "2.0.2"
+SERVER_VERSION = "2.0.3"
 
 # ── Tool definitions (OpenAI-compatible JSON schemas) ──────
 

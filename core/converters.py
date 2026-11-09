@@ -37,7 +37,7 @@ def _office_ready(key: str) -> bool:
 
     A missing cache (None) means "unknown" — CLI should still try, matching the
     pre-2.0.1 behaviour. An explicit False from the background probe avoids a
-    pointless 300 s osascript/COM timeout.
+    pointless 90 s osascript timeout.
     """
     cache = get_office_cache()
     return cache is None or bool(cache.get(key, False))
@@ -175,14 +175,61 @@ def _verify_pdf(path: Path) -> bool:
         return path.stat().st_size > 100
 
 
+# macOS gates every Apple Event behind TCC ("Automation") consent.  The first
+# `osascript` call raises a system prompt and blocks until the user answers it;
+# if nobody clicks, the conversion would sit on its full timeout and the whole
+# merge looks frozen (PR #2).  Probe with a short timeout first and fall back
+# to the built-in renderer instead of waiting minutes.
+_AUTOMATION_PROBE_TIMEOUT = 6.0
+# A granted permission is permanent; a denial or a missed prompt may change as
+# soon as the user answers the dialog, so only cache it briefly.
+_AUTOMATION_CACHE_TTL = 30.0
+_automation_cache: dict = {}
+
+
+def _automation_granted(app_name: str,
+                        timeout: float = _AUTOMATION_PROBE_TIMEOUT) -> bool:
+    """True when Apple Events to ``app_name`` are already authorised.
+
+    ``tell application X to get version`` is the cheapest script that goes
+    through the same TCC check as the conversion.  It is bounded by a short
+    timeout, so an unanswered prompt degrades into "fall back now" instead of
+    a multi-minute hang.
+    """
+    import time
+
+    now = time.monotonic()
+    cached = _automation_cache.get(app_name)
+    if cached:
+        granted, stamp = cached
+        if granted or now - stamp < _AUTOMATION_CACHE_TTL:
+            return granted
+
+    try:
+        r = subprocess.run(
+            ["osascript", "-e", f'tell application "{app_name}" to get version'],
+            capture_output=True, text=True, timeout=timeout,
+        )
+        granted = r.returncode == 0
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        granted = False
+    _automation_cache[app_name] = (granted, now)
+    return granted
+
+
 def _applescript_convert(app_name: str, script: str, input_path: Path,
-                         output_path: Path, timeout: int = 300) -> bool:
+                         output_path: Path, timeout: int = 90) -> bool:
     """Convert via AppleScript (macOS). Returns True on success.
 
     Paths go through ``argv`` instead of being interpolated into the script:
     a filename containing ``"`` (or AppleScript code) must never be able to
     execute a shell command.
+
+    The TCC probe runs first: without automation permission the long call would
+    block on the system dialog until ``timeout`` and then fall back anyway.
     """
+    if not _automation_granted(app_name):
+        return False
     try:
         r = subprocess.run(
             ["osascript", "-e", script, "--",
@@ -380,7 +427,7 @@ class WordConverter(BaseConverter):
             progress_callback(f"Converting Word: {input_path.name}", 30)
 
         # Platform-specific Office automation. Skip it when the GUI probe
-        # already proved Office is unavailable — a 300 s osascript/COM timeout
+        # already proved Office is unavailable — a long osascript/COM timeout
         # per file is far worse than falling back immediately.
         if _office_ready("word"):
             if sys.platform == "win32":
@@ -391,7 +438,7 @@ class WordConverter(BaseConverter):
                     return out
             else:
                 if _applescript_convert("Microsoft Word", _WORD_APPLESCRIPT,
-                                        input_path, out, timeout=300):
+                                        input_path, out, timeout=90):
                     if progress_callback:
                         progress_callback(f"Word done (AppleScript): {input_path.name}", 100)
                     return out
