@@ -912,3 +912,6 @@ Ver 2.0.2 | 2026-11-09 — macOS 26 与 Apple 芯片全系统兼容
   - BUGFIX: 2.0.1 的 bundle 实际要求 macOS 27（pyenv Python 26.0 + Homebrew OpenSSL/readline 27.0 + pikepdf 14.0），
     Info.plist 却声明 11.0，macOS 26 上 dyld 直接拒绝加载（issue #1）——改用 python.org universal2 Python
     （基线 11.0）构建，构建后逐文件审计，实际最低系统 13.0
+  - 发布：GitHub Release v2.0.2 已公开并设为 Latest；macOS zip 72,561,457 bytes、
+    Windows 安装包 80,959,416 bytes、SHA256SUMS.txt 194 bytes；服务端 SHA-256 digest 与本地一致
+  - CI 42639151981 全绿：核心 97 + macOS 兼容 40 + Studio 25、exe/安装包构建与冻结包冒烟

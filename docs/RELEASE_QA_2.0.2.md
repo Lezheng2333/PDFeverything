@@ -108,8 +108,23 @@ GUI                → 直接执行与 `open dist/PDFeverything.app` 均正常�
   正式发布建议按 `docs/MACOS_COMPAT.md` §5 走 `--identity ... --notarize`。
 - **最低系统 13.0**：由 Qt 6.11 决定（Qt 6.12 抬到 14.4）。macOS 11/12 不再支持，
   原因与取舍见 `docs/MACOS_COMPAT.md` §3。
-- **Windows 产物**：本机不能交叉编译；`installer_windows.iss` 版本已同步 2.0.2，
-  需通过 `build-windows-installer.yml` 出包后补传 Release 资产。
+- **Windows 产物**：本机不能交叉编译；已通过 CI 出包并上传 Release
+  （`PDFeverything_Setup_v2.0.2.exe`，80,959,416 bytes）。
 - **未在真实 macOS 26 机器上复测**：当前环境为 macOS 27.0.1。审计证明所有 145 个
   Mach-O 的 `minos` ≤ 13.0，dyld 不会因版本拒绝加载；仍建议发布前在 macOS 26 上做一次
   双击冒烟。
+
+## 6. 发布资产（GitHub Release v2.0.2）
+
+| 资产 | 大小 | SHA-256 |
+|---|---|---|
+| `PDFeverything_macOS_v2.0.2.zip` | 72,561,457 | `e9a33231521ff7560f9b3acf3f3a63a1abc28e428d46393134dc75d1efa8ae90` |
+| `PDFeverything_Setup_v2.0.2.exe` | 80,959,416 | `d18e797ae53f37de1ca8cfdcbb01baf2661ca215467e6e4a01572216a01c3f09` |
+| `SHA256SUMS.txt` | 194 | — |
+
+GitHub 服务端 `digest` 字段与本地 `shasum -a 256` 完全一致（本环境到
+`objects.githubusercontent.com` 的下载链路不稳定，故以服务端摘要 + 上传前后大小核对
+代替重新下载）。
+
+CI run 42639151981 全部通过：核心 97、macOS 兼容 40、Studio 25、exe/安装包构建、
+冻结包 `help` / `info` / `merge` / `encrypt` / `decrypt` 冒烟。
